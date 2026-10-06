@@ -1,0 +1,9 @@
+---
+- name: "Phase 01 | Platform: Node Feature Discovery, GPU operator, storage, user workload monitoring"
+  hosts: localhost
+  gather_facts: false
+  tags: [platform]
+  tasks:
+    - name: Report that phase 01 is not implemented yet
+      ansible.builtin.debug:
+        msg: "Phase 01 (platform) is a stub. See docs/implementation-design.md sections 7 and 8."

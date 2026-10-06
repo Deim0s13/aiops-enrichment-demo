@@ -1,0 +1,19 @@
+---
+namespace: demo
+name: aiops
+version: 0.1.0
+readme: README.md
+authors:
+  - Patrick Leathen
+description: Diagnostic, ITSM write-back and remediation roles for the AI-assisted incident enrichment demo
+license:
+  - Apache-2.0
+tags:
+  - aiops
+  - incident
+  - servicenow
+  - openshift
+dependencies: {}
+repository: https://github.com/Deim0s13/aiops-enrichment-demo
+build_ignore:
+  - "*.tar.gz"

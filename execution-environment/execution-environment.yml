@@ -1,0 +1,17 @@
+---
+# Build: ansible-builder build -f execution-environment/execution-environment.yml -t localhost/aiops-demo-ee:latest
+# Needs a registry.redhat.io login and ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN in your environment.
+# The image contains dependencies only, never secrets.
+version: 3
+
+images:
+  base_image:
+    # Confirm the image name and tag for AAP 2.7 before the first build.
+    name: registry.redhat.io/ansible-automation-platform-27/ee-minimal-rhel9:latest
+
+dependencies:
+  galaxy: ../collections/requirements.yml
+  python: requirements.txt
+
+options:
+  package_manager_path: /usr/bin/microdnf

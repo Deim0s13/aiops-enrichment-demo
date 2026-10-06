@@ -1,0 +1,5 @@
+# Uses the gitleaks default rules. Add rules here rather than weakening them.
+title = "aiops-enrichment-demo gitleaks configuration"
+
+[extend]
+useDefault = true

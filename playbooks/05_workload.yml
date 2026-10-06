@@ -1,0 +1,9 @@
+---
+- name: "Phase 05 | Workload: sample service, alert rules and Alertmanager routing"
+  hosts: localhost
+  gather_facts: false
+  tags: [workload]
+  tasks:
+    - name: Report that phase 05 is not implemented yet
+      ansible.builtin.debug:
+        msg: "Phase 05 (workload) is a stub. See docs/implementation-design.md DD01 and DD02."

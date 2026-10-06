@@ -1,0 +1,9 @@
+---
+- name: "Phase 02 | OpenShift AI: model serving, gateway subscription and tracing"
+  hosts: localhost
+  gather_facts: false
+  tags: [openshift_ai]
+  tasks:
+    - name: Report that phase 02 is not implemented yet
+      ansible.builtin.debug:
+        msg: "Phase 02 (openshift_ai) is a stub. See docs/implementation-design.md DD04, DD05 and DD07."

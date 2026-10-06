@@ -1,0 +1,10 @@
+---
+- name: Reset the demo to a clean state between runs
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Report that reset is not implemented yet
+      ansible.builtin.debug:
+        msg: >-
+          Reset is a stub. It will close demo incidents, clear enrichment fields,
+          restart the sample service and clear heap dumps.

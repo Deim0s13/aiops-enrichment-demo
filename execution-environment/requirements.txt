@@ -1,0 +1,4 @@
+# Python dependencies for collections used in the build
+kubernetes
+hvac
+jmespath

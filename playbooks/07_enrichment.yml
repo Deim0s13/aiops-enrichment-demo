@@ -1,0 +1,9 @@
+---
+- name: "Phase 07 | Enrichment service: build, deployment and network policies"
+  hosts: localhost
+  gather_facts: false
+  tags: [enrichment]
+  tasks:
+    - name: Report that phase 07 is not implemented yet
+      ansible.builtin.debug:
+        msg: "Phase 07 (enrichment) is a stub. See docs/implementation-design.md sections 5.3 and 6.2."

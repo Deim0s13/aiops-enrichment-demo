@@ -1,0 +1,8 @@
+---
+- name: Verify the demo against its acceptance criteria
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Report that verify is not implemented yet
+      ansible.builtin.debug:
+        msg: "Verify is a stub. See docs/implementation-design.md section 9 for the checks it will run."

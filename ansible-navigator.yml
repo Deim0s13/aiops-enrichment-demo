@@ -1,0 +1,25 @@
+---
+ansible-navigator:
+  mode: stdout
+
+  execution-environment:
+    enabled: true
+    container-engine: podman
+    # Built locally from execution-environment/ (see README).
+    image: localhost/aiops-demo-ee:latest
+    pull:
+      policy: missing
+    environment-variables:
+      pass:
+        - VAULT_ADDR
+        - VAULT_ROLE_ID
+        - VAULT_SECRET_ID
+        - ANSIBLE_VAULT_PASSWORD_FILE
+
+  # Playbook artefacts record every variable, including secrets. Keep this disabled.
+  playbook-artifact:
+    enable: false
+
+  logging:
+    level: warning
+    append: false

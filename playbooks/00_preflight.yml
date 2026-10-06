@@ -1,0 +1,9 @@
+---
+- name: "Phase 00 | Preflight: confirm required secrets and cluster access before any change"
+  hosts: localhost
+  gather_facts: false
+  tags: [preflight]
+  tasks:
+    - name: Report that phase 00 is not implemented yet
+      ansible.builtin.debug:
+        msg: "Phase 00 (preflight) is a stub. See docs/implementation-design.md section 8."

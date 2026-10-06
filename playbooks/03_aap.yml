@@ -1,0 +1,9 @@
+---
+- name: "Phase 03 | AAP: operator, instance and subscription manifest"
+  hosts: localhost
+  gather_facts: false
+  tags: [aap]
+  tasks:
+    - name: Report that phase 03 is not implemented yet
+      ansible.builtin.debug:
+        msg: "Phase 03 (aap) is a stub. See docs/implementation-design.md DD11."

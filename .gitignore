@@ -1,0 +1,44 @@
+# Secrets: never commit these. .gitignore is a safety net, not a control.
+secrets.yml
+secrets.*.yml
+!secrets.example.yml
+*.vault
+.vault-token
+.vault-pass*
+vault-init*.json
+pull-secret*
+manifest*.zip
+*.manifest.zip
+kubeconfig*
+*.kubeconfig
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+
+# ansible-navigator and Ansible runtime output
+*-artifact-*.json
+ansible-navigator.log
+.ansible/
+*.retry
+
+# Collections installed from requirements.yml (the local demo collection is tracked)
+collections/ansible_collections/*
+!collections/ansible_collections/demo/
+
+# Execution environment build context
+execution-environment/context/
+
+# Python and tooling
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# OS and editors
+.DS_Store
+.vscode/
+.idea/

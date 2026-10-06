@@ -1,0 +1,30 @@
+---
+# Full build of a fresh demo environment. Run one phase with --tags <phase>.
+# playbooks/00_secrets.yml is not included: it runs once on the laptop with --ee false.
+
+- name: Preflight
+  ansible.builtin.import_playbook: playbooks/00_preflight.yml
+
+- name: Platform
+  ansible.builtin.import_playbook: playbooks/01_platform.yml
+
+- name: OpenShift AI
+  ansible.builtin.import_playbook: playbooks/02_openshift_ai.yml
+
+- name: Ansible Automation Platform
+  ansible.builtin.import_playbook: playbooks/03_aap.yml
+
+- name: AAP content
+  ansible.builtin.import_playbook: playbooks/04_aap_content.yml
+
+- name: Workload
+  ansible.builtin.import_playbook: playbooks/05_workload.yml
+
+- name: Knowledge
+  ansible.builtin.import_playbook: playbooks/06_knowledge.yml
+
+- name: Enrichment service
+  ansible.builtin.import_playbook: playbooks/07_enrichment.yml
+
+- name: ServiceNow
+  ansible.builtin.import_playbook: playbooks/08_servicenow.yml

@@ -1,0 +1,51 @@
+---
+# Environment settings for the demo. No secrets belong in this file (see SECURITY.md).
+
+demo_name: aiops-enrichment-demo
+
+# Platform baseline (docs/implementation-design.md, header and section 7)
+demo_versions:
+  openshift_ai: "3.5"
+  aap: "2.7"
+
+# Instance profile drives resource requests. Change to g6.12xlarge for four L4 GPUs.
+demo_instance_profile: g6.16xlarge
+
+# Incident family for the demo scenarios (DD01). Each family is a content set:
+# diagnostic jobs in automation/diagnostics and documents in knowledge/.
+demo_incident_family: jvm-memory
+
+demo_namespaces:
+  workload: demo-payments
+  enrichment: aiops-enrichment
+  models: aiops-models
+  tracing: aiops-tracing
+  aap: aap
+
+# Trigger mode from ServiceNow to EDA (DD03): push or poll. Depends on OI01.
+demo_trigger_mode: push
+
+# Model selection (DD04). Final choice depends on the citation-adherence test (OI04).
+demo_model:
+  name: TBD
+  modelcar_image: TBD
+  quantisation: fp8
+
+# Secrets backend (SECURITY.md): vault or local
+demo_secrets_backend: vault
+demo_vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR', default='http://host.containers.internal:8200') }}"
+demo_vault_mount: aiops-demo
+demo_local_secrets_file: "~/.config/aiops-demo/secrets.yml"
+
+# Logical secret names mapped to Vault paths and keys. Preflight checks every entry.
+demo_required_secrets:
+  pull_secret: { path: entitlements, key: pull_secret }
+  aap_manifest_b64: { path: entitlements, key: aap_manifest_b64 }
+  automation_hub_token: { path: entitlements, key: automation_hub_token }
+  registry_username: { path: entitlements, key: registry_username }
+  registry_password: { path: entitlements, key: registry_password }
+  cluster_api_url: { path: cluster, key: api_url }
+  cluster_api_token: { path: cluster, key: api_token }
+  servicenow_instance_url: { path: servicenow, key: instance_url }
+  servicenow_admin_username: { path: servicenow, key: admin_username }
+  servicenow_admin_password: { path: servicenow, key: admin_password }

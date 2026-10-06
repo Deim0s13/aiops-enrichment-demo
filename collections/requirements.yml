@@ -1,0 +1,15 @@
+---
+# Used by the execution environment build and by AAP project sync.
+# Versions are unpinned until the first successful build, then pinned (CONTRIBUTING.md).
+# Certified collections (marked) come from Automation Hub and need your own token.
+collections:
+  - name: ansible.controller          # certified
+  - name: ansible.platform            # certified
+  - name: ansible.eda                 # certified
+  - name: infra.aap_configuration
+  - name: kubernetes.core
+  - name: redhat.openshift            # certified
+  - name: servicenow.itsm             # certified
+  - name: community.hashi_vault
+  - name: community.general
+  - name: ansible.utils

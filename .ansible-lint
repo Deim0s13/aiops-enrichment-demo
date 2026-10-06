@@ -1,0 +1,20 @@
+---
+profile: production
+
+# Collections from collections/requirements.yml include certified content that
+# needs an Automation Hub token, so linting does not install them.
+offline: true
+
+exclude_paths:
+  - .github/
+  - collections/ansible_collections/
+  - "!collections/ansible_collections/demo/"
+  - execution-environment/
+  - knowledge/
+  - services/
+
+kinds:
+  - playbook: "playbooks/*.yml"
+  - playbook: "automation/**/*.yml"
+  - rulebook: "rulebooks/*.yml"
+  - yaml: "inventory/**/*.yml"
