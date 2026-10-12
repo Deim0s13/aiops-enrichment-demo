@@ -33,9 +33,15 @@ demo_model:
 
 # Secrets backend (SECURITY.md): vault or local
 demo_secrets_backend: vault
-demo_vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR', default='http://host.containers.internal:8200') }}"
+# Vault address as seen from inside the execution environment. On macOS, Podman resolves
+# host.containers.internal to the laptop. Override with the AIOPS_VAULT_ADDR environment variable.
+demo_vault_addr: "{{ lookup('ansible.builtin.env', 'AIOPS_VAULT_ADDR', default='http://host.containers.internal:8200') }}"
 demo_vault_mount: aiops-demo
-demo_local_secrets_file: "~/.config/aiops-demo/secrets.yml"
+# Path to the local secrets file as seen from inside the execution environment (see docs/laptop-setup.md).
+demo_local_secrets_file: /runner/aiops-secrets/secrets.yml
+
+# Demo environments often present a self-signed API certificate. Set to false only if yours does.
+demo_cluster_validate_certs: true
 
 # Logical secret names mapped to Vault paths and keys. Preflight checks every entry.
 demo_required_secrets:

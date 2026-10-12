@@ -1,0 +1,6 @@
+---
+# Collections needed on the laptop itself, outside the execution environment.
+# Install with: ansible-galaxy collection install -r collections/requirements-laptop.yml
+collections:
+  - name: containers.podman
+    version: ">=1.16.0"

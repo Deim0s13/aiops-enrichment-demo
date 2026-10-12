@@ -1,0 +1,50 @@
+---
+# Container
+vault_bootstrap_manage_container: true
+# HashiCorp's UBI-based Vault image from Red Hat's partner registry (DD12: no Hardened Image exists
+# for Vault). Needs a registry.connect.redhat.com login. Tags carry a -ubi suffix.
+vault_bootstrap_image: registry.connect.redhat.com/hashicorp/vault:2.1.0-ubi
+vault_bootstrap_container_name: aiops-demo-vault
+vault_bootstrap_volume: aiops-demo-vault-data
+vault_bootstrap_bind_address: 127.0.0.1
+vault_bootstrap_port: 8200
+
+# API address as seen from the laptop
+vault_bootstrap_api: "http://{{ vault_bootstrap_bind_address }}:{{ vault_bootstrap_port }}"
+
+# Where the playbook writes files for the operator. Kept outside the repository.
+vault_bootstrap_config_dir: "{{ lookup('ansible.builtin.env', 'HOME') }}/.config/aiops-demo"
+vault_bootstrap_init_file: "{{ vault_bootstrap_config_dir }}/vault-init.json"
+vault_bootstrap_approle_file: "{{ vault_bootstrap_config_dir }}/approle.env"
+
+# Configuration applied to Vault
+vault_bootstrap_mount: "{{ demo_vault_mount | default('aiops-demo') }}"
+# One read-only policy and AppRole per secret group (entitlements, cluster, servicenow), so each
+# identity can read only its own group: <prefix>-read-<group> and <prefix>-<group>.
+vault_bootstrap_name_prefix: aiops-demo
+vault_bootstrap_groups: "{{ demo_required_secrets | dict2items | map(attribute='value.path') | unique | list }}"
+vault_bootstrap_token_ttl: 1h
+vault_bootstrap_token_max_ttl: 4h
+# Secret IDs last a week: rotate with each new demo environment, when the cluster token is updated.
+vault_bootstrap_secret_id_ttl: 168h
+
+# Operator switches
+#   vault_bootstrap_reconfigure: reapply mount, policy and AppRole (needs VAULT_TOKEN)
+#   vault_bootstrap_rotate_secret_id: issue a new AppRole secret ID and revoke all earlier ones
+#   (needs VAULT_TOKEN)
+vault_bootstrap_reconfigure: false
+vault_bootstrap_rotate_secret_id: false
+
+# Server configuration. TLS is disabled because the listener is published on the laptop's
+# loopback address only (see SECURITY.md).
+vault_bootstrap_server_config:
+  storage:
+    file:
+      path: /vault/file
+  listener:
+    - tcp:
+        address: "0.0.0.0:8200"
+        tls_disable: true
+  disable_mlock: true
+  ui: true
+  api_addr: "{{ vault_bootstrap_api }}"

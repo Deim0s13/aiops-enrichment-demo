@@ -1,0 +1,122 @@
+---
+- name: Take the administrative token from this run or from VAULT_TOKEN
+  ansible.builtin.set_fact:
+    vault_bootstrap_token: "{{ vault_bootstrap_token | default(lookup('ansible.builtin.env', 'VAULT_TOKEN', default='')) }}"
+  no_log: true
+
+- name: Check that an administrative token is available
+  ansible.builtin.assert:
+    that: vault_bootstrap_token | length > 0
+    fail_msg: >-
+      Reconfiguring Vault needs the root token. Set VAULT_TOKEN from your password manager and rerun,
+      for example: read -rs VAULT_TOKEN && export VAULT_TOKEN
+    quiet: true
+
+- name: List secrets engines
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_api }}/v1/sys/mounts"
+    headers:
+      X-Vault-Token: "{{ vault_bootstrap_token }}"
+  register: vault_bootstrap_mounts
+  no_log: true
+
+- name: Enable the KV version 2 engine for the demo
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_api }}/v1/sys/mounts/{{ vault_bootstrap_mount }}"
+    method: POST
+    body_format: json
+    body:
+      type: kv
+      description: Bootstrap secrets for the aiops-enrichment-demo build
+      options:
+        version: "2"
+    headers:
+      X-Vault-Token: "{{ vault_bootstrap_token }}"
+    status_code: [200, 204]
+  when: (vault_bootstrap_mount ~ '/') not in vault_bootstrap_mounts.json.data
+  changed_when: true
+  no_log: true
+
+- name: List auth methods
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_api }}/v1/sys/auth"
+    headers:
+      X-Vault-Token: "{{ vault_bootstrap_token }}"
+  register: vault_bootstrap_auth_methods
+  no_log: true
+
+- name: Enable AppRole authentication
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_api }}/v1/sys/auth/approle"
+    method: POST
+    body_format: json
+    body:
+      type: approle
+    headers:
+      X-Vault-Token: "{{ vault_bootstrap_token }}"
+    status_code: [200, 204]
+  when: "'approle/' not in vault_bootstrap_auth_methods.json.data"
+  changed_when: true
+  no_log: true
+
+- name: Write a read-only policy for each secret group
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_api }}/v1/sys/policies/acl/{{ vault_bootstrap_name_prefix }}-read-{{ vault_bootstrap_group }}"
+    method: PUT
+    body_format: json
+    body:
+      policy: "{{ lookup('ansible.builtin.template', 'policy.hcl.j2') }}"
+    headers:
+      X-Vault-Token: "{{ vault_bootstrap_token }}"
+    status_code: [200, 204]
+  loop: "{{ vault_bootstrap_groups }}"
+  loop_control:
+    loop_var: vault_bootstrap_group
+  changed_when: true
+  no_log: true
+
+- name: Create an AppRole for each secret group, bound to that group's policy only
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_api }}/v1/auth/approle/role/{{ vault_bootstrap_name_prefix }}-{{ vault_bootstrap_group }}"
+    method: POST
+    body_format: json
+    body:
+      token_policies: ["{{ vault_bootstrap_name_prefix }}-read-{{ vault_bootstrap_group }}"]
+      token_no_default_policy: true
+      token_ttl: "{{ vault_bootstrap_token_ttl }}"
+      token_max_ttl: "{{ vault_bootstrap_token_max_ttl }}"
+      secret_id_ttl: "{{ vault_bootstrap_secret_id_ttl }}"
+      secret_id_num_uses: 0
+    headers:
+      X-Vault-Token: "{{ vault_bootstrap_token }}"
+    status_code: [200, 204]
+  loop: "{{ vault_bootstrap_groups }}"
+  loop_control:
+    loop_var: vault_bootstrap_group
+  changed_when: true
+  no_log: true
+
+- name: Check for an existing AppRole credentials file
+  ansible.builtin.stat:
+    path: "{{ vault_bootstrap_approle_file }}"
+  register: vault_bootstrap_approle_existing
+
+- name: Issue AppRole credentials for the operator
+  when: (not vault_bootstrap_approle_existing.stat.exists) or (vault_bootstrap_rotate_secret_id | bool)
+  block:
+    - name: Start with no credentials
+      ansible.builtin.set_fact:
+        vault_bootstrap_credentials: {}
+
+    - name: Issue a secret ID for each group and revoke earlier ones
+      ansible.builtin.include_tasks: issue_secret_id.yml
+      loop: "{{ vault_bootstrap_groups }}"
+      loop_control:
+        loop_var: vault_bootstrap_group
+
+    - name: Write the AppRole credentials file, readable only by the operator
+      ansible.builtin.template:
+        src: approle.env.j2
+        dest: "{{ vault_bootstrap_approle_file }}"
+        mode: "0600"
+      no_log: true

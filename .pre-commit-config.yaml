@@ -26,3 +26,15 @@ repos:
     rev: v26.9.0
     hooks:
       - id: ansible-lint
+
+  - repo: local
+    hooks:
+      # Blocks any debug task that references secrets_values, the fact holding every resolved
+      # secret (roles/secrets). Asserts and when: conditions are not affected.
+      - id: no-debug-secrets-values
+        name: Block debug tasks that print secrets_values
+        language: pygrep
+        entry: '^([ \t]*)(?:-[ \t]+)?(?:ansible\.builtin\.)?debug:[^\n]*(?:\n\1[ \t]+[^\n]*)*?secrets_values'
+        args: [--multiline]
+        types: [yaml]
+        exclude: ^\.pre-commit-config\.yaml$

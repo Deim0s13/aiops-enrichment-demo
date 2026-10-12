@@ -4,7 +4,7 @@ A reproducible demonstration of AI-assisted incident enrichment using Red Hat An
 
 The whole environment is built and configured with Ansible playbooks, so it can be rebuilt from an empty cluster whenever a demo environment expires.
 
-> **Status:** early scaffold. The repository structure, secrets model and design are in place. The build phases are stubs and nothing is deployable yet.
+> **Status:** milestone M0 (readiness). Vault on the laptop, the secrets role and preflight are implemented and tested. Build phases 01 onwards are stubs.
 
 ## What the demo shows
 
@@ -21,6 +21,8 @@ All data is fictional: a fictional organisation, fictional services and a synthe
 ## Documentation
 
 - [Implementation design](docs/implementation-design.md): how the demo implements the reference architecture, what it simplifies, and the acceptance criteria
+- [Implementation plan](docs/implementation-plan.md): milestones, tasks and exit criteria
+- [Laptop setup](docs/laptop-setup.md): tools, Vault, secrets and preflight
 - [Security and secrets](SECURITY.md): how secrets are handled and the rules for contributors
 - [Contributing](CONTRIBUTING.md)
 
@@ -72,16 +74,17 @@ There are two kinds of playbook in this repository, separated by who runs them. 
 
 ## Getting started
 
-These steps describe the intended workflow. The phases are not implemented yet.
+Start with [docs/laptop-setup.md](docs/laptop-setup.md), which takes you from a bare laptop to a passing preflight check before any demo environment exists. In outline:
 
 ```bash
-# One-off setup
-pre-commit install
-ansible-navigator run playbooks/00_secrets.yml --ee false   # starts Vault on your laptop
-# Load your secrets into Vault at the paths listed in SECURITY.md
+# One-off setup on the laptop
+ansible-galaxy collection install -r collections/requirements-laptop.yml
+ansible-playbook playbooks/00_secrets.yml          # starts and configures Vault on your laptop
+# Load your secrets into Vault (see the guide), then build the execution environment
+source ~/.config/aiops-demo/approle.env
+ansible-navigator run playbooks/00_preflight.yml -e preflight_include_cluster=false
 
-# For each new demo environment
-ansible-builder build -f execution-environment/execution-environment.yml -t localhost/aiops-demo-ee:latest
+# For each new demo environment (phases 01 onwards are not implemented yet)
 ansible-navigator run site.yml                     # full build
 ansible-navigator run site.yml --tags platform     # or one phase at a time
 ansible-navigator run verify.yml                   # check the acceptance criteria
@@ -90,7 +93,7 @@ ansible-navigator run verify.yml                   # check the acceptance criter
 ansible-navigator run reset.yml
 ```
 
-`00_secrets.yml` runs outside the execution environment (`--ee false`) because it manages a container on your laptop. Everything else runs inside it.
+`00_secrets.yml` runs with `ansible-playbook` directly rather than inside the execution environment, because it manages a container on your laptop. Everything else runs inside it.
 
 ## Licence
 

@@ -11,10 +11,8 @@ ansible-navigator:
       policy: missing
     environment-variables:
       pass:
-        - VAULT_ADDR
-        - VAULT_ROLE_ID
-        - VAULT_SECRET_ID
-        - ANSIBLE_VAULT_PASSWORD_FILE
+        - AIOPS_VAULT_ADDR
+        - AIOPS_VAULT_APPROLES
 
   # Playbook artefacts record every variable, including secrets. Keep this disabled.
   playbook-artifact:

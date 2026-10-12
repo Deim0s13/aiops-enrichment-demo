@@ -1,0 +1,41 @@
+---
+- name: Read the seal status
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_api }}/v1/sys/seal-status"
+  register: vault_bootstrap_seal_status
+
+- name: Unseal Vault
+  when: vault_bootstrap_seal_status.json.sealed
+  block:
+    - name: Take the unseal key from this run or from AIOPS_VAULT_UNSEAL_KEY
+      ansible.builtin.set_fact:
+        vault_bootstrap_unseal_key: "{{ vault_bootstrap_unseal_key | default(lookup('ansible.builtin.env', 'AIOPS_VAULT_UNSEAL_KEY', default='')) }}"
+      no_log: true
+
+    - name: Check that an unseal key is available
+      ansible.builtin.assert:
+        that: vault_bootstrap_unseal_key | length > 0
+        fail_msg: >-
+          Vault is sealed. Set AIOPS_VAULT_UNSEAL_KEY from your password manager and rerun,
+          for example: read -rs AIOPS_VAULT_UNSEAL_KEY && export AIOPS_VAULT_UNSEAL_KEY
+        quiet: true
+
+    - name: Submit the unseal key
+      ansible.builtin.uri:
+        url: "{{ vault_bootstrap_api }}/v1/sys/unseal"
+        method: PUT
+        body_format: json
+        body:
+          key: "{{ vault_bootstrap_unseal_key }}"
+        status_code: [200, 400]
+      register: vault_bootstrap_unseal_result
+      changed_when: vault_bootstrap_unseal_result.status == 200
+      no_log: true
+
+    - name: Confirm Vault is unsealed
+      ansible.builtin.assert:
+        that:
+          - vault_bootstrap_unseal_result.status == 200
+          - not vault_bootstrap_unseal_result.json.sealed
+        fail_msg: Vault rejected the unseal key. Check that AIOPS_VAULT_UNSEAL_KEY is the key saved on the first run.
+        quiet: true

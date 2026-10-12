@@ -1,0 +1,38 @@
+---
+- name: Read the initialisation status
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_api }}/v1/sys/init"
+  register: vault_bootstrap_init_status
+
+- name: Record whether this run initialises Vault
+  ansible.builtin.set_fact:
+    vault_bootstrap_initialised_now: "{{ not vault_bootstrap_init_status.json.initialized }}"
+
+- name: Initialise Vault with a single unseal key
+  when: vault_bootstrap_initialised_now
+  block:
+    - name: Initialise Vault
+      ansible.builtin.uri:
+        url: "{{ vault_bootstrap_api }}/v1/sys/init"
+        method: PUT
+        body_format: json
+        body:
+          secret_shares: 1
+          secret_threshold: 1
+      register: vault_bootstrap_init_result
+      changed_when: true
+      no_log: true
+
+    - name: Save the unseal key and root token for the operator, readable only by them
+      ansible.builtin.copy:
+        dest: "{{ vault_bootstrap_init_file }}"
+        content: "{{ {'unseal_key': vault_bootstrap_init_result.json.keys_base64[0],
+                      'root_token': vault_bootstrap_init_result.json.root_token} | to_nice_json }}"
+        mode: "0600"
+      no_log: true
+
+    - name: Keep the unseal key and root token in memory for the rest of this run
+      ansible.builtin.set_fact:
+        vault_bootstrap_unseal_key: "{{ vault_bootstrap_init_result.json.keys_base64[0] }}"
+        vault_bootstrap_token: "{{ vault_bootstrap_init_result.json.root_token }}"
+      no_log: true

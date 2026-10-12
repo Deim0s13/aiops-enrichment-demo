@@ -1,9 +1,293 @@
 ---
-- name: "Phase 00 | Preflight: confirm required secrets and cluster access before any change"
+# Confirms that everything the build needs is in place before any change is made.
+#
+# Before a demo environment exists (milestone M0), run without the cluster checks:
+#   ansible-navigator run playbooks/00_preflight.yml -e preflight_include_cluster=false
+#
+# Checks that secrets are set, in the right format and, for the Red Hat registry, Automation Hub
+# and ServiceNow credentials, actually accepted. Secret values are never printed.
+
+- name: "Phase 00 | Preflight: confirm required secrets and access before any change"
   hosts: localhost
   gather_facts: false
   tags: [preflight]
+  vars:
+    preflight_include_cluster: true
+    preflight_check_servicenow: true
+    preflight_check_entitlements: true
+    preflight_registry_url: https://registry.redhat.io
+    preflight_sso_discovery_url: https://sso.redhat.com/auth/realms/redhat-external/.well-known/openid-configuration
+    preflight_groups: >-
+      {{ ['entitlements', 'servicenow'] + (['cluster'] if preflight_include_cluster | bool else []) }}
+
   tasks:
-    - name: Report that phase 00 is not implemented yet
+    - name: Resolve the required secrets
+      ansible.builtin.include_role:
+        name: secrets
+      vars:
+        secrets_groups: "{{ preflight_groups }}"
+
+    - name: Report secret groups that could not be read
+      ansible.builtin.assert:
+        that: secrets_missing_groups | length == 0
+        fail_msg: >-
+          No secrets found at {{ secrets_missing_groups | map('regex_replace', '^', demo_vault_mount ~ '/') | join(', ') }}.
+          Load them as described in docs/laptop-setup.md.
+        success_msg: "All secret groups read: {{ preflight_groups | join(', ') }}"
+
+    - name: Assess each secret without revealing its value
+      ansible.builtin.set_fact:
+        preflight_secret_checks:
+          missing: "{{ secrets_values | dict2items | selectattr('value', 'equalto', '') | map(attribute='key') | list }}"
+          placeholder: "{{ secrets_values | dict2items | selectattr('value', 'search', 'REPLACE_WITH') | map(attribute='key') | list }}"
+          pull_secret_ok: >-
+            {{ secrets_values.pull_secret is search('"auths"')
+               and secrets_values.pull_secret is search('registry\.redhat\.io') }}
+          manifest_ok: >-
+            {{ secrets_values.aap_manifest_b64 | length > 1000
+               and secrets_values.aap_manifest_b64 is match('^[A-Za-z0-9+/=\s]+$')
+               and secrets_values.aap_manifest_b64 is match('^UEsDB') }}
+          hub_token_ok: "{{ secrets_values.automation_hub_token | length > 20 }}"
+          servicenow_url_ok: "{{ secrets_values.servicenow_instance_url is match('^https://[a-z0-9-]+\\.service-now\\.com/?$') }}"
+          cluster_url_ok: >-
+            {{ (not preflight_include_cluster | bool)
+               or secrets_values.cluster_api_url | default('') is match('^https://api\.[^/]+:6443/?$') }}
+      no_log: true
+
+    - name: Check that no secret is empty or still a placeholder
+      ansible.builtin.assert:
+        that:
+          - preflight_secret_checks.missing | length == 0
+          - preflight_secret_checks.placeholder | length == 0
+        fail_msg: >-
+          Empty: {{ preflight_secret_checks.missing | join(', ') or 'none' }}.
+          Still a placeholder: {{ preflight_secret_checks.placeholder | join(', ') or 'none' }}.
+        success_msg: "All {{ secrets_values | length }} required secrets are set."
+
+    - name: Check that each secret is in the expected format
+      ansible.builtin.assert:
+        that:
+          - preflight_secret_checks.pull_secret_ok
+          - preflight_secret_checks.manifest_ok
+          - preflight_secret_checks.hub_token_ok
+          - preflight_secret_checks.servicenow_url_ok
+          - preflight_secret_checks.cluster_url_ok
+        fail_msg: >-
+          Format problems:
+          {{ ([] + (['pull_secret is not a pull secret JSON containing registry.redhat.io'] if not preflight_secret_checks.pull_secret_ok else [])
+             + (['aap_manifest_b64 is not a base64-encoded zip file'] if not preflight_secret_checks.manifest_ok else [])
+             + (['automation_hub_token looks too short to be an offline token'] if not preflight_secret_checks.hub_token_ok else [])
+             + (['servicenow instance_url should look like https://devNNNNNN.service-now.com'] if not preflight_secret_checks.servicenow_url_ok else [])
+             + (['cluster api_url should look like https://api.<cluster domain>:6443'] if not preflight_secret_checks.cluster_url_ok else [])) | join('; ') }}.
+        success_msg: All secrets are in the expected format.
+
+    - name: Check that the Red Hat credentials work, not just their format
+      when: preflight_check_entitlements | bool
+      block:
+        - name: Ask registry.redhat.io how to authenticate (no credentials, so errors can be shown)
+          ansible.builtin.uri:
+            url: "{{ preflight_registry_url }}/v2/"
+            status_code: [200, 401]
+            timeout: 20
+          register: preflight_registry_probe
+          failed_when: false
+
+        - name: Report an unreachable registry
+          ansible.builtin.assert:
+            that: preflight_registry_probe.status | default(-1) == 401
+            fail_msg: >-
+              Cannot reach {{ preflight_registry_url }}
+              ({{ preflight_registry_probe.msg | default('no response') | truncate(200) }}).
+            quiet: true
+
+        - name: Work out the registry's token service from its challenge
+          ansible.builtin.set_fact:
+            preflight_registry_auth_url: >-
+              {{ preflight_registry_probe.www_authenticate | regex_search('realm="([^"]+)"', '\1') | first }}?service={{
+                 preflight_registry_probe.www_authenticate | regex_search('service="([^"]+)"', '\1') | first | urlencode }}
+
+        - name: Log in to the registry token service with the registry credentials
+          ansible.builtin.uri:
+            url: "{{ preflight_registry_auth_url }}"
+            url_username: "{{ secrets_values.registry_username }}"
+            url_password: "{{ secrets_values.registry_password }}"
+            force_basic_auth: true
+            status_code: [200, 401, 403]
+            timeout: 20
+          register: preflight_registry_login
+          failed_when: false
+          no_log: true
+
+        - name: Check that registry.redhat.io accepted the credentials
+          ansible.builtin.assert:
+            that: preflight_registry_login.status | default(-1) == 200
+            fail_msg: >-
+              registry.redhat.io rejected registry_username and registry_password in aiops-demo/entitlements.
+              Check the registry service account at access.redhat.com/terms-based-registry; service accounts
+              can be deleted or have their token regenerated.
+            success_msg: registry.redhat.io accepts the registry credentials.
+
+        - name: Find Red Hat single sign-on's token endpoint (no credentials, so errors can be shown)
+          ansible.builtin.uri:
+            url: "{{ preflight_sso_discovery_url }}"
+            timeout: 20
+          register: preflight_sso_discovery
+          failed_when: false
+
+        - name: Report an unreachable single sign-on service
+          ansible.builtin.assert:
+            that: preflight_sso_discovery.json.token_endpoint is defined
+            fail_msg: >-
+              Cannot reach Red Hat single sign-on
+              ({{ preflight_sso_discovery.msg | default('no response') | truncate(200) }}).
+            quiet: true
+
+        - name: Exchange the Automation Hub offline token for an access token, as ansible-galaxy does
+          ansible.builtin.uri:
+            url: "{{ preflight_sso_discovery.json.token_endpoint }}"
+            method: POST
+            body_format: form-urlencoded
+            body:
+              grant_type: refresh_token
+              client_id: cloud-services
+              refresh_token: "{{ secrets_values.automation_hub_token }}"
+            status_code: [200, 400, 401]
+            timeout: 20
+          register: preflight_hub_exchange
+          failed_when: false
+          no_log: true
+
+        - name: Check that the Automation Hub token is still valid
+          ansible.builtin.assert:
+            that: preflight_hub_exchange.status | default(-1) == 200
+            fail_msg: >-
+              Red Hat single sign-on rejected automation_hub_token in aiops-demo/entitlements. Offline tokens
+              expire after 30 days without use: generate a new one at console.redhat.com, under Ansible
+              Automation Platform > Automation Hub > Connect to Hub, and update it in Vault.
+            success_msg: The Automation Hub token is valid.
+
+    - name: Check the ServiceNow instance
+      when: preflight_check_servicenow | bool
+      block:
+        - name: Probe the ServiceNow instance without credentials (an awake instance answers 401)
+          ansible.builtin.uri:
+            url: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}/api/now/table/sys_user?sysparm_limit=1"
+            follow_redirects: none
+            headers:
+              Accept: application/json
+            status_code: [200, 301, 302, 401]
+            timeout: 20
+          register: preflight_servicenow_probe
+          failed_when: false
+
+        - name: Report an unreachable or hibernating instance
+          ansible.builtin.assert:
+            that: preflight_servicenow_probe.status | default(-1) == 401
+            fail_msg: >-
+              {{ 'The ServiceNow PDI looks like it is hibernating. Wake it at developer.servicenow.com and rerun.'
+                 if preflight_servicenow_probe.status | default(-1) in [200, 301, 302] else
+                 'Cannot reach ' ~ secrets_values.servicenow_instance_url ~ ' ('
+                 ~ (preflight_servicenow_probe.msg | default('no response') | truncate(200)) ~ ').' }}
+            quiet: true
+
+        - name: Query the ServiceNow Table API as the administrator
+          ansible.builtin.uri:
+            url: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}/api/now/table/sys_user?sysparm_limit=1&sysparm_fields=sys_id"
+            url_username: "{{ secrets_values.servicenow_admin_username }}"
+            url_password: "{{ secrets_values.servicenow_admin_password }}"
+            force_basic_auth: true
+            follow_redirects: none
+            headers:
+              Accept: application/json
+            status_code: [200, 401, 403]
+            timeout: 20
+          register: preflight_servicenow
+          failed_when: false
+          no_log: true
+
+        - name: Check that the administrator credentials work
+          ansible.builtin.assert:
+            that: preflight_servicenow.status | default(-1) == 200
+            fail_msg: >-
+              ServiceNow did not accept the administrator credentials in aiops-demo/servicenow.
+              PDI passwords are reset when an instance is reclaimed or upgraded; check the current one at developer.servicenow.com.
+            success_msg: ServiceNow is awake and the administrator credentials work.
+
+    - name: Check the demo environment
+      when: preflight_include_cluster | bool
+      block:
+        - name: Check that the cluster API is reachable (unauthenticated, so errors can be shown)
+          ansible.builtin.uri:
+            url: "{{ secrets_values.cluster_api_url | regex_replace('/$', '') }}/version"
+            validate_certs: "{{ demo_cluster_validate_certs }}"
+            status_code: [200, 401, 403]
+            timeout: 15
+          register: preflight_cluster_ping
+          failed_when: false
+
+        - name: Report an unreachable cluster API
+          ansible.builtin.assert:
+            that: preflight_cluster_ping.status | default(-1) in [200, 401, 403]
+            fail_msg: >-
+              Cannot reach the cluster API at {{ secrets_values.cluster_api_url }}
+              ({{ preflight_cluster_ping.msg | default('no response') | truncate(250) }}).
+              Check that the environment is running and that aiops-demo/cluster holds its current API URL.
+              {{ 'The API presents a certificate that is not trusted; if that is expected for this environment,
+                 set demo_cluster_validate_certs to false.'
+                 if 'CERTIFICATE_VERIFY_FAILED' in (preflight_cluster_ping.msg | default('')) else '' }}
+            quiet: true
+
+        - name: Read the cluster version
+          kubernetes.core.k8s_info:
+            host: "{{ secrets_values.cluster_api_url }}"
+            api_key: "{{ secrets_values.cluster_api_token }}"
+            validate_certs: "{{ demo_cluster_validate_certs }}"
+            api_version: config.openshift.io/v1
+            kind: ClusterVersion
+            name: version
+          register: preflight_cluster_version
+          failed_when: false
+          no_log: true
+
+        - name: Report a rejected cluster token
+          ansible.builtin.assert:
+            that: (preflight_cluster_version.resources | default([])) | length > 0
+            fail_msg: >-
+              The cluster API is reachable but did not accept the token, or the token cannot read
+              ClusterVersion. Tokens expire: update api_token in aiops-demo/cluster with a current
+              cluster-admin token for this environment.
+            quiet: true
+
+        - name: Read the nodes
+          kubernetes.core.k8s_info:
+            host: "{{ secrets_values.cluster_api_url }}"
+            api_key: "{{ secrets_values.cluster_api_token }}"
+            validate_certs: "{{ demo_cluster_validate_certs }}"
+            kind: Node
+          register: preflight_nodes
+
+        - name: Summarise the environment
+          ansible.builtin.set_fact:
+            preflight_cluster:
+              version: "{{ preflight_cluster_version.resources[0].status.desired.version | default('unknown') }}"
+              nodes: "{{ preflight_nodes.resources | length }}"
+              instance_types: >-
+                {{ preflight_nodes.resources | map(attribute='metadata.labels')
+                   | map('extract', 'node.kubernetes.io/instance-type') | map('default', 'unknown') | unique | list }}
+
+        - name: Report the environment
+          ansible.builtin.debug:
+            msg: >-
+              OpenShift {{ preflight_cluster.version }},
+              {{ preflight_cluster.nodes }} node(s), instance type {{ preflight_cluster.instance_types | join(', ') }}.
+
+        - name: Warn if the instance type is not the expected profile
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: expected {{ demo_instance_profile }} but found {{ preflight_cluster.instance_types | join(', ') }}.
+              Sizing in docs/implementation-design.md section 7 assumes {{ demo_instance_profile }}.
+          when: demo_instance_profile not in preflight_cluster.instance_types
+
+    - name: Preflight complete
       ansible.builtin.debug:
-        msg: "Phase 00 (preflight) is a stub. See docs/implementation-design.md section 8."
+        msg: "Preflight passed for: {{ preflight_groups | join(', ') ~ ('' if preflight_include_cluster | bool else ' (cluster checks skipped)') }}."

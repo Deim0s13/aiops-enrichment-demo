@@ -1,0 +1,16 @@
+# Read-only access to the {{ vault_bootstrap_group }} secrets only. Managed by playbooks/00_secrets.yml.
+path "{{ vault_bootstrap_mount }}/data/{{ vault_bootstrap_group }}" {
+  capabilities = ["read"]
+}
+
+path "{{ vault_bootstrap_mount }}/metadata/{{ vault_bootstrap_group }}" {
+  capabilities = ["read"]
+}
+
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+
+path "auth/token/revoke-self" {
+  capabilities = ["update"]
+}

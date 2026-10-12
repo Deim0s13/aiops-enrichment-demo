@@ -1,17 +1,29 @@
 ---
-# Build: ansible-builder build -f execution-environment/execution-environment.yml -t localhost/aiops-demo-ee:latest
-# Needs a registry.redhat.io login and ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN in your environment.
-# The image contains dependencies only, never secrets.
+# Build (see docs/laptop-setup.md, step 4):
+#   ansible-builder build -f execution-environment/execution-environment.yml -t localhost/aiops-demo-ee:latest \
+#     --build-arg ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN="$ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN"
+# Needs a registry.redhat.io login. The image contains dependencies only, never secrets: the
+# Automation Hub token is declared only in the galaxy stage, which is not part of the final image.
 version: 3
 
 images:
   base_image:
-    # Confirm the image name and tag for AAP 2.7 before the first build.
+    # Image name confirmed from the AAP 2.7 container advisory (RHSA-2026:42142), amd64 and arm64.
+    # Pin to a digest after the first successful build.
     name: registry.redhat.io/ansible-automation-platform-27/ee-minimal-rhel9:latest
 
 dependencies:
   galaxy: ../collections/requirements.yml
   python: requirements.txt
+
+additional_build_files:
+  - src: ../ansible.cfg
+    dest: configs
+
+additional_build_steps:
+  prepend_galaxy:
+    - COPY _build/configs/ansible.cfg /etc/ansible/ansible.cfg
+    - ARG ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN
 
 options:
   package_manager_path: /usr/bin/microdnf

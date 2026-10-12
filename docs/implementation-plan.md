@@ -44,6 +44,8 @@ The playbooks are written in this repository and run from the operator's laptop 
 
 **Exit criteria:** preflight passes on the laptop against Vault, with no environment yet. The execution environment builds.
 
+**Progress:** M0.5 and M0.6 are implemented and tested against a real OpenBao server (same API as Vault), covering first run, restart and unseal, secret ID rotation, the read-only policy, both secrets backends, every failure message, and a check at `-vvv` that no secret value appears in the output. The Podman container steps and the live ServiceNow check are untested until they run on a laptop. M0.7: the base image name is confirmed; the build and version pinning remain. The operator steps are in [laptop-setup.md](laptop-setup.md).
+
 **Estimate:** 1 day, mostly waiting on entitlements.
 
 ### M1 Platform and model serving

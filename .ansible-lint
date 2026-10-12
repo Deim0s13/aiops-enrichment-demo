@@ -5,6 +5,16 @@ profile: production
 # needs an Automation Hub token, so linting does not install them.
 offline: true
 
+# Because collections are not installed for linting, modules from them are mocked so the syntax
+# check can resolve them. Lint does not validate the arguments of mocked modules; real runs do.
+# Add each new non-builtin module here when a phase starts using it.
+mock_modules:
+  - community.hashi_vault.vault_kv2_get
+  - community.hashi_vault.vault_login
+  - containers.podman.podman_container
+  - containers.podman.podman_volume
+  - kubernetes.core.k8s_info
+
 exclude_paths:
   - .github/
   - collections/ansible_collections/

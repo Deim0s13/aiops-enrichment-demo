@@ -1,0 +1,62 @@
+---
+- name: Create the operator configuration directory outside the repository
+  ansible.builtin.file:
+    path: "{{ vault_bootstrap_config_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Start the Vault container
+  ansible.builtin.include_tasks: container.yml
+  when: vault_bootstrap_manage_container | bool
+
+- name: Wait for the Vault API
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_api }}/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200"
+    status_code: 200
+  register: vault_bootstrap_health
+  until: vault_bootstrap_health.status == 200
+  retries: 30
+  delay: 2
+
+- name: Initialise Vault if this is the first run
+  ansible.builtin.include_tasks: init.yml
+
+- name: Unseal Vault if it is sealed
+  ansible.builtin.include_tasks: unseal.yml
+
+- name: Configure Vault for the demo build
+  ansible.builtin.include_tasks: configure.yml
+  when: >-
+    vault_bootstrap_initialised_now
+    or (vault_bootstrap_reconfigure | bool)
+    or (vault_bootstrap_rotate_secret_id | bool)
+
+- name: Check whether the init file is still on disk
+  ansible.builtin.stat:
+    path: "{{ vault_bootstrap_init_file }}"
+  register: vault_bootstrap_init_file_stat
+
+- name: Warn if the unseal key and root token are still on disk
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ vault_bootstrap_init_file }} still holds the unseal key and root token.
+      Copy both into your password manager and delete the file.
+  when:
+    - vault_bootstrap_init_file_stat.stat.exists
+    - not vault_bootstrap_initialised_now
+
+- name: Check whether AppRole credentials have been issued
+  ansible.builtin.stat:
+    path: "{{ vault_bootstrap_approle_file }}"
+  register: vault_bootstrap_approle_stat
+
+- name: Report the next steps
+  ansible.builtin.debug:
+    msg:
+      - "Vault is running and unsealed at {{ vault_bootstrap_api }} (UI at {{ vault_bootstrap_api }}/ui)."
+      - "{{ 'FIRST RUN: copy the unseal key and root token from ' ~ vault_bootstrap_init_file ~ ' into your password manager, then delete the file.'
+           if vault_bootstrap_initialised_now else 'Vault was already initialised.' }}"
+      - "{{ 'AppRole credentials are in ' ~ vault_bootstrap_approle_file ~ '. Run: source ' ~ vault_bootstrap_approle_file
+           if vault_bootstrap_approle_stat.stat.exists
+           else 'No AppRole credentials file found. Rerun with -e vault_bootstrap_rotate_secret_id=true and VAULT_TOKEN set.' }}"
+      - "Load your secrets as described in docs/laptop-setup.md, then run playbooks/00_preflight.yml."

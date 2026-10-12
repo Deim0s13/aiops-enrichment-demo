@@ -1,0 +1,23 @@
+---
+- name: Create the persistent volume for Vault storage
+  containers.podman.podman_volume:
+    name: "{{ vault_bootstrap_volume }}"
+    state: present
+
+- name: Run Vault with file storage, published on the loopback address only
+  containers.podman.podman_container:
+    name: "{{ vault_bootstrap_container_name }}"
+    image: "{{ vault_bootstrap_image }}"
+    state: started
+    command: server
+    ports:
+      - "{{ vault_bootstrap_bind_address }}:{{ vault_bootstrap_port }}:8200"
+    volumes:
+      # :U gives the container's non-root vault user ownership of the volume
+      - "{{ vault_bootstrap_volume }}:/vault/file:U"
+    env:
+      VAULT_LOCAL_CONFIG: "{{ vault_bootstrap_server_config | to_json }}"
+      # Lets 'podman exec ... vault' commands reach the server inside the container
+      VAULT_ADDR: "http://127.0.0.1:8200"
+    # No restart policy: Vault runs only when 00_secrets.yml starts it, and is stopped by hand
+    # with 'podman stop aiops-demo-vault' when not needed.

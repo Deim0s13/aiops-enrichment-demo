@@ -17,10 +17,11 @@ Generated secrets never leave the cluster and disappear with the environment, so
 
 The recommended backend is HashiCorp Vault Community Edition, run as a container on your laptop by `playbooks/00_secrets.yml`. It is free to use for this purpose under the Business Source License. OpenBao works the same way if your organisation's policy requires an OSI-approved licence.
 
-- Vault runs with file storage on a persistent Podman volume, not in dev mode.
-- Keep the unseal key and root token in your password manager. Use the root token only to set Vault up.
-- The playbooks authenticate with an AppRole bound to a read-only policy on the demo's KV path. Supply the role ID and secret ID through the `VAULT_ROLE_ID` and `VAULT_SECRET_ID` environment variables.
-- Enter secret values yourself through the Vault CLI or UI, so they never pass through a file.
+- Vault runs with file storage on a persistent Podman volume, not in dev mode. Its API is published on `127.0.0.1:8200` only. TLS is disabled on that listener because traffic never leaves the laptop.
+- The first run writes the unseal key and root token to `~/.config/aiops-demo/vault-init.json` (mode 0600). Move both into your password manager and delete the file. Use the root token only to set Vault up and load secrets.
+- The build reads each secret group (`entitlements`, `cluster`, `servicenow`) with its own AppRole, bound to a policy that can read that group and nothing else. A phase that needs only ServiceNow credentials therefore cannot read the pull secret, even by mistake. Tokens last one hour and carry no default policy. The credentials for all three AppRoles are written to `~/.config/aiops-demo/approle.env` (mode 0600) and supplied to the build through the `AIOPS_VAULT_APPROLES` environment variable. Secret IDs expire after 7 days and are rotated with each new demo environment; rotating revokes all earlier secret IDs, so only one per group is valid at a time.
+- The build revokes each Vault token as soon as it has read that group.
+- Enter secret values through the Vault CLI from standard input, as shown in [docs/laptop-setup.md](docs/laptop-setup.md), so they never appear on a command line, in shell history or in a file.
 - The demo cluster cannot reach your laptop, so Vault is used only during the build. The running demo never depends on it.
 
 Secrets are read from a KV version 2 engine mounted at `aiops-demo`:
@@ -33,14 +34,15 @@ Secrets are read from a KV version 2 engine mounted at `aiops-demo`:
 
 ## Without Vault
 
-Set `secrets_backend: local` and copy `secrets.example.yml` to `~/.config/aiops-demo/secrets.yml`, outside the repository. Encrypt it with your own `ansible-vault` password. The keys mirror the Vault paths above.
+Set `demo_secrets_backend: local` and copy `secrets.example.yml` to `~/.config/aiops-demo/local/secrets.yml`, outside the repository. Encrypt it with your own `ansible-vault` password. The keys mirror the Vault paths above. See [docs/laptop-setup.md](docs/laptop-setup.md) for how to mount it into the execution environment.
 
 ## Guardrails
 
 - **Pre-commit hooks** run gitleaks, yamllint and ansible-lint before every commit. Run `pre-commit install` once after cloning.
+- **A local pre-commit hook blocks any `debug` task that references `secrets_values`**, the fact that holds every resolved secret. A troubleshooting `debug` is the easiest way to leak everything at once.
 - **CI** runs the same checks on every push and pull request.
 - **GitHub secret scanning and push protection** are enabled once the repository is public.
-- **`no_log: true`** is set on every task that handles a secret, so values stay out of console output and AAP job logs.
+- **`no_log: true`** is set on every task that handles a secret, so values stay out of console output and AAP job logs. Where `no_log` would also hide a useful error, the playbooks run a separate check that involves no secret, so the error can be shown safely. Secret handling is tested at maximum verbosity (`-vvv`) to confirm no value appears in the output.
 - **ansible-navigator playbook artefacts are disabled** in the committed configuration, because they record every variable, including secrets.
 - **The execution environment and container images contain no secrets.** Credentials are supplied at run time.
 - **`.gitignore`** excludes the common secret file names, but it is a safety net, not a control.

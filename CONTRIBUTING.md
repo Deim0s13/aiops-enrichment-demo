@@ -18,7 +18,9 @@ pre-commit run --all-files
 ## Conventions
 
 - Use fully qualified collection names (`ansible.builtin.copy`, not `copy`).
+- When a playbook or role starts using a module from a collection other than `ansible.builtin`, add it to `mock_modules` in `.ansible-lint`. Linting runs offline, without collections installed, so it cannot otherwise resolve the module.
 - Name every play and task.
 - Tag each phase with its phase name, so `site.yml --tags <phase>` works.
 - Use British English in documentation.
 - Pin collection and image versions once a phase has been built successfully.
+- Source container images in the order set by DD12 in the implementation design: Red Hat Hardened Images where viable, then UBI-based images, then other sources only where neither exists, with the reason recorded.
