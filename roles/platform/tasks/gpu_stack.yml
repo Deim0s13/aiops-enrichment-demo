@@ -1,0 +1,85 @@
+---
+# Checks the Node Feature Discovery and NVIDIA GPU operators the environment provides. Copied
+# CSVs (one per namespace for operators installed for all namespaces) are excluded.
+
+- name: List installed operators
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    label_selectors:
+      - "!olm.copiedFrom"
+  register: platform_csvs
+
+- name: Find the Node Feature Discovery and GPU operators
+  ansible.builtin.set_fact:
+    platform_nfd_csvs: "{{ platform_csvs.resources | selectattr('metadata.name', 'match', '^nfd\\.') | list }}"
+    platform_gpu_csvs: "{{ platform_csvs.resources | selectattr('metadata.name', 'match', '^gpu-operator-certified\\.') | list }}"
+
+- name: Check that both operators are installed and healthy
+  ansible.builtin.assert:
+    that:
+      - platform_nfd_csvs | map(attribute='status.phase', default='') | list == ['Succeeded']
+      - platform_gpu_csvs | map(attribute='status.phase', default='') | list == ['Succeeded']
+    fail_msg: >-
+      Expected Node Feature Discovery and the NVIDIA GPU Operator to be installed and Succeeded,
+      as the RHDP OpenShift AI environment provides them. Found Node Feature Discovery:
+      {{ platform_nfd_csvs | map(attribute='status.phase', default='unknown') | join(', ') or 'not installed' }};
+      GPU Operator: {{ platform_gpu_csvs | map(attribute='status.phase', default='unknown') | join(', ') or 'not installed' }}.
+      This phase checks the GPU stack but does not install it (DD13).
+    quiet: true
+
+# The ClusterPolicy reports ready only after the driver is loaded and NVIDIA's own validator
+# has run a CUDA workload on the GPU, so no separate test pod is needed. A test pod would also
+# stay Pending on a rerun once the model holds the GPU.
+- name: Wait for the NVIDIA ClusterPolicy to be ready
+  kubernetes.core.k8s_info:
+    api_version: nvidia.com/v1
+    kind: ClusterPolicy
+  register: platform_clusterpolicy
+  until: platform_clusterpolicy.resources | map(attribute='status.state', default='') | list == ['ready']
+  retries: "{{ platform_gpu_ready_retries }}"
+  delay: "{{ platform_gpu_ready_delay }}"
+  failed_when: false
+
+- name: Report a ClusterPolicy that is not ready
+  ansible.builtin.assert:
+    that: platform_clusterpolicy.resources | map(attribute='status.state', default='') | list == ['ready']
+    fail_msg: >-
+      The NVIDIA ClusterPolicy is not ready (state:
+      {{ platform_clusterpolicy.resources | map(attribute='status.state', default='unknown') | join(', ') or 'no ClusterPolicy found' }}).
+      On a fresh environment the driver may still be compiling; rerun in a few minutes. Otherwise check the
+      pods in the namespace {{ platform_gpu_csvs[0].metadata.namespace }}.
+    quiet: true
+
+- name: Read the nodes
+  kubernetes.core.k8s_info:
+    kind: Node
+  register: platform_nodes
+
+- name: Count GPU nodes and allocatable GPUs
+  ansible.builtin.set_fact:
+    platform_gpu_nodes: >-
+      {{ platform_nodes.resources
+         | community.general.json_query('[?metadata.labels."nvidia.com/gpu.present" == `"true"`].metadata.name') }}
+    platform_gpu_count: >-
+      {{ platform_nodes.resources
+         | community.general.json_query('[].status.allocatable."nvidia.com/gpu"')
+         | map('int') | sum }}
+
+- name: Check that the GPU is labelled and advertised
+  ansible.builtin.assert:
+    that:
+      - platform_gpu_nodes | length > 0
+      - platform_gpu_count | int > 0
+    fail_msg: >-
+      No node advertises nvidia.com/gpu ({{ platform_gpu_nodes | length }} node(s) labelled
+      nvidia.com/gpu.present). Check the NVIDIA device plugin pods in {{ platform_gpu_csvs[0].metadata.namespace }}.
+    quiet: true
+
+- name: Record the GPU stack
+  ansible.builtin.set_fact:
+    platform_report: >-
+      {{ platform_report + [
+           'Node Feature Discovery ' ~ platform_nfd_csvs[0].spec.version ~ ', GPU Operator '
+           ~ platform_gpu_csvs[0].spec.version ~ ', ClusterPolicy ready, '
+           ~ platform_gpu_count ~ ' GPU(s) allocatable on ' ~ platform_gpu_nodes | join(', ')] }}

@@ -76,7 +76,7 @@ These decisions apply to the demonstration only. They do not change the referenc
 |---|---|---|
 | DD01 | The incident family is JVM memory exhaustion on a sample service. | The fault can be triggered on demand, its diagnostics are visible in standard metrics, and runbook advice is concrete. It can be replaced with a customer's own incident family where that family can be reproduced. |
 | DD02 | OpenShift user workload monitoring stands in for Dynatrace. | The technical architecture treats monitoring as a replaceable example (E). A Dynatrace trial is time-limited and unsuitable for a reusable kit. |
-| DD03 | The trigger is a push from a ServiceNow business rule to an EDA event stream. Polling through the `servicenow.itsm` collection is the fallback. | Push matches the reference flow. Polling avoids exposing an inbound route when the environment's ingress is not reachable from the internet (OI01). |
+| DD03 | The trigger is a push from a ServiceNow business rule to an EDA event stream. Polling through the `servicenow.itsm` collection is the documented fallback but is not built. | Push matches the reference flow. The environment's routes are reachable from the internet and present a publicly trusted certificate, so ServiceNow can call the event stream without a custom CA (OI01, closed). |
 | DD04 | The model is an 8B-class instruct model in FP8, served by vLLM on KServe using the single L4 GPU, and packaged as a ModelCar image. | It fits within the L4's memory with room for the required context. A ModelCar image avoids a model download on every rebuild. Final selection depends on a citation-adherence test (OI04). |
 | DD05 | Embeddings run in-process within the enrichment service on CPU. | The L4 does not support partitioning, so a second GPU-served model is not practical. The corpus is small enough for CPU embedding. |
 | DD06 | PostgreSQL with pgvector holds the knowledge index. | It is a single, well-understood store that Ansible can deploy and reset. It is recorded as an ADR09 deviation. |
@@ -86,6 +86,7 @@ These decisions apply to the demonstration only. They do not change the referenc
 | DD10 | All deployment and configuration is performed by Ansible playbooks, run through `ansible-navigator` with a shared execution environment. | The kit must be rebuildable on short-lived environments, and the build itself demonstrates the automation platform to the audience. |
 | DD11 | AAP and OpenShift AI share one node. | Section 5 of the technical architecture permits co-location as a deployment choice without changing the logical design. |
 | DD12 | Container images are sourced in this order: Red Hat Hardened Images where viable; otherwise a UBI-based image, from Red Hat or a certified partner in the Red Hat Ecosystem Catalog; other sources only where neither exists. An image is not viable if it would have to be rebuilt to add something essential, such as a database extension. Any image from the third tier is recorded here with the reason. | Hardened Images are minimal, signed and near zero-CVE, and UBI images carry Red Hat's supply-chain assurances. Keeping to the Red Hat portfolio also keeps the demo consistent with the platform it showcases. Current applications: Vault uses HashiCorp's UBI image because no Hardened Image exists; the enrichment and sample services are planned on Hardened Images, subject to verification in M2 and M3; the pgvector store is decided in M4 (OI05). |
+| DD13 | The build adopts the platform the environment provides and installs no operators in phase 01. Phase 01 frees the GPU, checks Node Feature Discovery, the GPU Operator and the default StorageClass, and configures user workload monitoring. If an expected component is missing, the phase stops with a clear message. Operators the environment does not provide, such as AAP, are installed in their own phases. | The RHDP OpenShift AI environment already provides the GPU stack and OpenShift AI (section 7.1). An install path for components it always provides would never run, so it would never be tested. Leaving pre-installed operators on their own channels avoids disturbing the environment's OpenShift AI configuration. |
 
 ## 4 Component view
 
@@ -248,11 +249,11 @@ The `aiops-enrichment` and `aiops-models` namespaces apply default-deny network 
 | Category | Examples | Source | Lifetime |
 |---|---|---|---|
 | Operator entitlements | OpenShift pull secret, AAP subscription manifest, registry token | Operator's Vault | Held by the operator; never shared |
-| Environment access | Cluster API URL and token | Operator's Vault, updated for each environment | One environment |
+| Environment access | Cluster API URL, token and CA bundle (the CA bundle is not secret) | Operator's Vault, updated for each environment | One environment |
 | ServiceNow administration | PDI URL and administrator credential, used only by phase 08 to create service identities | Operator's Vault | Held by the operator |
 | Generated | AAP administrator, database, gateway key, EDA token, ServiceNow service identity passwords | Generated by the playbooks; stored as Kubernetes Secrets | One build; ServiceNow identities are reset on every build |
 
-The build reads each secret group from the operator's Vault with its own AppRole, whose policy can read only that group, so a phase holds only the secrets it asks for. Secrets never appear in the repository, the execution environment, container images, prompts, work notes or traces. Every task that handles a secret uses `no_log`, `ansible-navigator` playbook artefacts are disabled in the committed configuration, and the repository uses a gitleaks pre-commit hook with GitHub secret scanning and push protection. In production, AAP retrieves credentials from the enterprise vault through its external secret management integration [7].
+The build reads each secret group from the operator's Vault with its own AppRole, whose policy can read only that group, so a phase holds only the secrets it asks for. Secrets never appear in the repository, the execution environment, container images, prompts, work notes or traces. Every task that handles a secret uses `no_log`, except Kubernetes tasks that receive the cluster token through `module_defaults`. `kubernetes.core` prints that token at verbosity 3 and above, so the secrets role refuses to resolve secrets at that verbosity instead. `ansible-navigator` playbook artefacts are disabled in the committed configuration, and the repository uses a gitleaks pre-commit hook with GitHub secret scanning and push protection. In production, AAP retrieves credentials from the enterprise vault through its external secret management integration [7].
 
 ## 7 Deployment view
 
@@ -270,6 +271,24 @@ The environment is single-node OpenShift on an AWS g6.16xlarge: 64 vCPUs, 256 Gi
 
 These are planning figures, to be replaced with measured values after the first build. The L4 is allocated to vLLM only. Generation of a work note is expected to take 10 to 20 seconds, which is acceptable because enrichment is asynchronous.
 
+### 7.1 Environment baseline
+
+The environment is the Red Hat Demo Platform (RHDP) OpenShift AI catalogue item. As provisioned in October 2026, it provides the following before the build starts. Phase 01 reports the same details on every build, so drift between environments shows up in its output.
+
+| Component | As provisioned | Effect on the build |
+|---|---|---|
+| OpenShift | 4.20, single node, g6.16xlarge, one L4 advertised as `nvidia.com/gpu: 1` with no time-slicing | Matches the sizing above |
+| Node Feature Discovery | 4.20, channel `stable` | Checked by phase 01, not installed (DD13) |
+| NVIDIA GPU Operator | 25.3.4, channel `v25.3` | Checked by phase 01, not installed (DD13) |
+| OpenShift AI | 3.5.1, channel `stable-3.x` | Configured by phase 02. The channel follows minor releases, so phase 02 checks for at least 3.5 and records the version it finds |
+| OpenShift Serverless, Authorino | 1.37.1, 1.4.3 | OpenShift AI dependencies, left as provisioned |
+| OpenShift Pipelines, cert-manager, JobSet, Red Hat build of Keycloak | 1.24.1, 1.20.1, 1.0.1, 26.4.16 | Not used by the demo, left as provisioned |
+| Sample model `my-first-model` | Holds the only GPU | Deleted by phase 01 (`demo_gpu_reclaimable_namespaces`) |
+| Default StorageClass | `gp3-csi` | Checked by phase 01 |
+| User workload monitoring | Not configured | Enabled by phase 01, with its own Alertmanager |
+| Ingress | Routes reachable from the internet with a publicly trusted certificate | Push trigger (DD03) |
+| API certificate | Signed by the cluster's own CA, not publicly trusted | The build verifies the API against the cluster's CA bundle (`kube-root-ca.crt`), loaded into Vault with the URL and token |
+
 ## 8 Build and redeploy model
 
 Environments stop automatically and expire after a fixed period, so the kit is rebuilt rather than maintained. Every phase is idempotent and safe to rerun, versions are pinned, and environment-specific values such as instance profile, model and incident family are set in inventory variables.
@@ -280,7 +299,7 @@ The no-scripting rule applies to deployment and configuration. The enrichment se
 |---|---|---|
 | 00 | `00_secrets.yml` | Vault container, KV engine, read-only policy and AppRole on the operator's laptop |
 | 00 | `00_preflight.yml` | Confirms every required secret and the cluster connection before any change |
-| 01 | `01_platform.yml` | Node Feature Discovery, GPU operator, storage and user workload monitoring |
+| 01 | `01_platform.yml` | Frees the GPU, checks Node Feature Discovery, the GPU Operator and storage, and enables user workload monitoring with its Alertmanager (DD13) |
 | 02 | `02_openshift_ai.yml` | OpenShift AI configuration, model serving, gateway subscription and tracing |
 | 03 | `03_aap.yml` | AAP operator, instance and subscription manifest |
 | 04 | `04_aap_content.yml` | Projects, credentials, job templates, workflow, catalogue and rulebook activations, declared with `infra.aap_configuration` |
@@ -364,7 +383,7 @@ Scenarios S1 to S5 are presented to the audience. `verify.yml` also checks the f
 
 | ID | Item | Needed by |
 |---|---|---|
-| OI01 | Confirm whether the environment's routes are reachable from ServiceNow, which decides push or polling for the trigger (DD03). If polling, confirm the event source in the `servicenow.itsm` version shipped in the execution environment. | Phase 08 |
+| OI01 | ~~Confirm whether the environment's routes are reachable from ServiceNow, which decides push or polling for the trigger (DD03).~~ Closed: routes are reachable from the internet and present a publicly trusted certificate, so the trigger is a push. | Phase 08 |
 | OI02 | Confirm the gateway capability and its configuration in OpenShift AI 3.5 as provisioned in the environment. | Phase 02 |
 | OI03 | Confirm whether OpenShift AI 3.5 provides MLflow tracing in the environment, or whether a standalone server is required. | Phase 02 |
 | OI04 | Select the model by testing citation adherence against a hand-built prompt and sample evidence. | Phase 02 |

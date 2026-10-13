@@ -22,7 +22,15 @@ demo_namespaces:
   tracing: aiops-tracing
   aap: aap
 
-# Trigger mode from ServiceNow to EDA (DD03): push or poll. Depends on OI01.
+# GPU freeing in phase 01 (DD13). The RHDP OpenShift AI environment ships a sample model that
+# holds the only GPU. Namespaces listed here are deleted if they hold it; any other holder
+# stops the build. Set demo_free_gpu to false to never delete anything.
+demo_free_gpu: true
+demo_gpu_reclaimable_namespaces:
+  - my-first-model
+
+# Trigger mode from ServiceNow to EDA (DD03): push or poll. OI01 is closed: the environment's
+# routes are reachable from the internet with a publicly trusted certificate, so push.
 demo_trigger_mode: push
 
 # Model selection (DD04). Final choice depends on the citation-adherence test (OI04).
@@ -40,10 +48,14 @@ demo_vault_mount: aiops-demo
 # Path to the local secrets file as seen from inside the execution environment (see docs/laptop-setup.md).
 demo_local_secrets_file: /runner/aiops-secrets/secrets.yml
 
-# Demo environments often present a self-signed API certificate. Set to false only if yours does.
+# The cluster API certificate is always verified: against the cluster's own CA when
+# aiops-demo/cluster holds api_ca_cert (RHDP environments need this, see docs/build-guide.md),
+# otherwise against the execution environment's trusted CAs. Set to false only as a last resort:
+# the cluster token would then be sent to a server that has not been verified.
 demo_cluster_validate_certs: true
 
-# Logical secret names mapped to Vault paths and keys. Preflight checks every entry.
+# Logical secret names mapped to Vault paths and keys. Preflight checks that every entry is set,
+# except those marked optional. api_ca_cert is not a secret, but it changes with each environment.
 demo_required_secrets:
   pull_secret: { path: entitlements, key: pull_secret }
   aap_manifest_b64: { path: entitlements, key: aap_manifest_b64 }
@@ -52,6 +64,7 @@ demo_required_secrets:
   registry_password: { path: entitlements, key: registry_password }
   cluster_api_url: { path: cluster, key: api_url }
   cluster_api_token: { path: cluster, key: api_token }
+  cluster_api_ca_cert: { path: cluster, key: api_ca_cert, optional: true }
   servicenow_instance_url: { path: servicenow, key: instance_url }
   servicenow_admin_username: { path: servicenow, key: admin_username }
   servicenow_admin_password: { path: servicenow, key: admin_password }

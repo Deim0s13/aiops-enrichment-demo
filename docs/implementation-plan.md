@@ -64,14 +64,14 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 | ID | Task | Closes |
 |---|---|---|
 | M1.1 | Draft phases 01, 02 and 03 before requesting the environment | |
-| M1.2 | Request the g6.16xlarge environment with a root volume of about 500 GB. Record what the environment provides out of the box: operators, storage class, OpenShift AI configuration and ingress | |
-| M1.3 | Phase 01: Node Feature Discovery, GPU operator, storage and user workload monitoring | |
+| M1.2 | ~~Request the g6.16xlarge environment with a root volume of about 500 GB. Record what the environment provides out of the box~~ Done: recorded in section 7.1 of the design. The GPU stack and OpenShift AI 3.5.1 are provided, so phase 01 checks rather than installs (DD13) | |
+| M1.3 | Phase 01: free the GPU, check Node Feature Discovery, the GPU Operator and storage, and enable user workload monitoring with its Alertmanager. Done: ran on the first environment (2026-10-14); user workload Prometheus and Alertmanager running, one GPU allocatable | |
 | M1.4 | Confirm the gateway capability and how a consumer subscription and key are created in OpenShift AI 3.5 | OI02 |
 | M1.5 | Confirm whether MLflow tracing is provided or a standalone server is needed | OI03 |
 | M1.6 | Test two or three candidate models for citation adherence, using a hand-built prompt with sample evidence and passages. Package the chosen model as a ModelCar image | OI04 |
 | M1.7 | Phase 02: model serving, gateway subscription for the enrichment service, and tracing | |
 | M1.8 | Phase 03: AAP operator, instance and manifest upload | |
-| M1.9 | Confirm whether the cluster's routes are reachable from the internet, which decides push or polling for the trigger | OI01 |
+| M1.9 | ~~Confirm whether the cluster's routes are reachable from the internet~~ Done: reachable, with a publicly trusted certificate, so the trigger is a push | OI01 |
 | M1.10 | Rebuild from empty and time each phase | |
 
 **Exit criteria:** a request with the enrichment service's gateway key returns a model response, and the same request with no key or a revoked key is refused. AAP is licensed and reachable. Phase timings are recorded in section 7 of the design.

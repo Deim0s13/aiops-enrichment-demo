@@ -1,9 +1,39 @@
 ---
-- name: "Phase 01 | Platform: Node Feature Discovery, GPU operator, storage, user workload monitoring"
+# Phase 01: frees the GPU, checks the GPU stack and storage the environment provides, and enables
+# user workload monitoring with its own Alertmanager. It installs no operators (DD13).
+#   ansible-navigator run playbooks/01_platform.yml
+#
+# Safe to rerun. Run preflight first: it reports a missing or expired cluster token clearly.
+
+- name: "Phase 01 | Platform: free the GPU, check the GPU stack and storage, enable user workload monitoring"
   hosts: localhost
   gather_facts: false
   tags: [platform]
+
+  # Every kubernetes.core module in this play authenticates with the cluster token. The secrets
+  # role refuses to run at -vvv, where kubernetes.core would print the token.
+  # Modules are listed one by one rather than as the group/kubernetes.core.k8s action group,
+  # because lint runs without collections installed and cannot resolve the group. Add any other
+  # kubernetes.core module this play starts using.
+  module_defaults:
+    kubernetes.core.k8s: &cluster_auth
+      host: "{{ secrets_values.cluster_api_url }}"
+      api_key: "{{ secrets_values.cluster_api_token }}"
+      validate_certs: "{{ demo_cluster_validate_certs }}"
+      ca_cert: "{{ secrets_cluster_ca_file | default(omit) }}"
+    kubernetes.core.k8s_info: *cluster_auth
+
   tasks:
-    - name: Report that phase 01 is not implemented yet
+    - name: Resolve the cluster secrets
+      ansible.builtin.include_role:
+        name: secrets
+      vars:
+        secrets_groups: [cluster]
+
+    - name: Free the GPU and check or configure the platform
+      ansible.builtin.include_role:
+        name: platform
+
+    - name: Report what phase 01 found and changed
       ansible.builtin.debug:
-        msg: "Phase 01 (platform) is a stub. See docs/implementation-design.md sections 7 and 8."
+        msg: "{{ platform_report }}"

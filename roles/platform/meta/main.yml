@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: Patrick Leathen
+  description: Free the GPU and check or configure the platform the demo environment provides
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: EL
+      versions: [all]
+dependencies: []

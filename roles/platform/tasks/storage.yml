@@ -1,0 +1,28 @@
+---
+# Every claim in the demo uses the default StorageClass, so there must be exactly one.
+
+- name: List storage classes
+  kubernetes.core.k8s_info:
+    api_version: storage.k8s.io/v1
+    kind: StorageClass
+  register: platform_storageclasses
+
+- name: Find the default storage class
+  ansible.builtin.set_fact:
+    platform_default_storageclasses: >-
+      {{ platform_storageclasses.resources
+         | community.general.json_query(
+             '[?metadata.annotations."storageclass.kubernetes.io/is-default-class" == `"true"`].metadata.name') }}
+
+- name: Check that there is exactly one default storage class
+  ansible.builtin.assert:
+    that: platform_default_storageclasses | length == 1
+    fail_msg: >-
+      Expected one default StorageClass, found {{ platform_default_storageclasses | length }}
+      ({{ platform_default_storageclasses | join(', ') or 'none' }}). Claims would stay Pending or bind unpredictably.
+      Storage classes available: {{ platform_storageclasses.resources | map(attribute='metadata.name') | join(', ') }}.
+    quiet: true
+
+- name: Record the storage result
+  ansible.builtin.set_fact:
+    platform_report: "{{ platform_report + ['Storage: default StorageClass ' ~ platform_default_storageclasses[0]] }}"

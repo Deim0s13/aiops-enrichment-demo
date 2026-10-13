@@ -38,7 +38,10 @@
     - name: Assess each secret without revealing its value
       ansible.builtin.set_fact:
         preflight_secret_checks:
-          missing: "{{ secrets_values | dict2items | selectattr('value', 'equalto', '') | map(attribute='key') | list }}"
+          missing: >-
+            {{ secrets_values | dict2items | selectattr('value', 'equalto', '') | map(attribute='key')
+               | reject('in', demo_required_secrets | dict2items | selectattr('value.optional', 'defined')
+                              | selectattr('value.optional') | map(attribute='key') | list) | list }}
           placeholder: "{{ secrets_values | dict2items | selectattr('value', 'search', 'REPLACE_WITH') | map(attribute='key') | list }}"
           pull_secret_ok: >-
             {{ secrets_values.pull_secret is search('"auths"')
@@ -52,6 +55,9 @@
           cluster_url_ok: >-
             {{ (not preflight_include_cluster | bool)
                or secrets_values.cluster_api_url | default('') is match('^https://api\.[^/]+:6443/?$') }}
+          cluster_ca_ok: >-
+            {{ secrets_values.cluster_api_ca_cert | default('') == ''
+               or secrets_values.cluster_api_ca_cert is search('-----BEGIN CERTIFICATE-----') }}
       no_log: true
 
     - name: Check that no secret is empty or still a placeholder
@@ -72,13 +78,15 @@
           - preflight_secret_checks.hub_token_ok
           - preflight_secret_checks.servicenow_url_ok
           - preflight_secret_checks.cluster_url_ok
+          - preflight_secret_checks.cluster_ca_ok
         fail_msg: >-
           Format problems:
           {{ ([] + (['pull_secret is not a pull secret JSON containing registry.redhat.io'] if not preflight_secret_checks.pull_secret_ok else [])
              + (['aap_manifest_b64 is not a base64-encoded zip file'] if not preflight_secret_checks.manifest_ok else [])
              + (['automation_hub_token looks too short to be an offline token'] if not preflight_secret_checks.hub_token_ok else [])
              + (['servicenow instance_url should look like https://devNNNNNN.service-now.com'] if not preflight_secret_checks.servicenow_url_ok else [])
-             + (['cluster api_url should look like https://api.<cluster domain>:6443'] if not preflight_secret_checks.cluster_url_ok else [])) | join('; ') }}.
+             + (['cluster api_url should look like https://api.<cluster domain>:6443'] if not preflight_secret_checks.cluster_url_ok else [])
+             + (['cluster api_ca_cert is not a PEM certificate bundle'] if not preflight_secret_checks.cluster_ca_ok else [])) | join('; ') }}.
         success_msg: All secrets are in the expected format.
 
     - name: Check that the Red Hat credentials work, not just their format
@@ -220,6 +228,7 @@
           ansible.builtin.uri:
             url: "{{ secrets_values.cluster_api_url | regex_replace('/$', '') }}/version"
             validate_certs: "{{ demo_cluster_validate_certs }}"
+            ca_path: "{{ secrets_cluster_ca_file | default(omit) }}"
             status_code: [200, 401, 403]
             timeout: 15
           register: preflight_cluster_ping
@@ -232,8 +241,11 @@
               Cannot reach the cluster API at {{ secrets_values.cluster_api_url }}
               ({{ preflight_cluster_ping.msg | default('no response') | truncate(250) }}).
               Check that the environment is running and that aiops-demo/cluster holds its current API URL.
-              {{ 'The API presents a certificate that is not trusted; if that is expected for this environment,
-                 set demo_cluster_validate_certs to false.'
+              {{ ('The API certificate is not signed by the CA bundle in aiops-demo/cluster api_ca_cert.
+                  Load the CA of the current environment as in step 3 of docs/build-guide.md.'
+                  if secrets_cluster_ca_file is defined else
+                  'The API presents a certificate signed by a CA that is not publicly trusted. Load the
+                  CA of the cluster into aiops-demo/cluster api_ca_cert as in step 3 of docs/build-guide.md.')
                  if 'CERTIFICATE_VERIFY_FAILED' in (preflight_cluster_ping.msg | default('')) else '' }}
             quiet: true
 
@@ -242,6 +254,7 @@
             host: "{{ secrets_values.cluster_api_url }}"
             api_key: "{{ secrets_values.cluster_api_token }}"
             validate_certs: "{{ demo_cluster_validate_certs }}"
+            ca_cert: "{{ secrets_cluster_ca_file | default(omit) }}"
             api_version: config.openshift.io/v1
             kind: ClusterVersion
             name: version
@@ -263,6 +276,7 @@
             host: "{{ secrets_values.cluster_api_url }}"
             api_key: "{{ secrets_values.cluster_api_token }}"
             validate_certs: "{{ demo_cluster_validate_certs }}"
+            ca_cert: "{{ secrets_cluster_ca_file | default(omit) }}"
             kind: Node
           register: preflight_nodes
 
@@ -272,8 +286,9 @@
               version: "{{ preflight_cluster_version.resources[0].status.desired.version | default('unknown') }}"
               nodes: "{{ preflight_nodes.resources | length }}"
               instance_types: >-
-                {{ preflight_nodes.resources | map(attribute='metadata.labels')
-                   | map('extract', 'node.kubernetes.io/instance-type') | map('default', 'unknown') | unique | list }}
+                {{ preflight_nodes.resources
+                   | map(attribute='metadata.labels') | map('community.general.json_query', '"node.kubernetes.io/instance-type"')
+                   | map('default', 'unknown', true) | unique | list }}
 
         - name: Report the environment
           ansible.builtin.debug:

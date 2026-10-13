@@ -1,0 +1,20 @@
+---
+# Phase 01. Frees the GPU, then checks and configures what the RHDP OpenShift AI environment
+# provides. It installs no operators (DD13): if the GPU stack is missing, it stops and says so.
+# Cluster access comes from the module_defaults the calling play sets.
+
+- name: Start the phase report
+  ansible.builtin.set_fact:
+    platform_report: []
+
+- name: Free the GPU
+  ansible.builtin.include_tasks: gpu_free.yml
+
+- name: Check the GPU stack
+  ansible.builtin.include_tasks: gpu_stack.yml
+
+- name: Check storage
+  ansible.builtin.include_tasks: storage.yml
+
+- name: Configure user workload monitoring
+  ansible.builtin.include_tasks: monitoring.yml

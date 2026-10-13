@@ -23,6 +23,7 @@ All data is fictional: a fictional organisation, ACME Bank, with fictional servi
 - [Implementation design](docs/implementation-design.md): how the demo implements the reference architecture, what it simplifies, and the acceptance criteria
 - [Implementation plan](docs/implementation-plan.md): milestones, tasks and exit criteria
 - [Laptop setup](docs/laptop-setup.md): tools, Vault, secrets and preflight
+- [Build guide](docs/build-guide.md): building the demo on each new demo environment
 - [Security and secrets](SECURITY.md): how secrets are handled and the rules for contributors
 - [Contributing](CONTRIBUTING.md)
 
@@ -84,7 +85,7 @@ ansible-playbook playbooks/00_secrets.yml          # starts and configures Vault
 source ~/.config/aiops-demo/approle.env
 ansible-navigator run playbooks/00_preflight.yml -e preflight_include_cluster=false
 
-# For each new demo environment (phases 01 onwards are not implemented yet)
+# For each new demo environment: see docs/build-guide.md (phase 01 is implemented; 02 onwards are not yet)
 ansible-navigator run site.yml                     # full build
 ansible-navigator run site.yml --tags platform     # or one phase at a time
 ansible-navigator run verify.yml                   # check the acceptance criteria

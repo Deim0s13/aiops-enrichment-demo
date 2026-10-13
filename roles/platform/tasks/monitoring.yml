@@ -1,0 +1,29 @@
+---
+# User workload monitoring stands in for Dynatrace (DD02). Its settings live in two ConfigMaps
+# that other teams may also use, so the demo's settings are merged in, never overwritten.
+
+- name: Merge the demo's settings into each monitoring ConfigMap
+  ansible.builtin.include_tasks: monitoring_config.yml
+  loop: "{{ platform_monitoring_settings }}"
+  loop_control:
+    loop_var: platform_monitoring_item
+    label: "{{ platform_monitoring_item.namespace }}/{{ platform_monitoring_item.name }}"
+
+- name: Wait for user workload Prometheus and Alertmanager to be ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: StatefulSet
+    namespace: openshift-user-workload-monitoring
+    name: "{{ item }}"
+  register: platform_uwm_statefulset
+  until: >-
+    platform_uwm_statefulset.resources | length == 1
+    and (platform_uwm_statefulset.resources[0].status.readyReplicas | default(0)) > 0
+    and platform_uwm_statefulset.resources[0].status.readyReplicas == platform_uwm_statefulset.resources[0].spec.replicas
+  retries: "{{ platform_monitoring_ready_retries }}"
+  delay: "{{ platform_monitoring_ready_delay }}"
+  loop: "{{ platform_monitoring_statefulsets }}"
+
+- name: Record the monitoring result
+  ansible.builtin.set_fact:
+    platform_report: "{{ platform_report + ['Monitoring: user workload Prometheus and Alertmanager ready'] }}"

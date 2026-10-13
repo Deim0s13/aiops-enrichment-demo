@@ -1,0 +1,32 @@
+---
+# How long to wait. On a fresh environment the NVIDIA driver may still be compiling, which can
+# take 10 to 20 minutes, so the ClusterPolicy wait is long.
+platform_gpu_ready_retries: 60
+platform_gpu_ready_delay: 20
+platform_gpu_release_retries: 12
+platform_gpu_release_delay: 10
+platform_namespace_delete_timeout: 600
+platform_monitoring_ready_retries: 30
+platform_monitoring_ready_delay: 10
+
+# JMESPath query: namespaces of pods with a container that requests a GPU.
+platform_gpu_request_query: '[?spec.containers[?resources.requests."nvidia.com/gpu"]].metadata.namespace'
+
+# Settings merged into the monitoring ConfigMaps. Existing settings are kept.
+# The first enables user workload monitoring; the second gives it its own Alertmanager and lets
+# namespaces route their alerts with AlertmanagerConfig resources (DD02, phase 05).
+platform_monitoring_settings:
+  - namespace: openshift-monitoring
+    name: cluster-monitoring-config
+    settings:
+      enableUserWorkload: true
+  - namespace: openshift-user-workload-monitoring
+    name: user-workload-monitoring-config
+    settings:
+      alertmanager:
+        enabled: true
+        enableAlertmanagerConfig: true
+
+platform_monitoring_statefulsets:
+  - prometheus-user-workload
+  - alertmanager-user-workload

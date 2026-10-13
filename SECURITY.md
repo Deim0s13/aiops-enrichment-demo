@@ -29,7 +29,7 @@ Secrets are read from a KV version 2 engine mounted at `aiops-demo`:
 | Path | Keys |
 |---|---|
 | `aiops-demo/entitlements` | `pull_secret`, `aap_manifest_b64`, `automation_hub_token`, `registry_username`, `registry_password` |
-| `aiops-demo/cluster` | `api_url`, `api_token` |
+| `aiops-demo/cluster` | `api_url`, `api_token`, and optionally `api_ca_cert` (the cluster's CA bundle, which is not a secret but changes with each environment) |
 | `aiops-demo/servicenow` | `instance_url`, `admin_username`, `admin_password` |
 
 ## Without Vault
@@ -42,9 +42,11 @@ Set `demo_secrets_backend: local` and copy `secrets.example.yml` to `~/.config/a
 - **A local pre-commit hook blocks any `debug` task that references `secrets_values`**, the fact that holds every resolved secret. A troubleshooting `debug` is the easiest way to leak everything at once.
 - **CI** runs the same checks on every push and pull request.
 - **GitHub secret scanning and push protection** are enabled once the repository is public.
-- **`no_log: true`** is set on every task that handles a secret, so values stay out of console output and AAP job logs. Where `no_log` would also hide a useful error, the playbooks run a separate check that involves no secret, so the error can be shown safely. Secret handling is tested at maximum verbosity (`-vvv`) to confirm no value appears in the output.
+- **`no_log: true`** is set on every task that handles a secret, so values stay out of console output and AAP job logs. Where `no_log` would also hide a useful error, the playbooks run a separate check that involves no secret, so the error can be shown safely. Secret handling is tested at maximum verbosity (`-vvv`), with throwaway values, to confirm no value appears in the output.
+- **No secrets at `-vvv` and above.** Ansible prints each module's arguments at that verbosity, and `kubernetes.core` prints the cluster token among them, even when the task succeeds. The cluster phases pass the token to every Kubernetes task through `module_defaults`, so hiding each task with `no_log` would also hide every error. Instead, the `secrets` role refuses to resolve secrets at verbosity 3 or higher. Debug with `-vv`. `secrets_allow_debug_verbosity=true` overrides this, for throwaway credentials only.
 - **ansible-navigator playbook artefacts are disabled** in the committed configuration, because they record every variable, including secrets.
 - **The execution environment and container images contain no secrets.** Credentials are supplied at run time.
+- **The cluster API certificate is always verified**, against the cluster's own CA bundle when one is loaded, so the cluster token is only sent to the real cluster. Turning verification off (`demo_cluster_validate_certs=false`) is a last resort.
 - **`.gitignore`** excludes the common secret file names, but it is a safety net, not a control.
 
 ## Content rules

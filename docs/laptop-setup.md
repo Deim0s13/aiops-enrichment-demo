@@ -36,7 +36,9 @@ podman machine start
 podman login registry.redhat.io
 podman login registry.connect.redhat.com
 
-python3 -m venv ~/.venvs/aiops-demo
+# ansible-core does not yet support Python 3.15, Homebrew's current python3, so pin 3.14
+brew install python@3.14
+python3.14 -m venv ~/.venvs/aiops-demo
 source ~/.venvs/aiops-demo/bin/activate
 pip install ansible-core ansible-navigator ansible-builder pre-commit
 
@@ -93,13 +95,7 @@ v kv put -mount=aiops-demo servicenow instance_url=https://devNNNNNN.service-now
 read -rs T && printf %s "$T" | v kv patch -mount=aiops-demo servicenow admin_password=- ; unset T
 ```
 
-**Cluster.** Skip this until you have a demo environment (milestone M1), and repeat it for each new environment.
-
-```bash
-v kv put -mount=aiops-demo cluster api_url=https://api.<cluster domain>:6443
-oc login --web https://api.<cluster domain>:6443     # or however your environment provides access
-oc whoami -t | v kv patch -mount=aiops-demo cluster api_token=-
-```
+**Cluster.** Skip this for now. The cluster secrets change with every demo environment, so they are loaded as part of each build: see step 3 of [build-guide.md](build-guide.md).
 
 Check what is stored without showing values, then drop the root token from your session:
 
@@ -185,7 +181,7 @@ unset VAULT_TOKEN
 source ~/.config/aiops-demo/approle.env
 ```
 
-Then update the cluster secrets (step 3) and rerun preflight.
+Then load the cluster secrets and rerun preflight, as described in [build-guide.md](build-guide.md).
 
 ## Without Vault
 
@@ -207,12 +203,14 @@ ansible-navigator run playbooks/00_preflight.yml \
 
 | Symptom | Cause and fix |
 |---|---|
+| `AttributeError: module 'dataclasses' has no attribute '_is_type'` | The virtual environment uses a Python that ansible-core does not support yet, usually after Homebrew upgrades `python3`. Recreate it with Python 3.14, as in step 1 |
+| "This run uses verbosity 3" | Secrets are not resolved at `-vvv` and above, because some modules print credentials at that verbosity (see SECURITY.md). Use `-vv` |
 | Preflight: "Cannot reach Vault at http://host.containers.internal:8200" | The Vault container is not running (`podman ps`), or the Podman machine is stopped. On Linux, `host.containers.internal` may not reach a port bound to `127.0.0.1`: set `AIOPS_VAULT_ADDR=http://127.0.0.1:8200` and add `--execution-environment-container-options="--net=host"` |
 | "Vault is sealed" | The laptop or Podman machine restarted. Unseal as above |
 | "Vault refused the ... AppRole login" or "approle.env has no credentials for ..." | The secret IDs expired or were rotated, or `approle.env` was not sourced in this terminal. Issue new ones as above |
 | "The ServiceNow PDI looks like it is hibernating" | Wake it at developer.servicenow.com. PDIs hibernate after a period without use and are reclaimed if left long enough |
 | "ServiceNow did not accept the administrator credentials" | The PDI password changes when an instance is reclaimed or upgraded. Update `aiops-demo/servicenow` |
-| "The API presents a certificate that is not trusted" | The demo environment uses a self-signed API certificate. Add `-e demo_cluster_validate_certs=false` |
+| "The API presents a certificate signed by a CA that is not publicly trusted" | Load the cluster's CA bundle, as in step 3 of [build-guide.md](build-guide.md) |
 | "registry.redhat.io rejected registry_username and registry_password" | The registry service account was deleted or its token regenerated. Check it at access.redhat.com/terms-based-registry and update `aiops-demo/entitlements` |
 | "Red Hat single sign-on rejected automation_hub_token" | The offline token expired after 30 days without use. Generate a new one and update it in Vault |
 | Execution environment build fails to download collections | The Automation Hub token has expired. Run preflight to confirm, then generate a new one and update it in Vault |

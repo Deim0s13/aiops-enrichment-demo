@@ -1,0 +1,44 @@
+---
+# Called once per entry in platform_monitoring_settings. Reads the ConfigMap, if it exists,
+# merges the demo's settings into its config.yaml and writes it back only if something changed.
+# Rewriting config.yaml drops any comments in it; the settings themselves are kept.
+
+- name: Read {{ platform_monitoring_item.name }}
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    namespace: "{{ platform_monitoring_item.namespace }}"
+    name: "{{ platform_monitoring_item.name }}"
+  register: platform_monitoring_cm
+
+- name: Merge the demo's settings into the current configuration
+  ansible.builtin.set_fact:
+    platform_monitoring_current: >-
+      {{ ((platform_monitoring_cm.resources | first | default({})).data | default({}))['config.yaml']
+         | default('') | from_yaml | default({}, true) }}
+
+- name: Work out the merged configuration
+  ansible.builtin.set_fact:
+    platform_monitoring_merged: >-
+      {{ platform_monitoring_current | combine(platform_monitoring_item.settings, recursive=true) }}
+
+- name: Write {{ platform_monitoring_item.name }}
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ platform_monitoring_item.name }}"
+        namespace: "{{ platform_monitoring_item.namespace }}"
+      data:
+        config.yaml: "{{ platform_monitoring_merged | to_nice_yaml(indent=2) }}"
+  when: platform_monitoring_merged != platform_monitoring_current
+
+- name: Record the result for {{ platform_monitoring_item.name }}
+  ansible.builtin.set_fact:
+    platform_report: >-
+      {{ platform_report + ['Monitoring: ' ~ platform_monitoring_item.name ~ ' '
+         ~ ('created' if not platform_monitoring_cm.resources
+            else 'updated' if platform_monitoring_merged != platform_monitoring_current
+            else 'already set')] }}
