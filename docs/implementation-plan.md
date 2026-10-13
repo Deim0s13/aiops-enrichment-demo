@@ -38,13 +38,13 @@ The playbooks are written in this repository and run from the operator's laptop 
 | M0.5 | Implement `00_secrets.yml`: Vault container, KV engine, read-only policy and AppRole. Load the personal secrets by hand | |
 | M0.6 | Implement `00_preflight.yml` and the `secrets` role, with both the Vault and local backends | |
 | M0.7 | Confirm the execution environment base image for AAP 2.7, then build the execution environment and pin the collection versions that resolve | |
-| M0.8 | Name the fictional organisation and its services | OI07 |
-| M0.9 | Confirm licence and publication approval for sharing the repository | OI09 |
-| M0.10 | Ask the ops team whether their highest-volume incident family can be reproduced | OI08 |
+| M0.8 | ~~Name the fictional organisation and its services~~ Done: ACME Bank | OI07 |
+| M0.9 | ~~Confirm publication approval~~ Done: private in the author's GitHub under Apache 2.0, shared with colleagues as collaborators; going public is a later decision | OI09 |
+| M0.10 | ~~Ask the ops team whether their incident family can be reproduced~~ Done: keep DD01; design a second family in M5 | OI08 |
 
 **Exit criteria:** preflight passes on the laptop against Vault, with no environment yet. The execution environment builds.
 
-**Status: complete (2026-10-13)**, except M0.8 to M0.10, which are decisions rather than build tasks and are not needed before M1. Preflight passes on the operator's laptop against Vault, inside the execution environment, with live checks of the registry, Automation Hub and ServiceNow credentials.
+**Status: complete (2026-10-13).** Preflight passes on the operator's laptop against Vault, inside the execution environment, with live checks of the registry, Automation Hub and ServiceNow credentials.
 
 Lessons from the first real run, now reflected in the code and the setup guide:
 
@@ -161,9 +161,9 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 | M6.4 | Record a fallback video of the full run | |
 | M6.5 | Prepare the leadership calculation: evidence-gathering minutes per incident, multiplied by monthly incident volume, with the baseline left for the customer to fill in | |
 | M6.6 | Have a colleague build and run the demo from the README alone | |
-| M6.7 | Security review, then make the repository public and enable secret scanning and push protection | OI09 |
+| M6.7 | Final secret and content review, so the repository is ready to make public if and when that is decided | |
 
-**Exit criteria:** a colleague completes a build and a full run without help, and the repository is public.
+**Exit criteria:** a colleague completes a build and a full run without help.
 
 **Estimate:** 1.5 days.
 

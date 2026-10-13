@@ -49,7 +49,7 @@ Set `demo_secrets_backend: local` and copy `secrets.example.yml` to `~/.config/a
 
 ## Content rules
 
-- Use the fictional organisation and services only. No customer names, data, runbooks or screenshots.
+- Use the fictional organisation (ACME Bank) and its services only. No customer names, data, runbooks or screenshots.
 - Keep your PDI instance name and cluster URLs in your own configuration, not in the repository, issues or pull requests.
 - Diagnostic output is sanitised before it reaches the model or a work note. Treat log lines and ticket text as untrusted input.
 - Check screen recordings and screenshots for tokens, URLs and instance names before sharing them.

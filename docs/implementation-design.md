@@ -16,7 +16,7 @@ The demonstration has two purposes. It shows an operations and automation audien
 
 The reference architecture sets level 1 as the pilot target. The demonstration also shows level 2, because a recommended, catalogued job is the point at which enrichment becomes tangible for an automation team, and it needs no additional control components.
 
-All data in the demonstration is fictional. It uses a fictional organisation, fictional services and a synthetic knowledge corpus, and contains no customer material. For the same reason, this document and the repository refer to the reference architecture in its generic form rather than any customer-specific version.
+All data in the demonstration is fictional. It uses a fictional organisation, ACME Bank, with fictional services and a synthetic knowledge corpus, and contains no customer material. For the same reason, this document and the repository refer to the reference architecture in its generic form rather than any customer-specific version.
 
 | In scope | Out of scope (described, not built) |
 |---|---|
@@ -370,9 +370,9 @@ Scenarios S1 to S5 are presented to the audience. `verify.yml` also checks the f
 | OI04 | Select the model by testing citation adherence against a hand-built prompt and sample evidence. | Phase 02 |
 | OI05 | Confirm that pgvector is available in the chosen supported PostgreSQL image. | Phase 06 |
 | OI06 | Confirm that an AAP subscription manifest can be obtained for demo environments. | Phase 03 |
-| OI07 | Name the fictional organisation and its services for the corpus and demo data. | Phase 06 |
-| OI08 | Confirm whether the audience's own highest-volume incident family can be reproduced, as a replacement for DD01. | Before corpus authoring |
-| OI09 | Confirm licence and publication approval for sharing the repository. | First commit |
+| OI07 | ~~Name the fictional organisation and its services for the corpus and demo data.~~ Closed: the organisation is ACME Bank; service names are chosen with the corpus. | Phase 06 |
+| OI08 | ~~Confirm whether the audience's own highest-volume incident family can be reproduced, as a replacement for DD01.~~ Closed: DD01 (JVM memory exhaustion) stands; a second reproducible family is designed in M5. | Before corpus authoring |
+| OI09 | ~~Confirm licence and publication approval.~~ Closed: a personal learning and demonstration kit, kept private in the author's GitHub under Apache 2.0 and shared with colleagues as collaborators. Making it public is a later decision, once the kit is mature, and follows the review in M6.7. | Not applicable |
 
 ## Related documents and references
 

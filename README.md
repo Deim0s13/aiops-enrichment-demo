@@ -16,7 +16,7 @@ The whole environment is built and configured with Ansible playbooks, so it can 
 | Scaling | A second incident family is added with new Ansible content and runbooks only |
 | Traceability | Any work note can be followed to its model trace, prompt version and sources |
 
-All data is fictional: a fictional organisation, fictional services and a synthetic knowledge corpus.
+All data is fictional: a fictional organisation, ACME Bank, with fictional services and a synthetic knowledge corpus.
 
 ## Documentation
 

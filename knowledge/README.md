@@ -1,6 +1,6 @@
 # Knowledge corpus
 
-Synthetic runbooks and prior resolutions for the fictional organisation. The corpus is designed to test retrieval, not just to answer the happy path (implementation design section 5.6).
+Synthetic runbooks and prior resolutions for ACME Bank, the fictional organisation. The corpus is designed to test retrieval, not just to answer the happy path (implementation design section 5.6).
 
 Each document is Markdown with a metadata header. Ingestion stores these labels with every passage and filters on them before anything reaches the model.
 

@@ -10,7 +10,7 @@ This repository builds a demonstration of AI-assisted incident enrichment on Ope
 - Never rely on a module to mask secrets in its own output. Check new secret-handling tasks at `-vvv`.
 - Use fully qualified collection names and name every play and task. Code must pass `pre-commit run --all-files`.
 - Add any new non-builtin module to `mock_modules` in `.ansible-lint`, and lint in an environment without collections installed, as pre-commit and CI do.
-- Use fictional organisation and service names only.
+- Use fictional organisation and service names only: the organisation is ACME Bank.
 - Keep `playbooks/` (build phases, run from a laptop) separate from `automation/` and `rulebooks/` (content AAP runs).
 - Documentation uses British English and does not use em dashes.
 - If a change departs from the implementation design, update the design in the same change and say why.
