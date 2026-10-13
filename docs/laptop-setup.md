@@ -113,20 +113,32 @@ Once the downloads are in Vault, delete the pull secret and manifest from `~/Dow
 
 ## 4 Build the execution environment
 
-The build uses the registry login from step 1. It pulls the AAP 2.7 minimal execution environment image and installs certified collections from Automation Hub. The Automation Hub token is passed as a build argument used only in the collection download stage, so it does not reach the final image.
+The build pulls the AAP 2.7 minimal execution environment image and installs certified collections from Automation Hub. It uses the registry login from step 1.
+
+The Automation Hub token reaches the build as a build argument named on the command line **without a value**. Podman then reads the value from your environment. This matters: `ansible-builder` prints the full `podman build` command before running it, so a token passed as `NAME=value` would appear in your terminal. The token is declared only in the collection download stage, which is not part of the final image.
+
+Run these one line at a time:
 
 ```bash
 read -rs VAULT_TOKEN && export VAULT_TOKEN
 export ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN=$(v kv get -mount=aiops-demo -field=automation_hub_token entitlements)
-unset VAULT_TOKEN
-
-ansible-builder build \
-  -f execution-environment/execution-environment.yml \
-  -t localhost/aiops-demo-ee:latest \
-  --build-arg ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN="$ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN"
-
-unset ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN
+unset VAULT_TOKEN; echo ${#ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN}
 ```
+
+The last line prints the token's length, not the token: expect several hundred characters. If it prints `0`, stop and check Vault.
+
+```bash
+ansible-builder build -f execution-environment/execution-environment.yml -t localhost/aiops-demo-ee:latest --build-arg ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN
+```
+
+Then remove the token from your session and the intermediate build images, which can record build argument values in their history:
+
+```bash
+unset ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN
+podman image prune -f
+```
+
+Never pass the token as `--build-arg ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN="$ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN"`. That form puts the value in the printed command.
 
 This image runs on your laptop, so on Apple silicon it is built for arm64. AAP in the cluster will need an amd64 image, which is handled in milestone M2.
 

@@ -44,7 +44,16 @@ The playbooks are written in this repository and run from the operator's laptop 
 
 **Exit criteria:** preflight passes on the laptop against Vault, with no environment yet. The execution environment builds.
 
-**Progress:** M0.5 and M0.6 are implemented and tested against a real OpenBao server (same API as Vault), covering first run, restart and unseal, secret ID rotation, the read-only policy, both secrets backends, every failure message, and a check at `-vvv` that no secret value appears in the output. The Podman container steps and the live ServiceNow check are untested until they run on a laptop. M0.7: the base image name is confirmed; the build and version pinning remain. The operator steps are in [laptop-setup.md](laptop-setup.md).
+**Status: complete (2026-10-13)**, except M0.8 to M0.10, which are decisions rather than build tasks and are not needed before M1. Preflight passes on the operator's laptop against Vault, inside the execution environment, with live checks of the registry, Automation Hub and ServiceNow credentials.
+
+Lessons from the first real run, now reflected in the code and the setup guide:
+
+- `ansible-builder` prints the full `podman build` command, so a build argument passed as `NAME=value` exposes its value. The Automation Hub token is now passed by name only, and Podman reads it from the environment. The exposed token was revoked.
+- The AAP 2.7 execution environment repository publishes no `latest` tag. The base image is pinned to `2.20-1790991048` (ansible-core 2.20).
+- ansible-builder must use `/usr/bin/python3.12` explicitly, because system packages installed during the build can redirect `/usr/bin/python3` to a Python without `pip`.
+- `ansible.eda` requests `systemd-python`, which cannot compile in the minimal image and is not needed. It is excluded.
+- Setting `collections_path` in `ansible.cfg` replaces the default search path, so it must include the execution environment's `/usr/share/ansible/collections`.
+- Collection versions are pinned to those the first build resolved.
 
 **Estimate:** 1 day, mostly waiting on entitlements.
 

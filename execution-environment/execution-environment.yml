@@ -1,20 +1,35 @@
 ---
-# Build (see docs/laptop-setup.md, step 4):
+# Build (see docs/laptop-setup.md, step 4), with the token exported in your environment:
 #   ansible-builder build -f execution-environment/execution-environment.yml -t localhost/aiops-demo-ee:latest \
-#     --build-arg ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN="$ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN"
+#     --build-arg ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN
+# Name the build argument WITHOUT a value: Podman reads it from the environment. ansible-builder
+# prints the full podman command, so NAME=value would expose the token in your terminal.
 # Needs a registry.redhat.io login. The image contains dependencies only, never secrets: the
 # Automation Hub token is declared only in the galaxy stage, which is not part of the final image.
 version: 3
 
 images:
   base_image:
-    # Image name confirmed from the AAP 2.7 container advisory (RHSA-2026:42142), amd64 and arm64.
-    # Pin to a digest after the first successful build.
-    name: registry.redhat.io/ansible-automation-platform-27/ee-minimal-rhel9:latest
+    # AAP 2.7 minimal execution environment, ansible-core 2.20 stream. This repository publishes no
+    # 'latest' tag, so the build is pinned. Tags are <ansible-core>-<build>; a higher build number is
+    # newer. List them with:
+    #   podman search --list-tags --limit 200 registry.redhat.io/ansible-automation-platform-27/ee-minimal-rhel9
+    name: registry.redhat.io/ansible-automation-platform-27/ee-minimal-rhel9:2.20-1790991048
 
 dependencies:
+  # Use the image's own Python by full path. ansible-builder installs system packages that collections
+  # request between its build steps, and RHEL 9's default python3 (3.9, without pip) can take over the
+  # /usr/bin/python3 name, which made 'python3 -m pip' fail. Ansible in this image runs on 3.12.
+  python_interpreter:
+    python_path: /usr/bin/python3.12
   galaxy: ../collections/requirements.yml
   python: requirements.txt
+  exclude:
+    python:
+      # Requested by a collection (ansible.eda, for reading the systemd journal), which this kit does
+      # not use. It compiles from source and needs Python headers the minimal image does not have.
+      # The leading ~ makes this a regular expression, matching either spelling of the name.
+      - "~systemd[-_]python"
 
 additional_build_files:
   - src: ../ansible.cfg

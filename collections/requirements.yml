@@ -1,15 +1,26 @@
 ---
 # Used by the execution environment build and by AAP project sync.
-# Versions are unpinned until the first successful build, then pinned (CONTRIBUTING.md).
+# Pinned to the versions the first successful execution environment build resolved (2026-10-13).
 # Certified collections (marked) come from Automation Hub and need your own token.
+# ansible.hub and community.library_inventory_filtering_v1 are installed as dependencies.
 collections:
   - name: ansible.controller          # certified
+    version: "==4.8.11"
   - name: ansible.platform            # certified
+    version: "==2.7.20260930"
   - name: ansible.eda                 # certified
+    version: "==2.13.0"
   - name: infra.aap_configuration
+    version: "==4.10.0"
   - name: kubernetes.core
+    version: "==6.6.0"
   - name: redhat.openshift            # certified
+    version: "==6.0.0"
   - name: servicenow.itsm             # certified
+    version: "==2.16.0"
   - name: community.hashi_vault
+    version: "==7.1.0"
   - name: community.general
+    version: "==13.5.0"
   - name: ansible.utils
+    version: "==6.1.1"
