@@ -1,0 +1,13 @@
+---
+# Shared PostgreSQL for the demo (DD06): one instance, a database and user per consumer.
+postgres_namespace: "{{ demo_namespaces.data }}"
+postgres_name: postgres
+postgres_image: "{{ demo_images.postgresql }}"
+postgres_databases: "{{ demo_postgres_databases }}"
+postgres_storage_size: 20Gi
+
+# Generated once, on the first build, and kept in this Secret for the life of the environment.
+postgres_credentials_secret: postgres-credentials
+
+postgres_ready_retries: 30
+postgres_ready_delay: 10

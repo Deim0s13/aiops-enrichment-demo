@@ -66,10 +66,10 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 | M1.1 | Draft phases 01, 02 and 03 before requesting the environment | |
 | M1.2 | ~~Request the g6.16xlarge environment with a root volume of about 500 GB. Record what the environment provides out of the box~~ Done: recorded in section 7.1 of the design. The GPU stack and OpenShift AI 3.5.1 are provided, so phase 01 checks rather than installs (DD13) | |
 | M1.3 | Phase 01: free the GPU, check Node Feature Discovery, the GPU Operator and storage, and enable user workload monitoring with its Alertmanager. Done: ran on the first environment (2026-10-14); user workload Prometheus and Alertmanager running, one GPU allocatable | |
-| M1.4 | Confirm the gateway capability and how a consumer subscription and key are created in OpenShift AI 3.5 | OI02 |
-| M1.5 | Confirm whether MLflow tracing is provided or a standalone server is needed | OI03 |
-| M1.6 | Test two or three candidate models for citation adherence, using a hand-built prompt with sample evidence and passages. Package the chosen model as a ModelCar image | OI04 |
-| M1.7 | Phase 02: model serving, gateway subscription for the enrichment service, and tracing | |
+| M1.4 | ~~Confirm the gateway capability~~ Done: Models-as-a-Service (DD14). Key issuance confirmed (2026-10-14): the build mints the enrichment service's key with the service account's own token, without the dashboard | OI02 |
+| M1.5 | ~~Confirm whether MLflow tracing is provided~~ Done: the `mlflowoperator` component | OI03 |
+| M1.6 | Test two or three candidate models for citation adherence, using a hand-built prompt with sample evidence and passages. Phase 02 serves Granite 3.1 8B as the starting point; the test is a separate playbook that serves each candidate's validated FP8 ModelCar in turn and calls it through MaaS with the same evidence and prompt | OI04 |
+| M1.7 | Phase 02, in three parts: (1) OpenShift AI version check and Red Hat Connectivity Link, with the reusable operator role; (2) PostgreSQL, the MaaS gateway, and enabling MaaS and MLflow; (3) the model, its subscription, the enrichment service's API key and access checks. Parts 1 and 2 done (2026-10-14): Connectivity Link, PostgreSQL, the MaaS gateway, and MaaS and MLflow enabled. Part 2b, the MLflow server, done the same day. Part 3 done (2026-10-14): Granite served on the L4, the enrichment service's policy, subscription and key, and the access checks passing through the gateway | |
 | M1.8 | Phase 03: AAP operator, instance and manifest upload | |
 | M1.9 | ~~Confirm whether the cluster's routes are reachable from the internet~~ Done: reachable, with a publicly trusted certificate, so the trigger is a push | OI01 |
 | M1.10 | Rebuild from empty and time each phase | |
@@ -79,6 +79,20 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 **Estimate:** 2 days.
 
 **Decision point:** if the rebuild takes much longer than 90 minutes, decide whether to accept it, cache more (for example, mirror operator images) or split the build so the slow phases run once per environment.
+
+**Progress and lessons so far (2026-10-14).** Phases 01 and 02 (parts 1, 2 and 2b) run on the first environment. Lessons:
+
+- The environment is the RHDP OpenShift AI catalogue item and already provides the GPU stack and OpenShift AI (design section 7.1), so phase 01 checks rather than installs (DD13).
+- The cluster API uses a certificate from the cluster's own CA. The build verifies it against `kube-root-ca.crt`, loaded into Vault with the URL and token, rather than turning verification off.
+- `kubernetes.core` 6.6.0 prints the cluster token at `-vvv`, even on success. The `secrets` role refuses to run at that verbosity.
+- `kubernetes.core.k8s_exec` fails to import with current Kubernetes Python clients, so in-cluster setup runs as Jobs.
+- PostgreSQL clients that have a CA file configured treat `sslmode=require` as `verify-ca`. MLflow's does, so it is given the OpenShift service CA and connects with `verify-full`.
+- The single-node API server occasionally drops a connection; the DataScienceCluster patch retries.
+- Red Hat image tags for `rhel9/postgresql-16` are build timestamps; the list also contains digest-named signature entries.
+- MaaS keeps a model `Pending` ("Awaiting governance pairing") until an active auth policy and subscription both cover it, so the build waits for MaaS to accept the model only after creating them. The simulated MaaS used to test the build accepted models on its own, which hid this; simulations should copy the product's gating, not only its happy path.
+- MaaS publishes each model under an ID of the form `publishers/NAMESPACE/models/NAME` and routes the shared `/v1/chat/completions` endpoint on the request's `model` field before checking the key, so a wrong model name gets a 404 even without a key. The build reads the ID and URL from MaaS's model list, as a client would, and stores them with the key.
+- A missing MaaS key is refused with 401 and a revoked one with 403; the checks accept either.
+- Looping a later task over a Kubernetes task's registered results prints the cluster token at `-vv`, because each item carries the module invocation. Such results are reduced to the fields needed first.
 
 ### M2 Thin end to end
 
@@ -209,7 +223,7 @@ These need personal accounts or the environment, so they cannot be prepared in a
 
 | Risk | Effect | Response |
 |---|---|---|
-| The gateway in the environment does not support per-consumer keys as assumed | The kill switch and attribution story weakens | Confirm in M1.4. Fall back to an API key enforced in front of vLLM, and record it as a deviation from ADR06 |
+| Models-as-a-Service cannot be built reliably on the single node, or keys cannot be issued by a playbook | The kill switch and attribution story weakens | Fall back to a service account token on the `LLMInferenceService`, and record it as a deviation from ADR06 |
 | A small model does not keep to citations or resists prompt injection poorly | The trust scenario fails | Test early (M1.6), keep two candidates, and rely on service-side validation rather than the model |
 | The cluster is not reachable from ServiceNow | Push trigger cannot work | Polling fallback (DD03), decided in M1.9 |
 | Rebuild time is too long for the environment lifetime | Less time for building and rehearsal | Measure in M1.10 and act at the decision point |

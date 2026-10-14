@@ -1,0 +1,107 @@
+---
+# Part 3 of phase 02, first half: the model (DD04), served by vLLM on the L4 as an
+# LLMInferenceService and published to Models-as-a-Service (DD14).
+# The Red Hat vLLM image and its start-up command come from OpenShift AI's default
+# LLMInferenceServiceConfig, so nothing here names an OpenShift AI version.
+
+- name: Create the models namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ demo_namespaces.models }}"
+
+# The gateway reference puts the model behind the MaaS gateway, so every call is checked against
+# a MaaS API key and counted against a subscription. Without it, the model would be served on the
+# standard gateway and MaaS would not apply.
+- name: Deploy the model
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: serving.kserve.io/v1alpha2
+      kind: LLMInferenceService
+      metadata:
+        name: "{{ demo_model.name }}"
+        namespace: "{{ demo_namespaces.models }}"
+        annotations:
+          openshift.io/display-name: "{{ demo_model.display_name }}"
+      spec:
+        model:
+          uri: "{{ demo_model.modelcar_image }}"
+          name: "{{ demo_model.name }}"
+        replicas: 1
+        router:
+          route: {}
+          gateway:
+            refs:
+              - name: "{{ openshift_ai_maas_gateway_name }}"
+                namespace: openshift-ingress
+        template:
+          containers:
+            - name: main
+              env:
+                - name: VLLM_ADDITIONAL_ARGS
+                  value: "--max-model-len={{ demo_model.max_model_len }}"
+              resources:
+                requests:
+                  cpu: "{{ openshift_ai_model_cpu }}"
+                  memory: "{{ openshift_ai_model_memory }}"
+                  nvidia.com/gpu: "1"
+                limits:
+                  memory: "{{ openshift_ai_model_memory_limit }}"
+                  nvidia.com/gpu: "1"
+
+- name: Wait for the model to be ready
+  kubernetes.core.k8s_info:
+    api_version: serving.kserve.io/v1alpha2
+    kind: LLMInferenceService
+    namespace: "{{ demo_namespaces.models }}"
+    name: "{{ demo_model.name }}"
+  register: openshift_ai_model
+  until: >-
+    (openshift_ai_model.resources | first | default({})).status.conditions | default([])
+    | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length > 0
+  retries: "{{ openshift_ai_model_ready_retries }}"
+  delay: "{{ openshift_ai_model_ready_delay }}"
+  failed_when: false
+
+- name: Report a model that is not ready
+  ansible.builtin.assert:
+    that: >-
+      (openshift_ai_model.resources | first | default({})).status.conditions | default([])
+      | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length > 0
+    fail_msg: >-
+      The model {{ demo_model.name }} is not ready:
+      {{ (openshift_ai_model.resources | first | default({})).status.conditions | default([])
+         | selectattr('status', 'equalto', 'False') | map(attribute='message', default='')
+         | select | join('; ') or 'no status yet' }}.
+      Check the pod with: oc get pods -n {{ demo_namespaces.models }}, and its log for vLLM errors.
+    quiet: true
+
+# MaaS keeps the reference Pending ("Awaiting governance pairing") until an auth policy and a
+# subscription both cover the model, so no model is exposed before someone has decided who may use
+# it and how much. access.yml creates the pair and then waits for MaaS to accept the model.
+- name: Register the model with Models-as-a-Service
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaaSModelRef
+      metadata:
+        name: "{{ demo_model.name }}"
+        namespace: "{{ demo_namespaces.models }}"
+        annotations:
+          openshift.io/display-name: "{{ demo_model.display_name }}"
+          opendatahub.io/genai-use-case: chat
+          opendatahub.io/context-window: "{{ demo_model.max_model_len | string }}"
+      spec:
+        modelRef:
+          kind: LLMInferenceService
+          name: "{{ demo_model.name }}"
+
+- name: Record the model result
+  ansible.builtin.set_fact:
+    openshift_ai_report: >-
+      {{ openshift_ai_report + ['Model: ' ~ demo_model.name ~ ' ready on the GPU and registered with MaaS'] }}

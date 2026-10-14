@@ -1,0 +1,45 @@
+---
+# Kuadrant is the policy layer of Red Hat Connectivity Link. MaaS uses it, through Authorino and
+# Limitador, to check API keys and enforce token rate limits at the gateway (DD14).
+openshift_ai_kuadrant_namespace: kuadrant-system
+openshift_ai_kuadrant_api_version: kuadrant.io/v1beta1
+openshift_ai_kuadrant_ready_retries: 30
+openshift_ai_kuadrant_ready_delay: 10
+
+# Models-as-a-Service (DD14). The gateway name, namespace and annotations are fixed by MaaS.
+openshift_ai_maas_gateway_name: maas-default-gateway
+openshift_ai_maas_gateway_class: openshift-default
+# The gateway answers on <prefix>.<apps domain>, which the environment's trusted *.apps
+# certificate covers. OpenShift creates the DNS record for a gateway hostname.
+openshift_ai_maas_hostname_prefix: maas
+# MaaS reads its database connection from maas-db-config in this namespace (the 3.5 default).
+openshift_ai_maas_infra_namespace: redhat-ai-gateway-infra
+openshift_ai_maas_ready_retries: 60
+openshift_ai_maas_ready_delay: 10
+
+# MLflow (DD07). One server per cluster, run by the operator in this namespace. Metadata goes to the
+# shared PostgreSQL; artifacts go to a volume, because the environment has no S3-compatible storage.
+openshift_ai_mlflow_namespace: redhat-ods-applications
+openshift_ai_mlflow_storage_size: 10Gi
+openshift_ai_mlflow_ready_retries: 60
+openshift_ai_mlflow_ready_delay: 10
+
+# Model serving (DD04). The first start pulls the vLLM image and the ModelCar (several GB each)
+# and loads the model onto the GPU, so the wait is long.
+openshift_ai_model_ready_retries: 90
+openshift_ai_model_ready_delay: 20
+openshift_ai_model_cpu: "4"
+openshift_ai_model_memory: 16Gi
+openshift_ai_model_memory_limit: 24Gi
+
+# MaaS resources for the enrichment service. Policies and subscriptions live in the tenant namespace.
+openshift_ai_maas_tenant_namespace: models-as-a-service
+openshift_ai_maas_key_secret: maas-api-key
+# How long to wait for MaaS to accept the model, the policy and the subscription.
+openshift_ai_maas_resource_retries: 30
+openshift_ai_maas_resource_delay: 10
+# Callers verify the gateway's certificate; it is the environment's publicly trusted *.apps one.
+openshift_ai_maas_validate_certs: true
+# Revocation takes effect when Authorino's cache of the key expires.
+openshift_ai_maas_revoke_retries: 24
+openshift_ai_maas_revoke_delay: 5

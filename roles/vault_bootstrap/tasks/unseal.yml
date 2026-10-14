@@ -20,6 +20,24 @@
           for example: read -rs AIOPS_VAULT_UNSEAL_KEY && export AIOPS_VAULT_UNSEAL_KEY
         quiet: true
 
+    # Common slips: pasting the root token (which starts with hvs.) or the key with its JSON quotes.
+    # Assessed with no_log, then reported without the value.
+    - name: Assess the unseal key without revealing it
+      ansible.builtin.set_fact:
+        vault_bootstrap_unseal_key_problem: >-
+          {{ 'it is the root token (it starts with hvs.), not the unseal key'
+             if vault_bootstrap_unseal_key is match('hvs\.')
+             else 'it contains quotes or a comma; paste the bare key without them'
+             if vault_bootstrap_unseal_key is search('[",]')
+             else '' }}
+      no_log: true
+
+    - name: Check that the value is an unseal key
+      ansible.builtin.assert:
+        that: vault_bootstrap_unseal_key_problem | length == 0
+        fail_msg: "AIOPS_VAULT_UNSEAL_KEY is not usable: {{ vault_bootstrap_unseal_key_problem }}."
+        quiet: true
+
     - name: Submit the unseal key
       ansible.builtin.uri:
         url: "{{ vault_bootstrap_api }}/v1/sys/unseal"

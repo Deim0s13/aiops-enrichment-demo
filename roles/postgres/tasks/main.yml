@@ -1,0 +1,336 @@
+---
+# Shared PostgreSQL (DD06). One instance in postgres_namespace, with TLS from the OpenShift service
+# CA, and a database and user for each entry in postgres_databases. Passwords are generated on the
+# first build and stay in a Secret in the cluster (SECURITY.md, "Generated"). Safe to rerun, and
+# adding a database to the list adds it on the next run.
+# Cluster access comes from the module_defaults the calling play sets.
+
+- name: Check that the PostgreSQL image is pinned
+  ansible.builtin.assert:
+    that: postgres_image is not search('REPLACE_WITH|:latest$')
+    fail_msg: >-
+      demo_images.postgresql is '{{ postgres_image }}'. Pin it to a tag; see the build guide for how to
+      list the available tags.
+    quiet: true
+
+- name: Create the namespace for PostgreSQL
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ postgres_namespace }}"
+
+# --- Credentials -------------------------------------------------------------------------------
+
+- name: Read the existing credentials
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ postgres_namespace }}"
+    name: "{{ postgres_credentials_secret }}"
+  register: postgres_existing_credentials
+  no_log: true
+
+- name: Work out which passwords are missing
+  ansible.builtin.set_fact:
+    postgres_missing_passwords: >-
+      {{ (['admin'] + postgres_databases)
+         | reject('in', ((postgres_existing_credentials.resources | first | default({})).data | default({})).keys() | list)
+         | list }}
+
+# The password lookup with /dev/null generates a value without writing it anywhere. It runs once
+# per missing password, inside the loop, so each password is different.
+- name: Generate the missing passwords
+  ansible.builtin.set_fact:
+    postgres_new_passwords: >-
+      {{ postgres_new_passwords | default({}) | combine({item: lookup('ansible.builtin.password', '/dev/null',
+                                                                       length=32, chars=['ascii_letters', 'digits'])}) }}
+  loop: "{{ postgres_missing_passwords }}"
+  no_log: true
+
+- name: Store the new passwords in the cluster
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ postgres_credentials_secret }}"
+        namespace: "{{ postgres_namespace }}"
+      type: Opaque
+      stringData: "{{ postgres_new_passwords }}"
+  when: postgres_missing_passwords | length > 0
+  no_log: true
+
+- name: Forget the new passwords
+  ansible.builtin.set_fact:
+    postgres_new_passwords: {}
+
+# --- Configuration -----------------------------------------------------------------------------
+
+# The service CA issues a certificate for this Service into the postgres-tls Secret. MaaS
+# connects with sslmode=require.
+- name: Create the PostgreSQL service
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: "{{ postgres_name }}"
+        namespace: "{{ postgres_namespace }}"
+        annotations:
+          service.beta.openshift.io/serving-cert-secret-name: "{{ postgres_name }}-tls"
+      spec:
+        selector:
+          app: "{{ postgres_name }}"
+        ports:
+          - name: postgresql
+            port: 5432
+            targetPort: 5432
+
+# The Red Hat image includes every *.conf file in /opt/app-root/src/postgresql-cfg.
+- name: Create the PostgreSQL configuration
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ postgres_name }}-config"
+        namespace: "{{ postgres_namespace }}"
+      data:
+        tls.conf: |
+          ssl = on
+          ssl_cert_file = '/etc/postgres-tls/tls.crt'
+          ssl_key_file = '/etc/postgres-tls/tls.key'
+
+# Idempotent SQL: create each role and database if missing, and set the role's password from
+# the pod's environment through a psql variable, so no password appears in this file or in
+# the command that runs it.
+- name: Create the database setup script
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ postgres_name }}-setup"
+        namespace: "{{ postgres_namespace }}"
+      data:
+        setup.sql: |
+          {% for db in postgres_databases %}
+          SELECT format('CREATE ROLE %I LOGIN', '{{ db }}') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ db }}')\gexec
+          ALTER ROLE "{{ db }}" WITH LOGIN PASSWORD :'{{ db }}_pw';
+          SELECT format('CREATE DATABASE %I OWNER %I', '{{ db }}', '{{ db }}') WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{{ db }}')\gexec
+          REVOKE ALL ON DATABASE "{{ db }}" FROM PUBLIC;
+          {% endfor %}
+
+- name: Create the PostgreSQL volume
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: "{{ postgres_name }}-data"
+        namespace: "{{ postgres_namespace }}"
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: "{{ postgres_storage_size }}"
+
+# --- Server ------------------------------------------------------------------------------------
+
+# Passwords reach the container from the Secret by reference, never as values in this play.
+- name: Start the container environment with the administrator password
+  ansible.builtin.set_fact:
+    postgres_container_env:
+      - name: POSTGRESQL_ADMIN_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: "{{ postgres_credentials_secret }}"
+            key: admin
+
+- name: Add each database password to the container environment
+  ansible.builtin.set_fact:
+    postgres_container_env: >-
+      {{ postgres_container_env + [{'name': item | upper ~ '_DB_PASSWORD',
+                                    'valueFrom': {'secretKeyRef': {'name': postgres_credentials_secret, 'key': item}}}] }}
+  loop: "{{ postgres_databases }}"
+
+- name: Deploy PostgreSQL
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "{{ postgres_name }}"
+        namespace: "{{ postgres_namespace }}"
+        labels:
+          app: "{{ postgres_name }}"
+      spec:
+        replicas: 1
+        strategy:
+          type: Recreate
+        selector:
+          matchLabels:
+            app: "{{ postgres_name }}"
+        template:
+          metadata:
+            labels:
+              app: "{{ postgres_name }}"
+          spec:
+            containers:
+              - name: postgresql
+                image: "{{ postgres_image }}"
+                ports:
+                  - containerPort: 5432
+                env: "{{ postgres_container_env }}"
+                readinessProbe:
+                  exec:
+                    command: [pg_isready, -h, 127.0.0.1]
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                livenessProbe:
+                  exec:
+                    command: [pg_isready, -h, 127.0.0.1]
+                  initialDelaySeconds: 30
+                  periodSeconds: 20
+                resources:
+                  requests:
+                    cpu: 250m
+                    memory: 512Mi
+                  limits:
+                    memory: 1Gi
+                volumeMounts:
+                  - name: data
+                    mountPath: /var/lib/pgsql/data
+                  - name: config
+                    mountPath: /opt/app-root/src/postgresql-cfg
+                  - name: setup
+                    mountPath: /opt/app-root/src/aiops-setup
+                  - name: tls
+                    mountPath: /etc/postgres-tls
+                    readOnly: true
+            volumes:
+              - name: data
+                persistentVolumeClaim:
+                  claimName: "{{ postgres_name }}-data"
+              - name: config
+                configMap:
+                  name: "{{ postgres_name }}-config"
+              - name: setup
+                configMap:
+                  name: "{{ postgres_name }}-setup"
+              # PostgreSQL refuses a key that others can read. Mode 416 is octal 0640, which it
+              # accepts for a key owned by root.
+              - name: tls
+                secret:
+                  secretName: "{{ postgres_name }}-tls"
+                  defaultMode: 416
+
+- name: Wait for PostgreSQL to be ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ postgres_namespace }}"
+    name: "{{ postgres_name }}"
+  register: postgres_deployment
+  until: >-
+    (postgres_deployment.resources | first | default({})).status.readyReplicas | default(0) == 1
+    and (postgres_deployment.resources | first).status.updatedReplicas | default(0) == 1
+  retries: "{{ postgres_ready_retries }}"
+  delay: "{{ postgres_ready_delay }}"
+
+# --- Databases ---------------------------------------------------------------------------------
+
+# A Job runs the setup script against the server over TLS, as the administrator. Passwords reach
+# it from the Secret as environment variables, and bash hands them to psql as variables, so they
+# never appear in the Job definition or its command. Rerun on every build; the script is
+# idempotent.
+- name: Remove the previous database setup job
+  kubernetes.core.k8s:
+    state: absent
+    api_version: batch/v1
+    kind: Job
+    namespace: "{{ postgres_namespace }}"
+    name: "{{ postgres_name }}-setup"
+    delete_options:
+      propagationPolicy: Foreground
+    wait: true
+
+- name: Run the database setup job
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: "{{ postgres_name }}-setup"
+        namespace: "{{ postgres_namespace }}"
+      spec:
+        backoffLimit: 3
+        template:
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: setup
+                image: "{{ postgres_image }}"
+                command:
+                  - bash
+                  - -c
+                  - >-
+                    psql "host={{ postgres_name }}.{{ postgres_namespace }}.svc sslmode=require user=postgres dbname=postgres"
+                    -v ON_ERROR_STOP=1
+                    {% for db in postgres_databases %}-v {{ db }}_pw="${{ db | upper }}_DB_PASSWORD" {% endfor %}
+                    -f /opt/app-root/src/aiops-setup/setup.sql
+                env: >-
+                  {{ [{'name': 'PGPASSWORD', 'valueFrom': {'secretKeyRef': {'name': postgres_credentials_secret, 'key': 'admin'}}}]
+                     + postgres_container_env[1:] }}
+                resources:
+                  requests:
+                    cpu: 50m
+                    memory: 64Mi
+                volumeMounts:
+                  - name: setup
+                    mountPath: /opt/app-root/src/aiops-setup
+            volumes:
+              - name: setup
+                configMap:
+                  name: "{{ postgres_name }}-setup"
+
+- name: Wait for the database setup job
+  kubernetes.core.k8s_info:
+    api_version: batch/v1
+    kind: Job
+    namespace: "{{ postgres_namespace }}"
+    name: "{{ postgres_name }}-setup"
+  register: postgres_setup_job
+  until: >-
+    (postgres_setup_job.resources | first | default({})).status.succeeded | default(0) > 0
+    or (postgres_setup_job.resources | first | default({})).status.failed | default(0) > 3
+  retries: "{{ postgres_ready_retries }}"
+  delay: "{{ postgres_ready_delay }}"
+  failed_when: false
+
+- name: Report a database setup job that did not succeed
+  ansible.builtin.assert:
+    that: (postgres_setup_job.resources | first | default({})).status.succeeded | default(0) > 0
+    fail_msg: >-
+      The database setup job did not succeed. Check its log with:
+      oc logs job/{{ postgres_name }}-setup -n {{ postgres_namespace }}
+    quiet: true
+
+- name: Record the PostgreSQL result
+  ansible.builtin.set_fact:
+    postgres_host: "{{ postgres_name }}.{{ postgres_namespace }}.svc"
+    postgres_port: 5432
+    postgres_report: >-
+      PostgreSQL ready at {{ postgres_name }}.{{ postgres_namespace }}.svc with databases
+      {{ postgres_databases | join(', ') }}{{ ' (created ' ~ postgres_missing_passwords | reject('equalto', 'admin') | join(', ') ~ ')'
+         if postgres_missing_passwords | reject('equalto', 'admin') | list else '' }}

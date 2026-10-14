@@ -1,0 +1,298 @@
+---
+# Part 2 of phase 02: the MaaS gateway, TLS between the gateway and Authorino, the MaaS database
+# connection, and switching on MaaS and MLflow in the DataScienceCluster. Follows the order in
+# "Govern LLM access with Models-as-a-Service" for OpenShift AI 3.5 (DD14).
+
+# --- Gateway -----------------------------------------------------------------------------------
+
+- name: Read the cluster's application domain
+  kubernetes.core.k8s_info:
+    api_version: config.openshift.io/v1
+    kind: Ingress
+    name: cluster
+  register: openshift_ai_ingress_config
+
+- name: Read the default router certificate
+  kubernetes.core.k8s_info:
+    api_version: operator.openshift.io/v1
+    kind: IngressController
+    namespace: openshift-ingress-operator
+    name: default
+  register: openshift_ai_ingresscontroller
+
+# Reusing the router's *.apps certificate means callers trust the gateway without a custom CA.
+# On RHDP it is publicly trusted; without a custom certificate, OpenShift's own is used instead.
+- name: Work out the gateway hostname and certificate
+  ansible.builtin.set_fact:
+    openshift_ai_maas_hostname: "{{ openshift_ai_maas_hostname_prefix }}.{{ openshift_ai_ingress_config.resources[0].spec.domain }}"
+    openshift_ai_maas_certificate: >-
+      {{ (openshift_ai_ingresscontroller.resources[0].spec.defaultCertificate | default({})).name
+         | default('router-certs-default') }}
+
+- name: Look for the gateway class
+  kubernetes.core.k8s_info:
+    api_version: gateway.networking.k8s.io/v1
+    kind: GatewayClass
+    name: "{{ openshift_ai_maas_gateway_class }}"
+  register: openshift_ai_gatewayclass
+
+# A GatewayClass's controller cannot be changed once set, so an existing one is left alone.
+- name: Create the gateway class for the OpenShift gateway controller
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: GatewayClass
+      metadata:
+        name: "{{ openshift_ai_maas_gateway_class }}"
+      spec:
+        controllerName: openshift.io/gateway-controller/v1
+  when: openshift_ai_gatewayclass.resources | length == 0
+
+# The annotations are required by MaaS: the first stops OpenShift AI overriding MaaS's
+# authorisation policies, the second has MaaS configure TLS between the gateway and Authorino.
+- name: Create the MaaS gateway
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: Gateway
+      metadata:
+        name: "{{ openshift_ai_maas_gateway_name }}"
+        namespace: openshift-ingress
+        annotations:
+          opendatahub.io/managed: "false"
+          security.opendatahub.io/authorino-tls-bootstrap: "true"
+      spec:
+        gatewayClassName: "{{ openshift_ai_maas_gateway_class }}"
+        listeners:
+          - name: https
+            hostname: "{{ openshift_ai_maas_hostname }}"
+            port: 443
+            protocol: HTTPS
+            tls:
+              mode: Terminate
+              certificateRefs:
+                - group: ""
+                  kind: Secret
+                  name: "{{ openshift_ai_maas_certificate }}"
+            # Only the MaaS API (in the infrastructure namespace) and the demo's models may attach
+            # routes to this gateway.
+            allowedRoutes:
+              namespaces:
+                from: Selector
+                selector:
+                  matchExpressions:
+                    - key: kubernetes.io/metadata.name
+                      operator: In
+                      values:
+                        - "{{ openshift_ai_maas_infra_namespace }}"
+                        - "{{ demo_namespaces.models }}"
+
+- name: Wait for the MaaS gateway to be programmed
+  kubernetes.core.k8s_info:
+    api_version: gateway.networking.k8s.io/v1
+    kind: Gateway
+    namespace: openshift-ingress
+    name: "{{ openshift_ai_maas_gateway_name }}"
+  register: openshift_ai_maas_gateway
+  until: >-
+    (openshift_ai_maas_gateway.resources | first | default({})).status.conditions | default([])
+    | selectattr('type', 'equalto', 'Programmed') | selectattr('status', 'equalto', 'True') | list | length > 0
+  retries: "{{ openshift_ai_maas_ready_retries }}"
+  delay: "{{ openshift_ai_maas_ready_delay }}"
+  failed_when: false
+
+- name: Report a gateway that is not programmed
+  ansible.builtin.assert:
+    that: >-
+      (openshift_ai_maas_gateway.resources | first | default({})).status.conditions | default([])
+      | selectattr('type', 'equalto', 'Programmed') | selectattr('status', 'equalto', 'True') | list | length > 0
+    fail_msg: >-
+      The MaaS gateway is not programmed:
+      {{ (openshift_ai_maas_gateway.resources | first | default({})).status.conditions | default([])
+         | map(attribute='message', default='') | select | join('; ') or 'no status yet' }}.
+      Check it with: oc describe gateway {{ openshift_ai_maas_gateway_name }} -n openshift-ingress
+    quiet: true
+
+# --- TLS between the gateway and Authorino -----------------------------------------------------
+
+# The service CA issues Authorino a certificate, Authorino serves its authorisation API over TLS,
+# and trusts the service CA when it calls out. The gateway annotation above completes the setup.
+- name: Ask the service CA for an Authorino certificate
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: authorino-authorino-authorization
+        namespace: "{{ openshift_ai_kuadrant_namespace }}"
+        annotations:
+          service.beta.openshift.io/serving-cert-secret-name: authorino-server-cert
+
+- name: Wait for the Authorino certificate
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ openshift_ai_kuadrant_namespace }}"
+    name: authorino-server-cert
+  register: openshift_ai_authorino_cert
+  until: openshift_ai_authorino_cert.resources | length == 1
+  retries: 12
+  delay: 5
+  failed_when: false
+  no_log: true
+
+- name: Report a missing Authorino certificate
+  ansible.builtin.assert:
+    that: openshift_ai_authorino_cert.resources | length == 1
+    fail_msg: >-
+      The service CA has not issued authorino-server-cert in {{ openshift_ai_kuadrant_namespace }}.
+      Check the annotation with: oc get service authorino-authorino-authorization -n {{ openshift_ai_kuadrant_namespace }} -o yaml
+    quiet: true
+
+- name: Serve the Authorino authorisation API over TLS
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: operator.authorino.kuadrant.io/v1beta1
+      kind: Authorino
+      metadata:
+        name: authorino
+        namespace: "{{ openshift_ai_kuadrant_namespace }}"
+      spec:
+        listener:
+          tls:
+            enabled: true
+            certSecretRef:
+              name: authorino-server-cert
+
+- name: Read the Authorino deployment
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ openshift_ai_kuadrant_namespace }}"
+    name: authorino
+  register: openshift_ai_authorino_deployment
+
+- name: Have Authorino trust the service CA
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: authorino
+        namespace: "{{ openshift_ai_kuadrant_namespace }}"
+      spec:
+        template:
+          spec:
+            containers:
+              - name: "{{ openshift_ai_authorino_deployment.resources[0].spec.template.spec.containers[0].name }}"
+                env:
+                  - name: SSL_CERT_FILE
+                    value: /etc/ssl/certs/openshift-service-ca/service-ca-bundle.crt
+                  - name: REQUESTS_CA_BUNDLE
+                    value: /etc/ssl/certs/openshift-service-ca/service-ca-bundle.crt
+
+# --- Database connection -----------------------------------------------------------------------
+
+- name: Create the MaaS infrastructure namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ openshift_ai_maas_infra_namespace }}"
+
+- name: Read the MaaS database password
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ postgres_namespace }}"
+    name: "{{ postgres_credentials_secret }}"
+  register: openshift_ai_postgres_credentials
+  no_log: true
+
+# Must exist before MaaS is enabled; otherwise maas-api needs a restart to pick it up.
+- name: Give MaaS its database connection
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: maas-db-config
+        namespace: "{{ openshift_ai_maas_infra_namespace }}"
+      type: Opaque
+      stringData:
+        DB_CONNECTION_URL: >-
+          postgresql://maas:{{ openshift_ai_postgres_credentials.resources[0].data.maas | b64decode }}@{{
+          postgres_host }}:{{ postgres_port }}/maas?sslmode=require
+  no_log: true
+
+# --- Switch on MaaS and MLflow -----------------------------------------------------------------
+
+- name: Find the DataScienceCluster
+  kubernetes.core.k8s_info:
+    api_version: datasciencecluster.opendatahub.io/v2
+    kind: DataScienceCluster
+  register: openshift_ai_dsc
+
+# A merge patch: only these fields change; the environment's other component settings stay.
+- name: Enable Models-as-a-Service and MLflow
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: datasciencecluster.opendatahub.io/v2
+      kind: DataScienceCluster
+      metadata:
+        name: "{{ openshift_ai_dsc.resources[0].metadata.name }}"
+      spec:
+        components:
+          aigateway:
+            managementState: Managed
+            modelsAsAService:
+              managementState: Managed
+          mlflowoperator:
+            managementState: Managed
+  # The single-node API server occasionally drops a connection mid-request; the patch is safe to repeat.
+  register: openshift_ai_dsc_patch
+  until: openshift_ai_dsc_patch is not failed
+  retries: 3
+  delay: 10
+
+- name: Wait for Models-as-a-Service to be ready
+  kubernetes.core.k8s_info:
+    api_version: datasciencecluster.opendatahub.io/v2
+    kind: DataScienceCluster
+    name: "{{ openshift_ai_dsc.resources[0].metadata.name }}"
+  register: openshift_ai_dsc_status
+  until: >-
+    (openshift_ai_dsc_status.resources | first | default({})).status.conditions | default([])
+    | selectattr('type', 'equalto', 'ModelsAsAServiceReady') | selectattr('status', 'equalto', 'True') | list | length > 0
+  retries: "{{ openshift_ai_maas_ready_retries }}"
+  delay: "{{ openshift_ai_maas_ready_delay }}"
+  failed_when: false
+
+- name: Report Models-as-a-Service that is not ready
+  ansible.builtin.assert:
+    that: >-
+      (openshift_ai_dsc_status.resources | first | default({})).status.conditions | default([])
+      | selectattr('type', 'equalto', 'ModelsAsAServiceReady') | selectattr('status', 'equalto', 'True') | list | length > 0
+    fail_msg: >-
+      Models-as-a-Service is not ready:
+      {{ (openshift_ai_dsc_status.resources | first | default({})).status.conditions | default([])
+         | selectattr('type', 'equalto', 'ModelsAsAServiceReady') | map(attribute='message', default='')
+         | select | join('; ') or 'no ModelsAsAServiceReady condition yet' }}.
+      Check it with: oc get datasciencecluster -o yaml
+    quiet: true
+
+- name: Record the Models-as-a-Service result
+  ansible.builtin.set_fact:
+    openshift_ai_report: >-
+      {{ openshift_ai_report + [postgres_report,
+           'MaaS gateway: https://' ~ openshift_ai_maas_hostname ~ ' (certificate ' ~ openshift_ai_maas_certificate ~ ')',
+           'Models-as-a-Service: ready'] }}

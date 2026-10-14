@@ -1,0 +1,23 @@
+---
+# Installs one operator through OLM, or adopts it if the environment already has it (DD13).
+# Callers set olm_operator_package and olm_operator_channel; the rest have sensible defaults.
+
+# Package name as the catalogue lists it, for example rhcl-operator.
+olm_operator_package: ""
+# Channel to subscribe to. Pinning the channel picks up patch releases automatically; the exact
+# version installed is recorded in olm_operator_results.
+olm_operator_channel: ""
+olm_operator_source: redhat-operators
+olm_operator_source_namespace: openshift-marketplace
+# openshift-operators already has an OperatorGroup for all namespaces. For any other namespace,
+# the role creates one targeting that namespace only, unless one exists.
+olm_operator_namespace: openshift-operators
+# Set to true for operators the environment must provide: if the operator is missing, the role
+# stops with a clear message instead of installing it (DD13).
+olm_operator_adopt_only: false
+
+# Lowest acceptable version, checked whether the operator was installed or adopted. Empty skips it.
+olm_operator_min_version: ""
+
+olm_operator_install_retries: 60
+olm_operator_install_delay: 10

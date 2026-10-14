@@ -8,6 +8,13 @@ demo_versions:
   openshift_ai: "3.5"
   aap: "2.7"
 
+# Operators the build checks or installs (DD13). Channels are pinned and patch releases are picked
+# up automatically; each phase reports the exact versions it found. Operators the environment
+# already provides are left on their own channel, and only min_version is enforced.
+demo_operators:
+  openshift_ai: { package: rhods-operator, channel: stable-3.x, min_version: "3.5.0" }
+  connectivity_link: { package: rhcl-operator, channel: stable, min_version: "1.4.0" }
+
 # Instance profile drives resource requests. Change to g6.12xlarge for four L4 GPUs.
 demo_instance_profile: g6.16xlarge
 
@@ -19,8 +26,18 @@ demo_namespaces:
   workload: demo-payments
   enrichment: aiops-enrichment
   models: aiops-models
-  tracing: aiops-tracing
+  data: aiops-data
   aap: aap
+
+# Container images (DD12). Pinned; the build never pulls latest.
+demo_images:
+  postgresql: registry.redhat.io/rhel9/postgresql-16:1791897894
+
+# Shared PostgreSQL (DD06). Each database gets its own user and generated password.
+# The knowledge index database is added in phase 06.
+demo_postgres_databases:
+  - maas
+  - mlflow
 
 # GPU freeing in phase 01 (DD13). The RHDP OpenShift AI environment ships a sample model that
 # holds the only GPU. Namespaces listed here are deleted if they hold it; any other holder
@@ -33,11 +50,27 @@ demo_gpu_reclaimable_namespaces:
 # routes are reachable from the internet with a publicly trusted certificate, so push.
 demo_trigger_mode: push
 
-# Model selection (DD04). Final choice depends on the citation-adherence test (OI04).
+# Model selection (DD04). Granite is the starting point; the final choice depends on the
+# citation-adherence test (OI04). Candidates from Red Hat's validated ModelCar images:
+#   granite-3-1-8b-instruct  oci://registry.redhat.io/rhelai1/modelcar-granite-3-1-8b-instruct-fp8-dynamic:1.5
+#   llama-3-1-8b-instruct    oci://registry.redhat.io/rhelai1/modelcar-llama-3-1-8b-instruct-fp8-dynamic:1.5
+#   qwen2-5-7b-instruct      oci://registry.redhat.io/rhelai1/modelcar-qwen2-5-7b-instruct-fp8-dynamic:1.5
+# The name is used for the LLMInferenceService, its MaaS entry and the model field in requests.
 demo_model:
-  name: TBD
-  modelcar_image: TBD
-  quantisation: fp8
+  name: granite-3-1-8b-instruct
+  display_name: Granite 3.1 8B Instruct (FP8)
+  modelcar_image: oci://registry.redhat.io/rhelai1/modelcar-granite-3-1-8b-instruct-fp8-dynamic:1.5
+  # Fits the L4's memory with room for the KV cache; enrichment prompts are well under this.
+  max_model_len: 16384
+
+# Governed model access for the enrichment service (DD14, ADR06). The enrichment service calls the
+# model as its own service account, through a MaaS subscription with a token budget.
+demo_maas_consumer:
+  service_account: aiops-enrichment
+  token_limit: 100000
+  token_window: 1h
+  # Long enough for an environment's life; a rebuild mints a new key.
+  key_expiry: 30d
 
 # Secrets backend (SECURITY.md): vault or local
 demo_secrets_backend: vault

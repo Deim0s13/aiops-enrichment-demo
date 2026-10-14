@@ -1,0 +1,121 @@
+---
+# Part 2b of phase 02: the MLflow server that records a trace of every model call (DD07).
+# Enabling the mlflowoperator component (maas.yml) starts the operator; the server itself is
+# described by a single cluster-wide MLflow resource, which the operator turns into a Deployment
+# in openshift_ai_mlflow_namespace.
+
+- name: Read the MLflow database password
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ postgres_namespace }}"
+    name: "{{ postgres_credentials_secret }}"
+  register: openshift_ai_mlflow_credentials
+  no_log: true
+
+# MLflow's PostgreSQL client verifies the server certificate (with a CA file configured, libpq
+# treats even sslmode=require as verify-ca). Our PostgreSQL certificate comes from the OpenShift
+# service CA, so MLflow is given that CA: OpenShift fills this ConfigMap with it automatically.
+# No data is set here, so a rerun never clears what OpenShift injected.
+- name: Ask OpenShift for its service CA bundle for MLflow
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: mlflow-postgres-ca
+        namespace: "{{ openshift_ai_mlflow_namespace }}"
+        annotations:
+          service.beta.openshift.io/inject-cabundle: "true"
+
+- name: Wait for the service CA bundle
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    namespace: "{{ openshift_ai_mlflow_namespace }}"
+    name: mlflow-postgres-ca
+  register: openshift_ai_mlflow_ca
+  until: (openshift_ai_mlflow_ca.resources | first | default({})).data['service-ca.crt'] | default('') | length > 0
+  retries: 12
+  delay: 5
+
+# The connection string contains the password, so MLflow reads it from a Secret
+# (backendStoreUriFrom) rather than from the MLflow resource itself. verify-full checks both the
+# CA and that the certificate belongs to the PostgreSQL service.
+- name: Give MLflow its database connection
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: mlflow-db-credentials
+        namespace: "{{ openshift_ai_mlflow_namespace }}"
+      type: Opaque
+      stringData:
+        backend-store-uri: >-
+          postgresql://mlflow:{{ openshift_ai_mlflow_credentials.resources[0].data.mlflow | b64decode }}@{{
+          postgres_host }}:{{ postgres_port }}/mlflow?sslmode=verify-full
+  no_log: true
+
+- name: Describe the MLflow server
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: mlflow.opendatahub.io/v1
+      kind: MLflow
+      metadata:
+        name: mlflow
+      spec:
+        replicas: 1
+        backendStoreUriFrom:
+          name: mlflow-db-credentials
+          key: backend-store-uri
+        caBundleConfigMap:
+          name: mlflow-postgres-ca
+        # Artifacts (files attached to runs) are served by MLflow from its own volume.
+        serveArtifacts: true
+        artifactsDestination: file:///mlflow/artifacts
+        storage:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: "{{ openshift_ai_mlflow_storage_size }}"
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            memory: 2Gi
+
+# The first build pulls the MLflow image and runs a database migration Job before the server starts.
+- name: Wait for the MLflow server to be ready
+  kubernetes.core.k8s_info:
+    api_version: mlflow.opendatahub.io/v1
+    kind: MLflow
+    name: mlflow
+  register: openshift_ai_mlflow
+  until: >-
+    (openshift_ai_mlflow.resources | first | default({})).status.conditions | default([])
+    | selectattr('type', 'in', ['Ready', 'Available']) | selectattr('status', 'equalto', 'True') | list | length > 0
+  retries: "{{ openshift_ai_mlflow_ready_retries }}"
+  delay: "{{ openshift_ai_mlflow_ready_delay }}"
+  failed_when: false
+
+- name: Report an MLflow server that is not ready
+  ansible.builtin.assert:
+    that: >-
+      (openshift_ai_mlflow.resources | first | default({})).status.conditions | default([])
+      | selectattr('type', 'in', ['Ready', 'Available']) | selectattr('status', 'equalto', 'True') | list | length > 0
+    fail_msg: >-
+      The MLflow server is not ready:
+      {{ (openshift_ai_mlflow.resources | first | default({})).status.conditions | default([])
+         | map(attribute='message', default='') | select | join('; ') or 'no status yet' }}.
+      Check the migration Job's log with: oc get jobs -n {{ openshift_ai_mlflow_namespace }} | grep mlflow,
+      then oc logs job/JOB_NAME -n {{ openshift_ai_mlflow_namespace }}
+    quiet: true
+
+- name: Record the MLflow result
+  ansible.builtin.set_fact:
+    openshift_ai_report: "{{ openshift_ai_report + ['MLflow: ready, metadata in PostgreSQL, artifacts on a ' ~ openshift_ai_mlflow_storage_size ~ ' volume'] }}"

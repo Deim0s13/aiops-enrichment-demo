@@ -1,0 +1,56 @@
+---
+# Phase 02. Built in three parts (docs/implementation-plan.md, M1):
+#   1. OpenShift AI version check and Red Hat Connectivity Link
+#   2. PostgreSQL, the MaaS gateway, and switching on MaaS and MLflow (2b configures the MLflow server)
+#   3. The model, its MaaS subscription, the enrichment service's API key, and access checks (model.yml, access.yml, checks.yml)
+# Cluster access comes from the module_defaults the calling play sets.
+
+- name: Start the phase report
+  ansible.builtin.set_fact:
+    openshift_ai_report: []
+
+- name: Check that the environment provides a recent enough OpenShift AI
+  ansible.builtin.include_role:
+    name: olm_operator
+  vars:
+    olm_operator_package: "{{ demo_operators.openshift_ai.package }}"
+    olm_operator_channel: "{{ demo_operators.openshift_ai.channel }}"
+    olm_operator_min_version: "{{ demo_operators.openshift_ai.min_version }}"
+    olm_operator_adopt_only: true
+
+- name: Install Red Hat Connectivity Link
+  ansible.builtin.include_tasks: connectivity_link.yml
+
+- name: Record the operators
+  ansible.builtin.set_fact:
+    openshift_ai_report: >-
+      {{ openshift_ai_report + [item.package ~ ' ' ~ item.version ~ ': ' ~ item.action
+                                ~ ' (channel ' ~ item.channel ~ ', namespace ' ~ item.namespace ~ ')'] }}
+  loop: "{{ olm_operator_results | default([]) }}"
+  loop_control:
+    label: "{{ item.package }}"
+
+- name: Record the Kuadrant result
+  ansible.builtin.set_fact:
+    openshift_ai_report: "{{ openshift_ai_report + ['Kuadrant: ready in ' ~ openshift_ai_kuadrant_namespace] }}"
+
+# public: the MaaS tasks use the role's settings (namespace, Secret name) to build the connection.
+- name: Deploy the shared PostgreSQL
+  ansible.builtin.include_role:
+    name: postgres
+    public: true
+
+- name: Set up the MaaS gateway and switch on MaaS and MLflow
+  ansible.builtin.include_tasks: maas.yml
+
+- name: Run the MLflow server
+  ansible.builtin.include_tasks: mlflow.yml
+
+- name: Deploy the model and publish it to MaaS
+  ansible.builtin.include_tasks: model.yml
+
+- name: Set up governed access for the enrichment service
+  ansible.builtin.include_tasks: access.yml
+
+- name: Check governed access end to end
+  ansible.builtin.include_tasks: checks.yml

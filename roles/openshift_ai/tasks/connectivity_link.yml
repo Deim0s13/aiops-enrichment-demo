@@ -1,0 +1,59 @@
+---
+# Red Hat Connectivity Link provides Kuadrant: gateway policies for authentication (Authorino)
+# and rate limiting (Limitador). MaaS needs it, and the environment does not provide it.
+
+- name: Install or adopt the Connectivity Link operator
+  ansible.builtin.include_role:
+    name: olm_operator
+  vars:
+    olm_operator_package: "{{ demo_operators.connectivity_link.package }}"
+    olm_operator_channel: "{{ demo_operators.connectivity_link.channel }}"
+    olm_operator_min_version: "{{ demo_operators.connectivity_link.min_version }}"
+
+- name: Create the Kuadrant namespace {{ openshift_ai_kuadrant_namespace }}
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ openshift_ai_kuadrant_namespace }}"
+
+# One Kuadrant resource per cluster. The operator then deploys Authorino and Limitador into
+# this namespace and starts enforcing policies attached to gateways.
+- name: Create the Kuadrant instance
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: "{{ openshift_ai_kuadrant_api_version }}"
+      kind: Kuadrant
+      metadata:
+        name: kuadrant
+        namespace: "{{ openshift_ai_kuadrant_namespace }}"
+      spec: {}
+
+- name: Wait for Kuadrant to be ready
+  kubernetes.core.k8s_info:
+    api_version: "{{ openshift_ai_kuadrant_api_version }}"
+    kind: Kuadrant
+    namespace: "{{ openshift_ai_kuadrant_namespace }}"
+    name: kuadrant
+  register: openshift_ai_kuadrant
+  until: >-
+    (openshift_ai_kuadrant.resources | first | default({})).status.conditions | default([])
+    | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length > 0
+  retries: "{{ openshift_ai_kuadrant_ready_retries }}"
+  delay: "{{ openshift_ai_kuadrant_ready_delay }}"
+  failed_when: false
+
+- name: Report a Kuadrant instance that is not ready
+  ansible.builtin.assert:
+    that: >-
+      (openshift_ai_kuadrant.resources | first | default({})).status.conditions | default([])
+      | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length > 0
+    fail_msg: >-
+      Kuadrant is not ready:
+      {{ (openshift_ai_kuadrant.resources | first | default({})).status.conditions | default([])
+         | map(attribute='message', default='') | select | join('; ') or 'no status yet' }}.
+      Check it with: oc get kuadrant kuadrant -n {{ openshift_ai_kuadrant_namespace }} -o yaml
+    quiet: true

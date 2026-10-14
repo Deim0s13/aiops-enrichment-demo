@@ -1,0 +1,121 @@
+---
+# Installs olm_operator_package through OLM, or adopts an existing installation (DD13).
+# An operator the environment already provides is left on its own channel and namespace;
+# only its health and minimum version are checked. Appends a summary to olm_operator_results.
+# Cluster access comes from the module_defaults the calling play sets.
+
+- name: Check the operator settings
+  ansible.builtin.assert:
+    that:
+      - olm_operator_package | length > 0
+      - olm_operator_channel | length > 0
+    fail_msg: olm_operator_package and olm_operator_channel must both be set.
+    quiet: true
+
+- name: Look for an existing subscription to {{ olm_operator_package }}
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+  register: olm_operator_all_subscriptions
+
+- name: Select subscriptions to {{ olm_operator_package }}
+  ansible.builtin.set_fact:
+    olm_operator_existing: >-
+      {{ olm_operator_all_subscriptions.resources | selectattr('spec.name', 'equalto', olm_operator_package) | list }}
+
+- name: Stop if there is more than one subscription to {{ olm_operator_package }}
+  ansible.builtin.assert:
+    that: olm_operator_existing | length <= 1
+    fail_msg: >-
+      {{ olm_operator_package }} has {{ olm_operator_existing | length }} subscriptions, in
+      {{ olm_operator_existing | map(attribute='metadata.namespace') | join(', ') }}. OLM cannot manage
+      that reliably; remove all but one before rerunning.
+    quiet: true
+
+- name: Stop if the environment does not provide {{ olm_operator_package }}
+  ansible.builtin.assert:
+    that: olm_operator_existing | length == 1
+    fail_msg: >-
+      {{ olm_operator_package }} is not installed. This kit expects the RHDP OpenShift AI environment
+      to provide it and does not install it (DD13).
+    quiet: true
+  when: olm_operator_adopt_only | bool
+
+- name: Install {{ olm_operator_package }}
+  ansible.builtin.include_tasks: install.yml
+  when: olm_operator_existing | length == 0
+
+- name: Work out where the subscription lives
+  ansible.builtin.set_fact:
+    olm_operator_action: "{{ 'already installed' if olm_operator_existing else 'installed' }}"
+    olm_operator_sub_namespace: >-
+      {{ olm_operator_existing[0].metadata.namespace if olm_operator_existing else olm_operator_namespace }}
+    olm_operator_sub_name: >-
+      {{ olm_operator_existing[0].metadata.name if olm_operator_existing else olm_operator_package }}
+
+- name: Wait for OLM to resolve the subscription to {{ olm_operator_package }}
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    namespace: "{{ olm_operator_sub_namespace }}"
+    name: "{{ olm_operator_sub_name }}"
+  register: olm_operator_subscription
+  until: (olm_operator_subscription.resources | first | default({})).status.installedCSV | default('') | length > 0
+  retries: "{{ olm_operator_install_retries }}"
+  delay: "{{ olm_operator_install_delay }}"
+  failed_when: false
+
+- name: Report a subscription OLM could not resolve
+  ansible.builtin.assert:
+    that: (olm_operator_subscription.resources | first | default({})).status.installedCSV | default('') | length > 0
+    fail_msg: >-
+      OLM has not installed {{ olm_operator_package }}. Its subscription in {{ olm_operator_sub_namespace }}
+      reports: {{ (olm_operator_subscription.resources | first | default({})).status.conditions | default([])
+                  | selectattr('status', 'equalto', 'True') | map(attribute='message', default='')
+                  | select | join('; ') or 'no conditions yet' }}.
+      Check it with: oc describe subscription {{ olm_operator_sub_name }} -n {{ olm_operator_sub_namespace }}
+    quiet: true
+
+- name: Wait until the CSV is ready for {{ olm_operator_package }}
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    namespace: "{{ olm_operator_sub_namespace }}"
+    name: "{{ olm_operator_subscription.resources[0].status.installedCSV }}"
+  register: olm_operator_csv
+  until: (olm_operator_csv.resources | first | default({})).status.phase | default('') == 'Succeeded'
+  retries: "{{ olm_operator_install_retries }}"
+  delay: "{{ olm_operator_install_delay }}"
+  failed_when: false
+
+- name: Report an operator that is not ready
+  ansible.builtin.assert:
+    that: (olm_operator_csv.resources | first | default({})).status.phase | default('') == 'Succeeded'
+    fail_msg: >-
+      {{ olm_operator_subscription.resources[0].status.installedCSV }} is
+      {{ (olm_operator_csv.resources | first | default({})).status.phase | default('not found') }}
+      ({{ (olm_operator_csv.resources | first | default({})).status.message | default('no message') }}).
+      Check it with: oc get csv -n {{ olm_operator_sub_namespace }}
+    quiet: true
+
+- name: Record the result for {{ olm_operator_package }}
+  ansible.builtin.set_fact:
+    olm_operator_version: "{{ olm_operator_csv.resources[0].spec.version }}"
+    olm_operator_results: >-
+      {{ olm_operator_results | default([]) + [{
+           'package': olm_operator_package,
+           'action': olm_operator_action,
+           'namespace': olm_operator_sub_namespace,
+           'channel': olm_operator_subscription.resources[0].spec.channel,
+           'version': olm_operator_csv.resources[0].spec.version}] }}
+
+- name: Check the minimum version of {{ olm_operator_package }}
+  ansible.builtin.assert:
+    that: olm_operator_version is version(olm_operator_min_version, '>=')
+    fail_msg: >-
+      {{ olm_operator_package }} is at {{ olm_operator_version }} (channel
+      {{ olm_operator_subscription.resources[0].spec.channel }}), but this kit needs at least
+      {{ olm_operator_min_version }}.
+      {{ 'It was already installed, so the build has left it on its own channel (DD13).' if olm_operator_existing else '' }}
+    quiet: true
+  when: olm_operator_min_version | length > 0

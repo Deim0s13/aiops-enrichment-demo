@@ -62,8 +62,8 @@ Status values: **Implemented** follows the reference design; **Simplified** impl
 | ADR02 Complement existing monitoring and ITSM AI | Prometheus provides no root-cause analysis, so alert labels and annotations are passed to enrichment as an input | Simplified |
 | ADR03 Enrich incidents raised through the existing path | Pattern A only | Implemented |
 | ADR04 AAP orchestrates; enrichment is a bounded service | AAP workflow sequences every step; the enrichment service only retrieves, calls the model and validates | Implemented |
-| ADR05 Models hosted on OpenShift AI | vLLM on KServe in the same cluster | Implemented |
-| ADR06 Model access through a governed gateway | OpenShift AI gateway with a dedicated subscription and key for the enrichment service, subject to OI02 | Implemented |
+| ADR05 Models hosted on OpenShift AI | vLLM on the llm-d serving stack (`LLMInferenceService`) in the same cluster | Implemented |
+| ADR06 Model access through a governed gateway | OpenShift AI Models-as-a-Service: the enrichment service has its own API key and a subscription with a token rate limit, enforced at the gateway (DD14) | Implemented |
 | ADR07 Initial alerts do not wait on AI | As P2 | Implemented |
 | ADR08 Remediation through a broker | Levels 3 and 4 are out of scope | Not applicable |
 | ADR09 Reuse enterprise search or vector services | No enterprise search exists in the environment, so a dedicated pgvector store is used | Deviation |
@@ -77,16 +77,17 @@ These decisions apply to the demonstration only. They do not change the referenc
 | DD01 | The incident family is JVM memory exhaustion on a sample service. | The fault can be triggered on demand, its diagnostics are visible in standard metrics, and runbook advice is concrete. It can be replaced with a customer's own incident family where that family can be reproduced. |
 | DD02 | OpenShift user workload monitoring stands in for Dynatrace. | The technical architecture treats monitoring as a replaceable example (E). A Dynatrace trial is time-limited and unsuitable for a reusable kit. |
 | DD03 | The trigger is a push from a ServiceNow business rule to an EDA event stream. Polling through the `servicenow.itsm` collection is the documented fallback but is not built. | Push matches the reference flow. The environment's routes are reachable from the internet and present a publicly trusted certificate, so ServiceNow can call the event stream without a custom CA (OI01, closed). |
-| DD04 | The model is an 8B-class instruct model in FP8, served by vLLM on KServe using the single L4 GPU, and packaged as a ModelCar image. | It fits within the L4's memory with room for the required context. A ModelCar image avoids a model download on every rebuild. Final selection depends on a citation-adherence test (OI04). |
+| DD04 | The model is an 8B-class instruct model in FP8, served by vLLM as an `LLMInferenceService` (llm-d) using the single L4 GPU, and packaged as a ModelCar image. | It fits within the L4's memory with room for the required context. A ModelCar image avoids a model download on every rebuild. The build starts with Red Hat's validated Granite 3.1 8B Instruct FP8 ModelCar, with a 16,384-token context; Llama 3.1 8B and Qwen2.5 7B, also validated FP8 ModelCars, are the other candidates. The model is a setting (`demo_model`), and OpenShift AI's default serving template supplies the vLLM image, so changing models changes no code. Final selection depends on a citation-adherence test (OI04). |
 | DD05 | Embeddings run in-process within the enrichment service on CPU. | The L4 does not support partitioning, so a second GPU-served model is not practical. The corpus is small enough for CPU embedding. |
-| DD06 | PostgreSQL with pgvector holds the knowledge index. | It is a single, well-understood store that Ansible can deploy and reset. It is recorded as an ADR09 deviation. |
-| DD07 | MLflow records traces. | It provides per-call traces with prompt, model and source attributes, matching the tracing approach in the reference design (OI03). |
+| DD06 | PostgreSQL with pgvector holds the knowledge index. The same PostgreSQL instance, deployed in phase 02, holds separate databases for Models-as-a-Service and MLflow. | It is a single, well-understood store that Ansible can deploy and reset. Models-as-a-Service requires PostgreSQL 14 or later, which OpenShift AI does not provide. The knowledge index is recorded as an ADR09 deviation. |
+| DD07 | MLflow records traces, using the MLflow server OpenShift AI provides (the `mlflowoperator` component). | It provides per-call traces with prompt, model and source attributes, matching the tracing approach in the reference design. It is part of the product, so no standalone server is needed (OI03, closed). |
 | DD08 | Container images are built in-cluster with OpenShift Builds from the repository source. | No external registry or push credentials are required, which keeps the repository free of secrets. |
 | DD09 | HashiCorp Vault Community Edition on the operator's laptop supplies bootstrap secrets. Secrets generated during the build stay in the cluster. | The repository is shared, so it holds no secrets in any form. Generated secrets disappear with the environment. |
 | DD10 | All deployment and configuration is performed by Ansible playbooks, run through `ansible-navigator` with a shared execution environment. | The kit must be rebuildable on short-lived environments, and the build itself demonstrates the automation platform to the audience. |
 | DD11 | AAP and OpenShift AI share one node. | Section 5 of the technical architecture permits co-location as a deployment choice without changing the logical design. |
-| DD12 | Container images are sourced in this order: Red Hat Hardened Images where viable; otherwise a UBI-based image, from Red Hat or a certified partner in the Red Hat Ecosystem Catalog; other sources only where neither exists. An image is not viable if it would have to be rebuilt to add something essential, such as a database extension. Any image from the third tier is recorded here with the reason. | Hardened Images are minimal, signed and near zero-CVE, and UBI images carry Red Hat's supply-chain assurances. Keeping to the Red Hat portfolio also keeps the demo consistent with the platform it showcases. Current applications: Vault uses HashiCorp's UBI image because no Hardened Image exists; the enrichment and sample services are planned on Hardened Images, subject to verification in M2 and M3; the pgvector store is decided in M4 (OI05). |
+| DD12 | Container images are sourced in this order: Red Hat Hardened Images where viable; otherwise a UBI-based image, from Red Hat or a certified partner in the Red Hat Ecosystem Catalog; other sources only where neither exists. An image is not viable if it would have to be rebuilt to add something essential, such as a database extension. Any image from the third tier is recorded here with the reason. | Hardened Images are minimal, signed and near zero-CVE, and UBI images carry Red Hat's supply-chain assurances. Keeping to the Red Hat portfolio also keeps the demo consistent with the platform it showcases. Current applications: Vault uses HashiCorp's UBI image because no Hardened Image exists; the enrichment and sample services are planned on Hardened Images, subject to verification in M2 and M3; the shared PostgreSQL uses Red Hat's `rhel9/postgresql-16` image, and whether it can hold the pgvector store is decided in M4 (OI05). |
 | DD13 | The build adopts the platform the environment provides and installs no operators in phase 01. Phase 01 frees the GPU, checks Node Feature Discovery, the GPU Operator and the default StorageClass, and configures user workload monitoring. If an expected component is missing, the phase stops with a clear message. Operators the environment does not provide, such as AAP, are installed in their own phases. | The RHDP OpenShift AI environment already provides the GPU stack and OpenShift AI (section 7.1). An install path for components it always provides would never run, so it would never be tested. Leaving pre-installed operators on their own channels avoids disturbing the environment's OpenShift AI configuration. |
+| DD14 | Model access goes through OpenShift AI Models-as-a-Service (MaaS). Phase 02 installs Red Hat Connectivity Link, which provides the gateway policies MaaS relies on, enables the `aigateway.modelsAsAService` component, and publishes the model to MaaS. The enrichment service has its own identity, a service account, which a `MaaSAuthPolicy` allows to call the model and a `MaaSSubscription` gives a token budget. MaaS exposes a model only once such a policy and subscription both cover it. The build mints the service's API key with a short-lived token for that service account, so the key belongs to the service rather than to the person who ran the build. It then reads the model's ID and URL from MaaS's model list, as a client would, and stores them with the key in a Secret in the enrichment namespace; MaaS routes its shared OpenAI-style endpoint on that ID. Every build then checks access through the gateway as a client would: with the key, without a key, and with a key it has just revoked. | MaaS is the product's implementation of ADR06: per-consumer keys that can be revoked, rate limits and usage reporting by consumer, which are what risk and security teams ask about. The llm-d serving stack it needs is already provided by the environment. The alternative, a service account token on the model endpoint, gives no rate limits, usage view or per-consumer revocation. |
 
 ## 4 Component view
 
@@ -101,10 +102,11 @@ These decisions apply to the demonstration only. They do not change the referenc
 | Catalogued remediation job | N+C | Automation controller job template | `aap` | Level 2 action launched by an engineer |
 | Enrichment service | C | Python web service | `aiops-enrichment` | Retrieval, model call, output and citation validation |
 | Knowledge ingestion | C | Kubernetes Job using the enrichment service image | `aiops-enrichment` | Loads approved documents into the index |
-| Knowledge index | C/E | PostgreSQL with pgvector | `aiops-enrichment` | Passage storage and similarity search |
-| Model gateway | N | OpenShift AI gateway | Managed by OpenShift AI | Per-consumer keys, limits, revocation and attribution |
-| Model serving | N | KServe with vLLM on the L4 GPU | `aiops-models` | Model inference |
-| Tracing | N/E | MLflow | `aiops-tracing` or provided by OpenShift AI | Trace of every model call |
+| Knowledge index | C/E | PostgreSQL with pgvector, its own database in the shared PostgreSQL instance | `aiops-data` | Passage storage and similarity search |
+| Shared database | E | PostgreSQL 16 (Red Hat image), with a separate database and user for each consumer | `aiops-data` | Stores for Models-as-a-Service, MLflow and the knowledge index (DD06) |
+| Model gateway | N | OpenShift AI Models-as-a-Service, on Red Hat Connectivity Link | `openshift-ingress`, `models-as-a-service` | Per-consumer keys, limits, revocation and attribution (DD14) |
+| Model serving | N | vLLM as an `LLMInferenceService` (llm-d) on the L4 GPU | `aiops-models` | Model inference |
+| Tracing | N | MLflow provided by OpenShift AI, with metadata in the shared PostgreSQL | `redhat-ods-applications` | Trace of every model call |
 | Bootstrap secrets | E | Vault Community Edition | Operator's laptop | Holds the secrets each operator brings to a build |
 
 ```mermaid
@@ -235,7 +237,7 @@ Each document carries labels for its ID, origin, service, product version, owner
 | Trigger | EDA event stream token and AAP `svc-eda-enrichment` | Launch the enrichment workflow | Launch any other template, including the remediation job |
 | Diagnostics | OpenShift service account `aiops-diagnostics` | Read pods, events, logs and metrics in `demo-payments` | Write to any resource; read any other namespace |
 | ITSM writer | ServiceNow `svc-ai-enrichment` | Write work notes and enrichment fields | Create, reassign or close incidents; create changes |
-| Enrichment service | Service account, gateway key and database credential | Call the gateway; read the knowledge index | Any ITSM, cluster API or AAP access |
+| Enrichment service | Service account `aiops-enrichment`, its MaaS API key and a database credential | Call the gateway; read the knowledge index | Any ITSM, cluster API or AAP access |
 | Knowledge ingestion | Separate service account and database credential | Write the knowledge index | Call the gateway; read ITSM |
 | Engineer | Personal AAP and ServiceNow accounts | Read incidents; launch the catalogued job | Not applicable |
 | Model | None | Inference only | Any credential or outbound network access |
@@ -253,7 +255,7 @@ The `aiops-enrichment` and `aiops-models` namespaces apply default-deny network 
 | ServiceNow administration | PDI URL and administrator credential, used only by phase 08 to create service identities | Operator's Vault | Held by the operator |
 | Generated | AAP administrator, database, gateway key, EDA token, ServiceNow service identity passwords | Generated by the playbooks; stored as Kubernetes Secrets | One build; ServiceNow identities are reset on every build |
 
-The build reads each secret group from the operator's Vault with its own AppRole, whose policy can read only that group, so a phase holds only the secrets it asks for. Secrets never appear in the repository, the execution environment, container images, prompts, work notes or traces. Every task that handles a secret uses `no_log`, except Kubernetes tasks that receive the cluster token through `module_defaults`. `kubernetes.core` prints that token at verbosity 3 and above, so the secrets role refuses to resolve secrets at that verbosity instead. `ansible-navigator` playbook artefacts are disabled in the committed configuration, and the repository uses a gitleaks pre-commit hook with GitHub secret scanning and push protection. In production, AAP retrieves credentials from the enterprise vault through its external secret management integration [7].
+The build reads each secret group from the operator's Vault with its own AppRole, whose policy can read only that group, so a phase holds only the secrets it asks for. Secrets never appear in the repository, the execution environment, container images, prompts, work notes or traces. Every task that handles a secret uses `no_log`, except Kubernetes tasks that receive the cluster token through `module_defaults`. `kubernetes.core` prints that token at verbosity 3 and above, so the secrets role refuses to resolve secrets at that verbosity instead. A later task that loops over a Kubernetes task's registered results would print the token at verbosity 2, so the build reduces such results to the fields it needs first. `ansible-navigator` playbook artefacts are disabled in the committed configuration, and the repository uses a gitleaks pre-commit hook with GitHub secret scanning and push protection. In production, AAP retrieves credentials from the enterprise vault through its external secret management integration [7].
 
 ## 7 Deployment view
 
@@ -282,6 +284,8 @@ The environment is the Red Hat Demo Platform (RHDP) OpenShift AI catalogue item.
 | NVIDIA GPU Operator | 25.3.4, channel `v25.3` | Checked by phase 01, not installed (DD13) |
 | OpenShift AI | 3.5.1, channel `stable-3.x` | Configured by phase 02. The channel follows minor releases, so phase 02 checks for at least 3.5 and records the version it finds |
 | OpenShift Serverless, Authorino | 1.37.1, 1.4.3 | OpenShift AI dependencies, left as provisioned |
+| llm-d serving | `LLMInferenceService` resource types, `LLMInferenceServiceConfig` templates including a single-node NVIDIA one, and the `openshift-ai-inference` Gateway, all ready | Used for the model (DD04) |
+| Models-as-a-Service, MLflow | Not enabled. Red Hat Connectivity Link (`rhcl-operator`) is in the catalogue but not installed | Installed and enabled by phase 02 (DD14, DD07) |
 | OpenShift Pipelines, cert-manager, JobSet, Red Hat build of Keycloak | 1.24.1, 1.20.1, 1.0.1, 26.4.16 | Not used by the demo, left as provisioned |
 | Sample model `my-first-model` | Holds the only GPU | Deleted by phase 01 (`demo_gpu_reclaimable_namespaces`) |
 | Default StorageClass | `gp3-csi` | Checked by phase 01 |
@@ -300,7 +304,7 @@ The no-scripting rule applies to deployment and configuration. The enrichment se
 | 00 | `00_secrets.yml` | Vault container, KV engine, read-only policy and AppRole on the operator's laptop |
 | 00 | `00_preflight.yml` | Confirms every required secret and the cluster connection before any change |
 | 01 | `01_platform.yml` | Frees the GPU, checks Node Feature Discovery, the GPU Operator and storage, and enables user workload monitoring with its Alertmanager (DD13) |
-| 02 | `02_openshift_ai.yml` | OpenShift AI configuration, model serving, gateway subscription and tracing |
+| 02 | `02_openshift_ai.yml` | Red Hat Connectivity Link, PostgreSQL, Models-as-a-Service and MLflow, the model as an `LLMInferenceService`, and the enrichment service's subscription and API key (DD14) |
 | 03 | `03_aap.yml` | AAP operator, instance and subscription manifest |
 | 04 | `04_aap_content.yml` | Projects, credentials, job templates, workflow, catalogue and rulebook activations, declared with `infra.aap_configuration` |
 | 05 | `05_workload.yml` | Sample service, alert rules and Alertmanager routing |
@@ -384,9 +388,9 @@ Scenarios S1 to S5 are presented to the audience. `verify.yml` also checks the f
 | ID | Item | Needed by |
 |---|---|---|
 | OI01 | ~~Confirm whether the environment's routes are reachable from ServiceNow, which decides push or polling for the trigger (DD03).~~ Closed: routes are reachable from the internet and present a publicly trusted certificate, so the trigger is a push. | Phase 08 |
-| OI02 | Confirm the gateway capability and its configuration in OpenShift AI 3.5 as provisioned in the environment. | Phase 02 |
-| OI03 | Confirm whether OpenShift AI 3.5 provides MLflow tracing in the environment, or whether a standalone server is required. | Phase 02 |
-| OI04 | Select the model by testing citation adherence against a hand-built prompt and sample evidence. | Phase 02 |
+| OI02 | ~~Confirm the gateway capability and its configuration in OpenShift AI 3.5 as provisioned in the environment.~~ Closed: Models-as-a-Service (DD14). The enrichment service's key is issued without the dashboard: the build mints it through the MaaS API with a short-lived token for the service's own service account. Confirmed on the first environment (2026-10-14). | Phase 02 |
+| OI03 | ~~Confirm whether OpenShift AI 3.5 provides MLflow tracing in the environment, or whether a standalone server is required.~~ Closed: provided by the `mlflowoperator` component, not enabled by default (DD07). | Phase 02 |
+| OI04 | Select the model by testing citation adherence against a hand-built prompt and sample evidence. Phase 02 serves Granite 3.1 8B as the starting point; the test runs each candidate through MaaS with the same evidence and prompt. | Before phase 05 |
 | OI05 | Confirm that pgvector is available in the chosen supported PostgreSQL image. | Phase 06 |
 | OI06 | Confirm that an AAP subscription manifest can be obtained for demo environments. | Phase 03 |
 | OI07 | ~~Name the fictional organisation and its services for the corpus and demo data.~~ Closed: the organisation is ACME Bank; service names are chosen with the corpus. | Phase 06 |
