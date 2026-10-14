@@ -1,0 +1,174 @@
+---
+# The consumer's MaaS API key, minted with the consumer's own identity so the key belongs to it and
+# usage is attributed to it. A rerun keeps a stored key that still works. The key, the model's ID
+# and the URL to call are stored together in one Secret in the consumer's namespace.
+
+# A short-lived token for the service account, from the Kubernetes TokenRequest API. MaaS accepts
+# OpenShift tokens to mint keys, and a key minted with this token belongs to the service account.
+- name: Get a short-lived token for the consumer's service account
+  ansible.builtin.uri:
+    url: >-
+      {{ secrets_values.cluster_api_url | regex_replace('/$', '') }}/api/v1/namespaces/{{
+      maas_consumer_namespace }}/serviceaccounts/{{ maas_consumer_name }}/token
+    method: POST
+    headers:
+      Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+    body_format: json
+    body:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      spec:
+        expirationSeconds: 600
+    status_code: [200, 201]
+    validate_certs: "{{ maas_consumer_api_validate_certs }}"
+    ca_path: "{{ secrets_cluster_ca_file | default(omit) }}"
+  register: maas_consumer_sa_token
+  no_log: true
+
+- name: Read the stored API key
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ maas_consumer_namespace }}"
+    name: "{{ maas_consumer_secret }}"
+  register: maas_consumer_stored_key
+  until: maas_consumer_stored_key is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Check whether the stored API key still works
+  ansible.builtin.uri:
+    url: "{{ maas_consumer_maas_url }}/maas-api/v1/models"
+    headers:
+      Authorization: "Bearer {{ maas_consumer_stored_key.resources[0].data['api-key'] | b64decode }}"
+    status_code: [200, 401, 403]
+    validate_certs: "{{ maas_consumer_validate_certs }}"
+  register: maas_consumer_stored_key_check
+  when: maas_consumer_stored_key.resources | length > 0
+  failed_when: false
+  no_log: true
+
+# A network failure is not a sign of a bad key; stop rather than mint a replacement.
+- name: Report a MaaS gateway that cannot be reached
+  ansible.builtin.assert:
+    that: maas_consumer_stored_key_check.status | default(0) != -1
+    fail_msg: >-
+      Cannot reach the MaaS gateway at {{ maas_consumer_maas_url }}
+      ({{ maas_consumer_stored_key_check.msg | default('no response') | truncate(200) }}).
+      Check that DNS resolves the name and the gateway is programmed: oc get gateway -n openshift-ingress
+    quiet: true
+
+- name: Decide whether a new key is needed
+  ansible.builtin.set_fact:
+    maas_consumer_mint_key: >-
+      {{ maas_consumer_stored_key.resources | length == 0
+         or maas_consumer_stored_key_check.status | default(0) != 200 }}
+
+- name: Mint an API key for the consumer
+  ansible.builtin.uri:
+    url: "{{ maas_consumer_maas_url }}/maas-api/v1/api-keys"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ maas_consumer_sa_token.json.status.token }}"
+    body_format: json
+    body:
+      name: "{{ maas_consumer_name }}"
+      description: "API key for {{ maas_consumer_description }}"
+      expiresIn: "{{ maas_consumer_key_expiry }}"
+      subscription: "{{ maas_consumer_name }}"
+      labels: "{{ maas_consumer_key_labels }}"
+    status_code: [200, 201]
+    validate_certs: "{{ maas_consumer_validate_certs }}"
+  register: maas_consumer_new_key
+  when: maas_consumer_mint_key | bool
+  failed_when: false
+  no_log: true
+
+# Reports the outcome without the key: only the status code and MaaS's error text.
+- name: Report a key MaaS would not mint
+  ansible.builtin.assert:
+    that: maas_consumer_new_key.status in [200, 201]
+    fail_msg: "{{ maas_consumer_mint_unreachable if maas_consumer_new_key.status | default(-1) == -1 else maas_consumer_mint_refused }}"
+    quiet: true
+  vars:
+    maas_consumer_mint_unreachable: >-
+      Cannot reach the MaaS gateway at {{ maas_consumer_maas_url }} to mint the key
+      ({{ maas_consumer_new_key.msg | default('no response') | truncate(200) }}).
+      Check that DNS resolves the name and the gateway is programmed: oc get gateway -n openshift-ingress
+    maas_consumer_mint_refused: >-
+      MaaS refused to mint the key (HTTP {{ maas_consumer_new_key.status }}:
+      {{ maas_consumer_new_key.json.error | default(maas_consumer_new_key.json.message | default(maas_consumer_new_key.msg | default(''))) }}).
+      Check that the subscription and policy above are active and name {{ maas_consumer_user }}.
+  when: maas_consumer_mint_key | bool
+
+# The client view of MaaS: the models this key may use, each with the ID to put in the request's
+# model field and the URL to send it to. MaaS routes the shared OpenAI-style endpoint on that ID,
+# so the build stores what MaaS publishes rather than assuming a name or a path.
+- name: List the models MaaS offers the new key
+  ansible.builtin.uri:
+    url: "{{ maas_consumer_maas_url }}/maas-api/v1/models"
+    headers:
+      Authorization: "Bearer {{ maas_consumer_new_key.json.key }}"
+    status_code: [200]
+    validate_certs: "{{ maas_consumer_validate_certs }}"
+  register: maas_consumer_new_key_models
+  when: maas_consumer_mint_key | bool
+  failed_when: false
+  no_log: true
+
+- name: Find the model in the list
+  ansible.builtin.set_fact:
+    maas_consumer_offered_models: "{{ maas_consumer_model_list.json.data | default([]) }}"
+    maas_consumer_published_model: >-
+      {{ maas_consumer_model_list.json.data | default([])
+         | selectattr('owned_by', 'equalto', maas_consumer_model.namespace ~ '/' ~ maas_consumer_model.name) | first | default({}) }}
+  vars:
+    maas_consumer_model_list: "{{ maas_consumer_new_key_models if maas_consumer_mint_key | bool else maas_consumer_stored_key_check }}"
+
+- name: Report a model MaaS does not offer the consumer
+  ansible.builtin.assert:
+    that:
+      - maas_consumer_published_model.id is defined
+      - maas_consumer_published_model.url is defined
+      - maas_consumer_published_model.ready | default(false) | bool
+    fail_msg: >-
+      MaaS does not offer {{ maas_consumer_model.namespace }}/{{ maas_consumer_model.name }} to the key for
+      {{ maas_consumer_description }}{{ ' (it is listed but not ready)' if maas_consumer_published_model.id is defined else '' }}.
+      It offers: {{ maas_consumer_offered_models | map(attribute='owned_by', default='?') | join(', ') or 'no models' }}.
+      Check that the subscription names this model: oc get maassubscription
+      {{ maas_consumer_name }} -n {{ maas_consumer_tenant_namespace }} -o yaml
+    quiet: true
+
+# Everything the consumer needs to call the model: the key, where to send requests and
+# the model ID to put in them. Written as data rather than stringData so a rerun that changes
+# nothing reports no change.
+- name: Store the API key and the model's address for the consumer
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ maas_consumer_secret }}"
+        namespace: "{{ maas_consumer_namespace }}"
+      type: Opaque
+      data:
+        api-key: "{{ (maas_consumer_new_key.json.key if maas_consumer_mint_key | bool
+                     else maas_consumer_stored_key.resources[0].data['api-key'] | b64decode) | b64encode }}"
+        key-id: "{{ (maas_consumer_new_key.json.id if maas_consumer_mint_key | bool
+                    else maas_consumer_stored_key.resources[0].data['key-id'] | default('') | b64decode) | b64encode }}"
+        expires-at: "{{ (maas_consumer_new_key.json.expiresAt | default('') if maas_consumer_mint_key | bool
+                        else maas_consumer_stored_key.resources[0].data['expires-at'] | default('') | b64decode) | b64encode }}"
+        url: "{{ maas_consumer_published_model.url | regex_replace('/$', '') | b64encode }}"
+        model: "{{ maas_consumer_published_model.id | b64encode }}"
+  no_log: true
+
+- name: Record the access result
+  ansible.builtin.set_fact:
+    maas_consumer_report: >-
+      {{ maas_consumer_report + ['Access: model accepted by MaaS, policy and subscription active for ' ~ maas_consumer_user
+           ~ ' (' ~ maas_consumer_token_limit ~ ' tokens per ' ~ maas_consumer_token_window ~ '); API key '
+           ~ ('minted' if maas_consumer_mint_key | bool else 'kept, still valid')
+           ~ ' and stored in ' ~ maas_consumer_namespace ~ '/' ~ maas_consumer_secret
+           ~ ' with model ID ' ~ maas_consumer_published_model.id] }}

@@ -1,0 +1,75 @@
+---
+argument_specs:
+  main:
+    short_description: Onboard one consumer to one model on Models-as-a-Service
+    options:
+      maas_consumer_name:
+        type: str
+        required: true
+        description: >-
+          Name of the consumer's service account, MaaSAuthPolicy, MaaSSubscription and API key.
+      maas_consumer_namespace:
+        type: str
+        required: true
+        description: Namespace for the consumer's service account and the Secret holding its key.
+      maas_consumer_model:
+        type: dict
+        required: true
+        description: The model the consumer may call, as registered with MaaS.
+        options:
+          name:
+            type: str
+            required: true
+            description: Name of the model's MaaSModelRef.
+          namespace:
+            type: str
+            required: true
+            description: Namespace of the model's MaaSModelRef.
+      maas_consumer_description:
+        type: str
+        description: How the consumer is described in annotations, key descriptions and messages.
+      maas_consumer_token_limit:
+        type: int
+        description: Tokens the consumer may use per window.
+      maas_consumer_token_window:
+        type: str
+        description: The token budget's window, such as 1h.
+      maas_consumer_key_expiry:
+        type: str
+        description: Lifetime of the consumer's API key, such as 30d.
+      maas_consumer_key_labels:
+        type: dict
+        description: Labels on the consumer's API key.
+      maas_consumer_secret:
+        type: str
+        description: Name of the Secret that holds the key, the URL and the model ID.
+      maas_consumer_gateway_name:
+        type: str
+        description: Name of the MaaS gateway.
+      maas_consumer_gateway_namespace:
+        type: str
+        description: Namespace of the MaaS gateway.
+      maas_consumer_tenant_namespace:
+        type: str
+        description: Namespace MaaS keeps policies and subscriptions in.
+      maas_consumer_validate_certs:
+        type: bool
+        description: Verify the MaaS gateway's certificate.
+      maas_consumer_api_validate_certs:
+        type: bool
+        description: Verify the cluster API's certificate for the token request.
+      maas_consumer_resource_retries:
+        type: int
+        description: How many times to check the policy, the subscription and MaaS's acceptance of the model.
+      maas_consumer_resource_delay:
+        type: int
+        description: Seconds between those checks.
+      maas_consumer_run_checks:
+        type: bool
+        description: Run the access checks after onboarding.
+      maas_consumer_revoke_retries:
+        type: int
+        description: How many times to try the revoked key before giving up.
+      maas_consumer_revoke_delay:
+        type: int
+        description: Seconds between those tries.

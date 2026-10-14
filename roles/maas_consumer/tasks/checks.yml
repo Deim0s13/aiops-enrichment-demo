@@ -1,0 +1,149 @@
+---
+# Governed access, checked through the public MaaS gateway as a client would (the M1 exit criterion):
+#   1. a request with the consumer's key gets an answer from the model
+#   2. a request with no key is refused
+#   3. a revoked key is refused: a temporary key is minted, used, revoked and tried again
+# Requests that carry a key are hidden (no_log); only status codes and the model's reply are shown.
+
+- name: Read the consumer's API key
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ maas_consumer_namespace }}"
+    name: "{{ maas_consumer_secret }}"
+  register: maas_consumer_check_secret
+  until: maas_consumer_check_secret is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+# The checks use only what the Secret holds, as the consumer will.
+- name: Set the test request
+  ansible.builtin.set_fact:
+    maas_consumer_check_url: "{{ maas_consumer_check_secret.resources[0].data.url | b64decode }}/v1/chat/completions"
+    maas_consumer_check_body:
+      model: "{{ maas_consumer_check_secret.resources[0].data.model | b64decode }}"
+      messages:
+        - role: user
+          content: "Reply with exactly one word: ready"
+      max_tokens: 10
+      temperature: 0
+
+- name: "Check 1: call the model with the consumer's key"
+  ansible.builtin.uri:
+    url: "{{ maas_consumer_check_url }}"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ maas_consumer_check_secret.resources[0].data['api-key'] | b64decode }}"
+    body_format: json
+    body: "{{ maas_consumer_check_body }}"
+    status_code: [200, 401, 403, 404, 429, 500, 502, 503]
+    timeout: 120
+    validate_certs: "{{ maas_consumer_validate_certs }}"
+  register: maas_consumer_check_with_key
+  failed_when: false
+  no_log: true
+
+- name: "Check 2: call the model with no key"
+  ansible.builtin.uri:
+    url: "{{ maas_consumer_check_url }}"
+    method: POST
+    body_format: json
+    body: "{{ maas_consumer_check_body }}"
+    status_code: [200, 401, 403, 404]
+    timeout: 30
+    validate_certs: "{{ maas_consumer_validate_certs }}"
+  register: maas_consumer_check_no_key
+  failed_when: false
+
+- name: "Check 3: mint a temporary key"
+  ansible.builtin.uri:
+    url: "{{ maas_consumer_maas_url }}/maas-api/v1/api-keys"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ maas_consumer_sa_token.json.status.token }}"
+    body_format: json
+    body:
+      name: "{{ maas_consumer_name }}-revocation-check"
+      description: Temporary key for the build's revocation check
+      ephemeral: true
+      expiresIn: 10m
+      subscription: "{{ maas_consumer_name }}"
+    status_code: [200, 201]
+    validate_certs: "{{ maas_consumer_validate_certs }}"
+  register: maas_consumer_temp_key
+  no_log: true
+
+- name: "Check 3: call the model with the temporary key"
+  ansible.builtin.uri:
+    url: "{{ maas_consumer_check_url }}"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ maas_consumer_temp_key.json.key }}"
+    body_format: json
+    body: "{{ maas_consumer_check_body }}"
+    status_code: [200, 401, 403, 429]
+    timeout: 120
+    validate_certs: "{{ maas_consumer_validate_certs }}"
+  register: maas_consumer_check_temp_before
+  failed_when: false
+  no_log: true
+
+- name: "Check 3: revoke the temporary key"
+  ansible.builtin.uri:
+    url: "{{ maas_consumer_maas_url }}/maas-api/v1/api-keys/{{ maas_consumer_temp_key.json.id }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ maas_consumer_sa_token.json.status.token }}"
+    status_code: [200, 204]
+    validate_certs: "{{ maas_consumer_validate_certs }}"
+  no_log: true
+
+# Revocation is effective once Authorino's cached validation of the key expires.
+- name: "Check 3: wait until the revoked key is refused"
+  ansible.builtin.uri:
+    url: "{{ maas_consumer_check_url }}"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ maas_consumer_temp_key.json.key }}"
+    body_format: json
+    body: "{{ maas_consumer_check_body }}"
+    status_code: [200, 401, 403, 404, 429]
+    timeout: 120
+    validate_certs: "{{ maas_consumer_validate_certs }}"
+  register: maas_consumer_check_temp_after
+  until: maas_consumer_check_temp_after.status in [401, 403]
+  retries: "{{ maas_consumer_revoke_retries }}"
+  delay: "{{ maas_consumer_revoke_delay }}"
+  failed_when: false
+  no_log: true
+
+- name: Summarise the access checks
+  ansible.builtin.set_fact:
+    maas_consumer_checks:
+      with_key: "{{ maas_consumer_check_with_key.status | default(-1) }}"
+      reply: "{{ (maas_consumer_check_with_key.json.choices | default([{}]))[0].message.content | default('') | trim | truncate(40) }}"
+      no_key: "{{ maas_consumer_check_no_key.status | default(-1) }}"
+      temp_before: "{{ maas_consumer_check_temp_before.status | default(-1) }}"
+      temp_after: "{{ maas_consumer_check_temp_after.status | default(-1) }}"
+
+- name: Check that governed access works as designed
+  ansible.builtin.assert:
+    that:
+      - maas_consumer_checks.with_key | int == 200
+      - maas_consumer_checks.no_key | int in [401, 403]
+      - maas_consumer_checks.temp_before | int == 200
+      - maas_consumer_checks.temp_after | int in [401, 403]
+    fail_msg: >-
+      Access checks (HTTP status): with the consumer's key {{ maas_consumer_checks.with_key }} (expected 200),
+      with no key {{ maas_consumer_checks.no_key }} (expected 401 or 403), temporary key before revocation
+      {{ maas_consumer_checks.temp_before }} (expected 200) and after {{ maas_consumer_checks.temp_after }}
+      (expected 401 or 403). A 404 means MaaS does not route the model ID stored in the Secret; a 429 means the token
+      budget is used up.
+    quiet: true
+
+- name: Record the access check results
+  ansible.builtin.set_fact:
+    maas_consumer_report: >-
+      {{ maas_consumer_report + ['Checks: with key 200 (model replied "' ~ maas_consumer_checks.reply ~ '"), no key '
+           ~ maas_consumer_checks.no_key ~ ', revoked key ' ~ maas_consumer_checks.temp_after] }}

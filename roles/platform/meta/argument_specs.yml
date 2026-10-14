@@ -1,0 +1,16 @@
+---
+argument_specs:
+  main:
+    short_description: Free the GPU, check the GPU stack and storage, and enable user workload monitoring
+    options:
+      platform_free_gpu:
+        type: bool
+        description: Delete reclaimable namespaces that hold the GPU.
+      platform_gpu_reclaimable_namespaces:
+        type: list
+        elements: str
+        description: Sample namespaces the build may delete to free the GPU.
+      platform_model_namespaces:
+        type: list
+        elements: str
+        description: The demo's own model namespaces, whose GPU use is expected.

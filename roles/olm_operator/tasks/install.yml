@@ -9,6 +9,9 @@
     namespace: "{{ olm_operator_source_namespace }}"
     name: "{{ olm_operator_package }}"
   register: olm_operator_packagemanifest
+  until: olm_operator_packagemanifest is not failed
+  retries: 3
+  delay: 5
 
 - name: Check that the catalogue offers the requested channel for {{ olm_operator_package }}
   ansible.builtin.assert:
@@ -41,6 +44,9 @@
     kind: OperatorGroup
     namespace: "{{ olm_operator_namespace }}"
   register: olm_operator_groups
+  until: olm_operator_groups is not failed
+  retries: 3
+  delay: 5
 
 - name: Create an OperatorGroup for {{ olm_operator_namespace }}
   kubernetes.core.k8s:

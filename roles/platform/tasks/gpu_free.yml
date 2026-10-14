@@ -1,7 +1,7 @@
 ---
 # The environment ships a sample model that holds the only GPU. Pods that have finished are
 # ignored: the GPU Operator's CUDA validator, for example, requests a GPU and then completes.
-# The demo's own models namespace is ignored too, so the phase can be rerun after phase 02.
+# The demo's own model namespaces are ignored too, so the phase can be rerun after phase 02.
 
 - name: List running and pending pods
   kubernetes.core.k8s_info:
@@ -10,22 +10,25 @@
       - status.phase!=Succeeded
       - status.phase!=Failed
   register: platform_pods
+  until: platform_pods is not failed
+  retries: 3
+  delay: 5
 
 - name: Find the namespaces whose pods request a GPU
   ansible.builtin.set_fact:
     platform_gpu_holders: >-
       {{ platform_pods.resources
          | community.general.json_query(platform_gpu_request_query)
-         | unique | reject('equalto', demo_namespaces.models) | sort }}
+         | unique | reject('in', platform_model_namespaces) | sort }}
 
 - name: Sort the GPU holders into samples to delete and workloads to leave alone
   ansible.builtin.set_fact:
     platform_gpu_reclaim: >-
-      {{ (platform_gpu_holders | select('in', demo_gpu_reclaimable_namespaces) | list)
-         if demo_free_gpu | bool else [] }}
+      {{ (platform_gpu_holders | select('in', platform_gpu_reclaimable_namespaces) | list)
+         if platform_free_gpu | bool else [] }}
     platform_gpu_blocking: >-
-      {{ (platform_gpu_holders | reject('in', demo_gpu_reclaimable_namespaces) | list)
-         if demo_free_gpu | bool else platform_gpu_holders }}
+      {{ (platform_gpu_holders | reject('in', platform_gpu_reclaimable_namespaces) | list)
+         if platform_free_gpu | bool else platform_gpu_holders }}
 
 - name: Stop if a workload the build does not own holds the GPU
   ansible.builtin.assert:
@@ -34,7 +37,7 @@
       Pods in {{ platform_gpu_blocking | join(', ') }} hold the GPU. The model needs the only GPU,
       so it would stay Pending.
       {{ 'Free it and rerun, or, if the environment always ships this namespace as a sample,
-      add it to demo_gpu_reclaimable_namespaces.' if demo_free_gpu | bool
+      add it to demo_gpu_reclaimable_namespaces.' if platform_free_gpu | bool
       else 'demo_free_gpu is false, so the build leaves it alone. Free it and rerun.' }}
     quiet: true
 
@@ -58,7 +61,7 @@
   until: >-
     platform_pods_after.resources
     | community.general.json_query(platform_gpu_request_query)
-    | reject('equalto', demo_namespaces.models) | list | length == 0
+    | reject('in', platform_model_namespaces) | list | length == 0
   retries: "{{ platform_gpu_release_retries }}"
   delay: "{{ platform_gpu_release_delay }}"
   when: platform_gpu_reclaim | length > 0

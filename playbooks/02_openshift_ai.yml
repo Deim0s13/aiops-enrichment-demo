@@ -1,12 +1,17 @@
 ---
-# Phase 02: configures OpenShift AI for the demo (DD04, DD07, DD14). Built in three parts; part 1
-# checks the OpenShift AI version and installs Red Hat Connectivity Link; part 2 deploys PostgreSQL,
-# the MaaS gateway, and switches on Models-as-a-Service and MLflow.
+# Phase 02: the AI layer (DD04, DD06, DD07, DD14), in the order the teams that own it would work:
+#   1. the shared PostgreSQL
+#   2. the platform team's AI platform: OpenShift AI checked, Connectivity Link, the MaaS gateway,
+#      Models-as-a-Service and MLflow (role openshift_ai)
+#   3. the model owner's model, served on the GPU and registered with MaaS (role model_serving)
+#   4. the application team's consumer, the enrichment service, onboarded with its own identity,
+#      token budget and API key, then checked through the gateway (role maas_consumer)
+# The roles take this kit's settings as inputs here, so each can be reused on its own.
 #   ansible-navigator run playbooks/02_openshift_ai.yml
 #
 # Safe to rerun. Run preflight and phase 01 first.
 
-- name: "Phase 02 | OpenShift AI: Models-as-a-Service, MLflow and model serving"
+- name: "Phase 02 | OpenShift AI: Models-as-a-Service, MLflow, the model and governed access"
   hosts: localhost
   gather_facts: false
   tags: [openshift_ai]
@@ -27,10 +32,48 @@
       vars:
         secrets_groups: [cluster]
 
-    - name: Configure OpenShift AI
+    - name: Deploy the shared PostgreSQL
+      ansible.builtin.include_role:
+        name: postgres
+      vars:
+        postgres_namespace: "{{ demo_namespaces.data }}"
+        postgres_image: "{{ demo_images.postgresql }}"
+        postgres_databases: "{{ demo_postgres_databases }}"
+
+    - name: Set up the AI platform
       ansible.builtin.include_role:
         name: openshift_ai
+      vars:
+        openshift_ai_operator: "{{ demo_operators.openshift_ai }}"
+        openshift_ai_connectivity_link_operator: "{{ demo_operators.connectivity_link }}"
+        openshift_ai_model_namespaces: ["{{ demo_namespaces.models }}"]
+        openshift_ai_database: "{{ postgres_connection }}"
+
+    - name: Serve the model and register it with Models-as-a-Service
+      ansible.builtin.include_role:
+        name: model_serving
+      vars:
+        model_serving_model: "{{ demo_model }}"
+        model_serving_namespace: "{{ demo_namespaces.models }}"
+
+    - name: Onboard the enrichment service to the model
+      ansible.builtin.include_role:
+        name: maas_consumer
+      vars:
+        maas_consumer_name: "{{ demo_maas_consumer.service_account }}"
+        maas_consumer_namespace: "{{ demo_namespaces.enrichment }}"
+        maas_consumer_description: the AIOps enrichment service
+        maas_consumer_model:
+          name: "{{ demo_model.name }}"
+          namespace: "{{ demo_namespaces.models }}"
+        maas_consumer_token_limit: "{{ demo_maas_consumer.token_limit }}"
+        maas_consumer_token_window: "{{ demo_maas_consumer.token_window }}"
+        maas_consumer_key_expiry: "{{ demo_maas_consumer.key_expiry }}"
+        maas_consumer_key_labels:
+          app: "{{ demo_maas_consumer.service_account }}"
+          environment: demo
+        maas_consumer_api_validate_certs: "{{ demo_cluster_validate_certs }}"
 
     - name: Report what phase 02 found and changed
       ansible.builtin.debug:
-        msg: "{{ openshift_ai_report }}"
+        msg: "{{ [postgres_report] + openshift_ai_report + model_serving_report + maas_consumer_report }}"

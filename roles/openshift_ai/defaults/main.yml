@@ -1,4 +1,7 @@
 ---
+# The AI platform for phase 02. The operators to check or install, the model namespaces allowed on
+# the MaaS gateway and the database connection are inputs (meta/argument_specs.yml).
+
 # Kuadrant is the policy layer of Red Hat Connectivity Link. MaaS uses it, through Authorino and
 # Limitador, to check API keys and enforce token rate limits at the gateway (DD14).
 openshift_ai_kuadrant_namespace: kuadrant-system
@@ -23,23 +26,3 @@ openshift_ai_mlflow_namespace: redhat-ods-applications
 openshift_ai_mlflow_storage_size: 10Gi
 openshift_ai_mlflow_ready_retries: 60
 openshift_ai_mlflow_ready_delay: 10
-
-# Model serving (DD04). The first start pulls the vLLM image and the ModelCar (several GB each)
-# and loads the model onto the GPU, so the wait is long.
-openshift_ai_model_ready_retries: 90
-openshift_ai_model_ready_delay: 20
-openshift_ai_model_cpu: "4"
-openshift_ai_model_memory: 16Gi
-openshift_ai_model_memory_limit: 24Gi
-
-# MaaS resources for the enrichment service. Policies and subscriptions live in the tenant namespace.
-openshift_ai_maas_tenant_namespace: models-as-a-service
-openshift_ai_maas_key_secret: maas-api-key
-# How long to wait for MaaS to accept the model, the policy and the subscription.
-openshift_ai_maas_resource_retries: 30
-openshift_ai_maas_resource_delay: 10
-# Callers verify the gateway's certificate; it is the environment's publicly trusted *.apps one.
-openshift_ai_maas_validate_certs: true
-# Revocation takes effect when Authorino's cache of the key expires.
-openshift_ai_maas_revoke_retries: 24
-openshift_ai_maas_revoke_delay: 5

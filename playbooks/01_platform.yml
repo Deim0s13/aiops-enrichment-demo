@@ -33,6 +33,10 @@
     - name: Free the GPU and check or configure the platform
       ansible.builtin.include_role:
         name: platform
+      vars:
+        platform_free_gpu: "{{ demo_free_gpu }}"
+        platform_gpu_reclaimable_namespaces: "{{ demo_gpu_reclaimable_namespaces }}"
+        platform_model_namespaces: ["{{ demo_namespaces.models }}"]
 
     - name: Report what phase 01 found and changed
       ansible.builtin.debug:

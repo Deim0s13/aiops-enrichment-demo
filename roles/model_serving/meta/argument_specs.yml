@@ -1,0 +1,54 @@
+---
+argument_specs:
+  main:
+    short_description: Serve one model on vLLM and register it with Models-as-a-Service
+    options:
+      model_serving_namespace:
+        type: str
+        required: true
+        description: Namespace for the model. The MaaS gateway must allow routes from it.
+      model_serving_model:
+        type: dict
+        required: true
+        description: The model to serve.
+        options:
+          name:
+            type: str
+            required: true
+            description: Name of the LLMInferenceService and its MaaS registration.
+          display_name:
+            type: str
+            required: true
+            description: Name shown in the OpenShift AI dashboard and the MaaS model list.
+          modelcar_image:
+            type: str
+            required: true
+            description: The model's ModelCar image, as an oci:// URI pinned to a tag.
+          max_model_len:
+            type: int
+            required: true
+            description: Context length vLLM serves, in tokens.
+      model_serving_gateway_name:
+        type: str
+        description: Name of the MaaS gateway.
+      model_serving_gateway_namespace:
+        type: str
+        description: Namespace of the MaaS gateway.
+      model_serving_cpu:
+        type: str
+        description: CPU request for the model server.
+      model_serving_memory:
+        type: str
+        description: Memory request for the model server.
+      model_serving_memory_limit:
+        type: str
+        description: Memory limit for the model server.
+      model_serving_gpus:
+        type: int
+        description: GPUs for the model server.
+      model_serving_ready_retries:
+        type: int
+        description: How many times to check whether the model is ready.
+      model_serving_ready_delay:
+        type: int
+        description: Seconds between those checks.

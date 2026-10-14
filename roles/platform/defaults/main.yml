@@ -1,4 +1,11 @@
 ---
+# GPU freeing (DD13). The playbook passes the kit's settings in. Namespaces in
+# platform_gpu_reclaimable_namespaces are deleted if they hold the GPU; any other holder stops the
+# build, except the demo's own model namespaces. Set platform_free_gpu to false to delete nothing.
+platform_free_gpu: true
+platform_gpu_reclaimable_namespaces: []
+platform_model_namespaces: []
+
 # How long to wait. On a fresh environment the NVIDIA driver may still be compiling, which can
 # take 10 to 20 minutes, so the ClusterPolicy wait is long.
 platform_gpu_ready_retries: 60

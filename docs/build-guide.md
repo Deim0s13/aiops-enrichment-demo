@@ -69,7 +69,7 @@ unset VAULT_TOKEN
 
 The CA bundle is why the build can trust the API. RHDP gives the application routes a publicly trusted certificate, but the API on port 6443 keeps a certificate signed by the cluster's own CA, which your laptop does not know. With the bundle, the build verifies the API against that CA before it sends the token. The bundle is not a secret; it is kept in Vault because it changes with each environment.
 
-The token is an OpenShift session token and expires after 24 hours by default. If preflight later reports that the cluster did not accept the token, log in again and repeat the `api_token` line.
+The token is an OpenShift session token and expires after 24 hours by default, so on a new day you will usually need to log in again and repeat the `api_token` line. Every cluster phase checks the token before it changes anything: it prints `Cluster API reachable; the token is accepted for admin`, or stops with a message saying the token has probably expired.
 
 ## 4 Run preflight
 
@@ -129,17 +129,28 @@ The list also contains signature and attestation entries named after image diges
 ansible-navigator run playbooks/02_openshift_ai.yml
 ```
 
-What it does:
+What it does, in the order the teams that would own each part in production would work. Each part is a role, and the playbook passes this kit's settings into it (see [roles/README.md](../roles/README.md)):
 
-1. **Checks OpenShift AI.** The environment must provide OpenShift AI 3.5 or later. The phase does not install or change it.
-2. **Installs Red Hat Connectivity Link** from the Red Hat catalogue, on the channel set in `demo_operators`. It first checks that the catalogue offers that channel. If Connectivity Link is already installed, it is left as it is.
-3. **Creates the Kuadrant instance** in `kuadrant-system`, which deploys the policy components Models-as-a-Service relies on.
-4. **Deploys PostgreSQL** in `aiops-data`, with TLS from the OpenShift service CA, and a database and user for Models-as-a-Service and for MLflow. Passwords are generated on the first run and kept in the `postgres-credentials` Secret; they never leave the cluster. A Job named `postgres-setup` creates the databases and users; it runs on every build and changes nothing once they exist.
+**The shared database** (role `postgres`)
+
+1. **Deploys PostgreSQL** in `aiops-data`, with TLS from the OpenShift service CA, and a database and user for Models-as-a-Service and for MLflow. Passwords are generated on the first run and kept in the `postgres-credentials` Secret; they never leave the cluster. A Job named `postgres-setup` creates the databases and users; it runs on every build and changes nothing once they exist.
+
+**The AI platform** (role `openshift_ai`, the platform team's part)
+
+2. **Checks OpenShift AI.** The environment must provide OpenShift AI 3.5 or later. The phase does not install or change it.
+3. **Installs Red Hat Connectivity Link** from the Red Hat catalogue, on the channel set in `demo_operators`. It first checks that the catalogue offers that channel. If Connectivity Link is already installed, it is left as it is.
+4. **Creates the Kuadrant instance** in `kuadrant-system`, which deploys the policy components Models-as-a-Service relies on.
 5. **Creates the Models-as-a-Service gateway** `maas-default-gateway` in `openshift-ingress`, on `maas.` followed by the cluster's application domain, using the environment's trusted `*.apps` certificate. It configures TLS between the gateway and Authorino as the MaaS documentation describes.
 6. **Gives Models-as-a-Service its database connection** and **switches on Models-as-a-Service and MLflow** in the DataScienceCluster, then waits for Models-as-a-Service to be ready. Other DataScienceCluster settings are left as they are.
 7. **Runs the MLflow server**, with its metadata in the shared PostgreSQL and its artifacts on a volume. The connection string is kept in the `mlflow-db-credentials` Secret in `redhat-ods-applications`. MLflow verifies PostgreSQL's certificate against the OpenShift service CA, which OpenShift injects into the `mlflow-postgres-ca` ConfigMap. On the first build MLflow runs a database migration Job before the server starts, so this step can take several minutes.
+
+**The model** (role `model_serving`, the model owner's part)
+
 8. **Serves the model** set in `demo_model` (Granite 3.1 8B Instruct, FP8, to start with) as an `LLMInferenceService` in `aiops-models`, on the GPU, behind the MaaS gateway. OpenShift AI supplies the Red Hat vLLM image and its start-up command. The first start pulls the vLLM image and the model's ModelCar image, several GB each, then loads the model onto the GPU: allow up to 30 minutes, with `FAILED - RETRYING` lines while it waits. Later starts take a few minutes.
 9. **Registers the model with Models-as-a-Service** with a `MaaSModelRef`. MaaS holds it at `Pending` ("Awaiting governance pairing") until a policy and a subscription cover it, so no model is exposed before someone has decided who may use it and how much.
+
+**The consumer** (role `maas_consumer`, the application team's part)
+
 10. **Gives the enrichment service governed access.** The service gets its own identity, the `aiops-enrichment` service account in `aiops-enrichment`. A `MaaSAuthPolicy` allows that identity to call the model and a `MaaSSubscription` gives it a token budget (100,000 tokens an hour, set in `demo_maas_consumer`). Both are in `models-as-a-service`. Once both are active, MaaS accepts the model and routes requests for it.
 11. **Mints the enrichment service's API key.** The phase asks Kubernetes for a 10-minute token for the service account and uses it to mint a MaaS API key, so the key belongs to the service account rather than to you. It then asks MaaS which models the key may use, as any client would, and finds the model there. MaaS publishes each model with an ID, such as `publishers/aiops-models/models/granite-3-1-8b-instruct`, and routes requests on the shared OpenAI-style endpoint by that ID, so the build uses what MaaS publishes rather than assuming a name. The key is stored in the `maas-api-key` Secret in `aiops-enrichment`, with its ID and expiry, the URL to send requests to and the model ID: everything the enrichment service needs. On a rerun the stored key is tested and kept if it still works; a new one is minted only if it does not.
 12. **Checks access through the gateway**, as a client would: a request with the enrichment key gets an answer from the model, a request with no key is refused, and a temporary key is minted, used, revoked and refused. Revocation takes effect when the gateway's cache of the key expires, so this check can wait up to two minutes. Keys never appear in the output; only status codes and the model's one-word reply do.
@@ -147,10 +158,10 @@ What it does:
 On the first run, expect:
 
 ```text
+- PostgreSQL ready at postgres.aiops-data.svc with databases maas, mlflow (created maas, mlflow)
 - 'rhods-operator 3.5.1: already installed (channel stable-3.x, namespace redhat-ods-operator)'
 - 'rhcl-operator 1.4.x: installed (channel stable, namespace openshift-operators)'
 - 'Kuadrant: ready in kuadrant-system'
-- PostgreSQL ready at postgres.aiops-data.svc with databases maas, mlflow (created maas, mlflow)
 - 'MaaS gateway: https://maas.apps... (certificate cert-manager-ingress-cert)'
 - 'Models-as-a-Service: ready'
 - 'MLflow: ready, metadata in PostgreSQL, artifacts on a 10Gi volume'
@@ -160,6 +171,8 @@ On the first run, expect:
 ```
 
 The model's reply may differ in case or punctuation; any reply with a 200 passes. A missing key gets 401 and a revoked key 403: the gateway knows the revoked key but refuses it. Either code passes.
+
+A single-node cluster's API server occasionally drops a connection. The build retries reads and waits, so you may see an occasional `FAILED - RETRYING` line on a task that normally passes first time; that is expected.
 
 On a rerun, Connectivity Link reports `already installed`, PostgreSQL lists its databases without `created`, the API key is `kept, still valid`, and the play recap shows `changed=2`: the database setup Job is replaced on every run.
 
@@ -200,7 +213,8 @@ podman stop aiops-demo-vault
 | Symptom | Cause and fix |
 |---|---|
 | "This run uses verbosity 3" | Secrets are not read at `-vvv` and above. Use `-vv` |
-| Preflight: "did not accept the token" | The session token expired. Log in again and repeat the `api_token` line in step 3 |
+| "did not accept the token", in preflight or at the start of any phase | The session token expired. Log in again and repeat the `api_token` line in step 3 |
+| "Cannot reach the cluster API" | The environment is stopped, or Vault holds an earlier environment's API URL. Check the environment is running, then repeat the `api_url` line in step 3 if it changed |
 | "The API presents a certificate signed by a CA that is not publicly trusted" | The CA bundle is not in Vault. Load it with the `api_ca_cert` line in step 3 |
 | "The API certificate is not signed by the CA bundle" | The bundle in Vault belongs to an earlier environment. Repeat the `api_ca_cert` line in step 3. As a last resort, `-e demo_cluster_validate_certs=false` turns verification off, which sends the token to a server that has not been verified |
 | "Pods in ... hold the GPU" | A workload other than the RHDP sample holds the GPU. List its pods with `oc get pods -n` followed by the namespace in the message, and stop or delete it. If it is a sample that every environment ships, add its namespace to `demo_gpu_reclaimable_namespaces` in `inventory/group_vars/all/main.yml` |

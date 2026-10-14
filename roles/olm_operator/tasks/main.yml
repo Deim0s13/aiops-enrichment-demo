@@ -17,6 +17,9 @@
     api_version: operators.coreos.com/v1alpha1
     kind: Subscription
   register: olm_operator_all_subscriptions
+  until: olm_operator_all_subscriptions is not failed
+  retries: 3
+  delay: 5
 
 - name: Select subscriptions to {{ olm_operator_package }}
   ansible.builtin.set_fact:

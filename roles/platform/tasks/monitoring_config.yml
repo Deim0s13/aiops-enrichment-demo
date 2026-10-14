@@ -10,6 +10,9 @@
     namespace: "{{ platform_monitoring_item.namespace }}"
     name: "{{ platform_monitoring_item.name }}"
   register: platform_monitoring_cm
+  until: platform_monitoring_cm is not failed
+  retries: 3
+  delay: 5
 
 - name: Merge the demo's settings into the current configuration
   ansible.builtin.set_fact:

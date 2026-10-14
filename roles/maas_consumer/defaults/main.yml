@@ -1,0 +1,37 @@
+---
+# Onboards one consumer to one model on Models-as-a-Service (DD14). The consumer and the model are
+# inputs (meta/argument_specs.yml).
+
+# How the consumer is described in annotations, key descriptions and messages.
+maas_consumer_description: "{{ maas_consumer_name }}"
+
+# The token budget: tokens per window, enforced at the gateway.
+maas_consumer_token_limit: 100000
+maas_consumer_token_window: 1h
+
+# Lifetime of the consumer's key. A rerun keeps a key that still works and mints a new one otherwise.
+maas_consumer_key_expiry: 30d
+maas_consumer_key_labels: {}
+
+# The Secret that holds the key, its ID and expiry, the URL to call and the model ID.
+maas_consumer_secret: maas-api-key
+
+# Fixed by MaaS: its gateway, and the namespace policies and subscriptions live in.
+maas_consumer_gateway_name: maas-default-gateway
+maas_consumer_gateway_namespace: openshift-ingress
+maas_consumer_tenant_namespace: models-as-a-service
+
+# Callers verify the gateway's certificate. On RHDP it is the publicly trusted *.apps one.
+maas_consumer_validate_certs: true
+# Verification of the cluster API for the token request. The playbook passes the kit's setting.
+maas_consumer_api_validate_certs: true
+
+# How long to wait for MaaS to activate the policy and subscription and accept the model.
+maas_consumer_resource_retries: 30
+maas_consumer_resource_delay: 10
+
+# Run the access checks after onboarding. Revocation takes effect when the gateway's cache of the
+# key expires, so the revocation check waits up to two minutes.
+maas_consumer_run_checks: true
+maas_consumer_revoke_retries: 24
+maas_consumer_revoke_delay: 5

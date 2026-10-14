@@ -9,6 +9,9 @@
     label_selectors:
       - "!olm.copiedFrom"
   register: platform_csvs
+  until: platform_csvs is not failed
+  retries: 3
+  delay: 5
 
 - name: Find the Node Feature Discovery and GPU operators
   ansible.builtin.set_fact:
@@ -55,6 +58,9 @@
   kubernetes.core.k8s_info:
     kind: Node
   register: platform_nodes
+  until: platform_nodes is not failed
+  retries: 3
+  delay: 5
 
 - name: Count GPU nodes and allocatable GPUs
   ansible.builtin.set_fact:

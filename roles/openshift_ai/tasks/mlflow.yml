@@ -1,5 +1,5 @@
 ---
-# Part 2b of phase 02: the MLflow server that records a trace of every model call (DD07).
+# The MLflow server that records a trace of every model call (DD07).
 # Enabling the mlflowoperator component (maas.yml) starts the operator; the server itself is
 # described by a single cluster-wide MLflow resource, which the operator turns into a Deployment
 # in openshift_ai_mlflow_namespace.
@@ -8,9 +8,12 @@
   kubernetes.core.k8s_info:
     api_version: v1
     kind: Secret
-    namespace: "{{ postgres_namespace }}"
-    name: "{{ postgres_credentials_secret }}"
+    namespace: "{{ openshift_ai_database.namespace }}"
+    name: "{{ openshift_ai_database.credentials_secret }}"
   register: openshift_ai_mlflow_credentials
+  until: openshift_ai_mlflow_credentials is not failed
+  retries: 3
+  delay: 5
   no_log: true
 
 # MLflow's PostgreSQL client verifies the server certificate (with a CA file configured, libpq
@@ -56,7 +59,7 @@
       stringData:
         backend-store-uri: >-
           postgresql://mlflow:{{ openshift_ai_mlflow_credentials.resources[0].data.mlflow | b64decode }}@{{
-          postgres_host }}:{{ postgres_port }}/mlflow?sslmode=verify-full
+          openshift_ai_database.host }}:{{ openshift_ai_database.port }}/mlflow?sslmode=verify-full
   no_log: true
 
 - name: Describe the MLflow server

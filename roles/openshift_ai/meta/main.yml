@@ -1,7 +1,7 @@
 ---
 galaxy_info:
   author: Patrick Leathen
-  description: Configure OpenShift AI for the demo, with Models-as-a-Service, MLflow and model serving
+  description: Set up the AI platform on OpenShift AI, with Models-as-a-Service and MLflow
   license: Apache-2.0
   min_ansible_version: "2.16"
   platforms:

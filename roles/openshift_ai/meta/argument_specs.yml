@@ -1,0 +1,37 @@
+---
+argument_specs:
+  main:
+    short_description: Set up the AI platform on OpenShift AI, with Models-as-a-Service and MLflow
+    options:
+      openshift_ai_operator:
+        type: dict
+        required: true
+        description: The OpenShift AI operator the environment must provide. The role does not install it.
+        options:
+          package: {type: str, required: true, description: OLM package name.}
+          channel: {type: str, required: true, description: Channel the operator is expected on.}
+          min_version: {type: str, required: true, description: Lowest acceptable version.}
+      openshift_ai_connectivity_link_operator:
+        type: dict
+        required: true
+        description: The Red Hat Connectivity Link operator, installed if the environment lacks it.
+        options:
+          package: {type: str, required: true, description: OLM package name.}
+          channel: {type: str, required: true, description: Channel to subscribe to.}
+          min_version: {type: str, required: true, description: Lowest acceptable version.}
+      openshift_ai_model_namespaces:
+        type: list
+        elements: str
+        required: true
+        description: Namespaces whose models may attach routes to the MaaS gateway.
+      openshift_ai_database:
+        type: dict
+        required: true
+        description: >-
+          The PostgreSQL that holds the MaaS and MLflow databases, with a maas and an mlflow key in
+          its credentials Secret.
+        options:
+          host: {type: str, required: true, description: Service hostname.}
+          port: {type: int, required: true, description: Service port.}
+          namespace: {type: str, required: true, description: Namespace of the credentials Secret.}
+          credentials_secret: {type: str, required: true, description: Name of the credentials Secret.}

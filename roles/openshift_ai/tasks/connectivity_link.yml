@@ -6,9 +6,9 @@
   ansible.builtin.include_role:
     name: olm_operator
   vars:
-    olm_operator_package: "{{ demo_operators.connectivity_link.package }}"
-    olm_operator_channel: "{{ demo_operators.connectivity_link.channel }}"
-    olm_operator_min_version: "{{ demo_operators.connectivity_link.min_version }}"
+    olm_operator_package: "{{ openshift_ai_connectivity_link_operator.package }}"
+    olm_operator_channel: "{{ openshift_ai_connectivity_link_operator.channel }}"
+    olm_operator_min_version: "{{ openshift_ai_connectivity_link_operator.min_version }}"
 
 - name: Create the Kuadrant namespace {{ openshift_ai_kuadrant_namespace }}
   kubernetes.core.k8s:

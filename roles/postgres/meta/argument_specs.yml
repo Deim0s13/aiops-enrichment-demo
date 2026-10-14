@@ -1,0 +1,33 @@
+---
+argument_specs:
+  main:
+    short_description: Shared PostgreSQL with TLS and a database and user per consumer
+    options:
+      postgres_namespace:
+        type: str
+        required: true
+        description: Namespace for PostgreSQL and its credentials Secret.
+      postgres_image:
+        type: str
+        required: true
+        description: PostgreSQL image, pinned to a tag.
+      postgres_databases:
+        type: list
+        elements: str
+        required: true
+        description: A database and a user of the same name are created for each entry.
+      postgres_name:
+        type: str
+        description: Name of the Deployment, Service and storage.
+      postgres_storage_size:
+        type: str
+        description: Size of the data volume.
+      postgres_credentials_secret:
+        type: str
+        description: Secret that holds the generated passwords.
+      postgres_ready_retries:
+        type: int
+        description: How many times to check whether PostgreSQL and its setup Job are ready.
+      postgres_ready_delay:
+        type: int
+        description: Seconds between those checks.

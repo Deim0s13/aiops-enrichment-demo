@@ -9,8 +9,8 @@
   ansible.builtin.assert:
     that: postgres_image is not search('REPLACE_WITH|:latest$')
     fail_msg: >-
-      demo_images.postgresql is '{{ postgres_image }}'. Pin it to a tag; see the build guide for how to
-      list the available tags.
+      The PostgreSQL image is '{{ postgres_image }}' (demo_images.postgresql). Pin it to a tag;
+      see the build guide for how to list the available tags.
     quiet: true
 
 - name: Create the namespace for PostgreSQL
@@ -31,6 +31,9 @@
     namespace: "{{ postgres_namespace }}"
     name: "{{ postgres_credentials_secret }}"
   register: postgres_existing_credentials
+  until: postgres_existing_credentials is not failed
+  retries: 3
+  delay: 5
   no_log: true
 
 - name: Work out which passwords are missing
@@ -326,10 +329,15 @@
       oc logs job/{{ postgres_name }}-setup -n {{ postgres_namespace }}
     quiet: true
 
+# postgres_connection is the role's output: what a client needs to connect, with passwords in the
+# credentials Secret under one key per database.
 - name: Record the PostgreSQL result
   ansible.builtin.set_fact:
-    postgres_host: "{{ postgres_name }}.{{ postgres_namespace }}.svc"
-    postgres_port: 5432
+    postgres_connection:
+      host: "{{ postgres_name }}.{{ postgres_namespace }}.svc"
+      port: 5432
+      namespace: "{{ postgres_namespace }}"
+      credentials_secret: "{{ postgres_credentials_secret }}"
     postgres_report: >-
       PostgreSQL ready at {{ postgres_name }}.{{ postgres_namespace }}.svc with databases
       {{ postgres_databases | join(', ') }}{{ ' (created ' ~ postgres_missing_passwords | reject('equalto', 'admin') | join(', ') ~ ')'

@@ -1,0 +1,49 @@
+---
+# The application team's part (DD14, ADR06): onboard one consumer to one model on Models-as-a-
+# Service. The consumer gets its own identity, a policy and a token budget, and an API key that
+# belongs to it, stored with the model's ID and URL in one Secret. The checks then call the model
+# through the gateway as the consumer would. Cluster access comes from the module_defaults the
+# calling play sets; the token request uses the cluster credentials from the secrets role.
+
+- name: Start the consumer report
+  ansible.builtin.set_fact:
+    maas_consumer_report: []
+
+# The role finds the platform's endpoint itself, as an application team would, so it can run without
+# the platform role in the same play.
+- name: Read the MaaS gateway
+  kubernetes.core.k8s_info:
+    api_version: gateway.networking.k8s.io/v1
+    kind: Gateway
+    namespace: "{{ maas_consumer_gateway_namespace }}"
+    name: "{{ maas_consumer_gateway_name }}"
+  register: maas_consumer_gateway
+  until: maas_consumer_gateway is not failed
+  retries: 3
+  delay: 5
+
+- name: Report a missing MaaS gateway
+  ansible.builtin.assert:
+    that: >-
+      (maas_consumer_gateway.resources | first | default({})).spec.listeners | default([])
+      | selectattr('hostname', 'defined') | list | length > 0
+    fail_msg: >-
+      There is no MaaS gateway {{ maas_consumer_gateway_name }} with a hostname in
+      {{ maas_consumer_gateway_namespace }}. Run the openshift_ai role (phase 02) first.
+    quiet: true
+
+- name: Work out the consumer's identity and the MaaS address
+  ansible.builtin.set_fact:
+    maas_consumer_user: "system:serviceaccount:{{ maas_consumer_namespace }}:{{ maas_consumer_name }}"
+    maas_consumer_maas_url: >-
+      https://{{ (maas_consumer_gateway.resources[0].spec.listeners | selectattr('hostname', 'defined') | first).hostname }}
+
+- name: Give the consumer governed access to the model
+  ansible.builtin.include_tasks: access.yml
+
+- name: Mint or keep the consumer's API key
+  ansible.builtin.include_tasks: key.yml
+
+- name: Check governed access through the gateway
+  ansible.builtin.include_tasks: checks.yml
+  when: maas_consumer_run_checks | bool

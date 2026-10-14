@@ -26,6 +26,7 @@
         name: secrets
       vars:
         secrets_groups: "{{ preflight_groups }}"
+        secrets_check_cluster: false
 
     - name: Report secret groups that could not be read
       ansible.builtin.assert:

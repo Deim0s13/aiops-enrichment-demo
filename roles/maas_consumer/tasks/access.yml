@@ -1,0 +1,130 @@
+---
+# The consumer's identity and its governed access to one model: a service account, a MaaSAuthPolicy
+# that allows it to call the model and a MaaSSubscription that gives it a token budget. MaaS
+# accepts the model once a policy and a subscription both cover it.
+
+- name: Create the consumer namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ maas_consumer_namespace }}"
+
+- name: Create the consumer's identity
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: "{{ maas_consumer_name }}"
+        namespace: "{{ maas_consumer_namespace }}"
+
+# Both are needed: the policy decides who may call the model, the subscription how much.
+- name: Allow the consumer to call the model
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaaSAuthPolicy
+      metadata:
+        name: "{{ maas_consumer_name }}"
+        namespace: "{{ maas_consumer_tenant_namespace }}"
+        annotations:
+          openshift.io/description: "Model access for {{ maas_consumer_description }}"
+      spec:
+        modelRefs:
+          - name: "{{ maas_consumer_model.name }}"
+            namespace: "{{ maas_consumer_model.namespace }}"
+        subjects:
+          users:
+            - "{{ maas_consumer_user }}"
+
+- name: Give the consumer a token budget
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaaSSubscription
+      metadata:
+        name: "{{ maas_consumer_name }}"
+        namespace: "{{ maas_consumer_tenant_namespace }}"
+        annotations:
+          openshift.io/description: "Token budget for {{ maas_consumer_description }}"
+      spec:
+        owner:
+          users:
+            - "{{ maas_consumer_user }}"
+        modelRefs:
+          - name: "{{ maas_consumer_model.name }}"
+            namespace: "{{ maas_consumer_model.namespace }}"
+            tokenRateLimits:
+              - limit: "{{ maas_consumer_token_limit | int }}"
+                window: "{{ maas_consumer_token_window }}"
+
+- name: Wait for the policy and the subscription to be active
+  kubernetes.core.k8s_info:
+    api_version: maas.opendatahub.io/v1alpha1
+    kind: "{{ item }}"
+    namespace: "{{ maas_consumer_tenant_namespace }}"
+    name: "{{ maas_consumer_name }}"
+  register: maas_consumer_access
+  until: (maas_consumer_access.resources | first | default({})).status.phase | default('') == 'Active'
+  retries: "{{ maas_consumer_resource_retries }}"
+  delay: "{{ maas_consumer_resource_delay }}"
+  failed_when: false
+  loop: [MaaSAuthPolicy, MaaSSubscription]
+
+# Reduced to kind, phase and messages first: looping over the registered results would print each
+# module invocation, cluster token included, at -vv.
+- name: Summarise the policy and subscription status
+  ansible.builtin.set_fact:
+    maas_consumer_access_status: >-
+      {{ maas_consumer_access_status | default([]) + [{
+           'kind': item.item,
+           'phase': (item.resources | first | default({})).status.phase | default(''),
+           'messages': (item.resources | first | default({})).status.conditions | default([])
+                       | map(attribute='message', default='') | select | join('; ')}] }}
+  loop: "{{ maas_consumer_access.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  no_log: true
+
+- name: Report a policy or subscription that is not active
+  ansible.builtin.assert:
+    that: item.phase == 'Active'
+    fail_msg: >-
+      The {{ item.kind }} for {{ maas_consumer_description }} is {{ item.phase or 'not reporting a phase' }}:
+      {{ item.messages or 'no status yet' }}.
+      Check it with: oc get {{ item.kind | lower }} {{ maas_consumer_name }}
+      -n {{ maas_consumer_tenant_namespace }} -o yaml
+    quiet: true
+  loop: "{{ maas_consumer_access_status }}"
+  loop_control:
+    label: "{{ item.kind }}"
+
+# Now that the policy and subscription are active, MaaS can pair them with the model.
+- name: Wait for MaaS to accept the model
+  kubernetes.core.k8s_info:
+    api_version: maas.opendatahub.io/v1alpha1
+    kind: MaaSModelRef
+    namespace: "{{ maas_consumer_model.namespace }}"
+    name: "{{ maas_consumer_model.name }}"
+  register: maas_consumer_modelref
+  until: (maas_consumer_modelref.resources | first | default({})).status.phase | default('') == 'Ready'
+  retries: "{{ maas_consumer_resource_retries }}"
+  delay: "{{ maas_consumer_resource_delay }}"
+  failed_when: false
+
+- name: Report a model MaaS has not accepted
+  ansible.builtin.assert:
+    that: (maas_consumer_modelref.resources | first | default({})).status.phase | default('') == 'Ready'
+    fail_msg: >-
+      MaaS has not accepted {{ maas_consumer_model.name }} (phase
+      {{ (maas_consumer_modelref.resources | first | default({})).status.phase | default('unknown') }}:
+      {{ (maas_consumer_modelref.resources | first | default({})).status.conditions | default([])
+         | map(attribute='message', default='') | select | join('; ') or 'no status yet' }}).
+      Check it with: oc get maasmodelref {{ maas_consumer_model.name }} -n {{ maas_consumer_model.namespace }} -o yaml
+    quiet: true
