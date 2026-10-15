@@ -30,6 +30,10 @@ maas_consumer_api_validate_certs: true
 maas_consumer_resource_retries: 30
 maas_consumer_resource_delay: 10
 
+# How long to wait for MaaS to offer the model to the key, after the subscription is active.
+maas_consumer_offer_retries: 6
+maas_consumer_offer_delay: 10
+
 # Run the access checks after onboarding. Revocation takes effect when the gateway's cache of the
 # key expires, so the revocation check waits up to two minutes.
 maas_consumer_run_checks: true

@@ -2,6 +2,9 @@
 # Serves one model on vLLM as an LLMInferenceService and registers it with Models-as-a-Service
 # (DD04, DD14). The model and its namespace are inputs (meta/argument_specs.yml).
 
+# present serves the model; absent removes it and waits until its pods have gone, freeing the GPU.
+model_serving_state: present
+
 # The MaaS gateway the model is published on. Its name and namespace are fixed by MaaS.
 model_serving_gateway_name: maas-default-gateway
 model_serving_gateway_namespace: openshift-ingress
@@ -16,3 +19,7 @@ model_serving_gpus: 1
 # the GPU, so the wait is long.
 model_serving_ready_retries: 90
 model_serving_ready_delay: 20
+
+# How long to wait for a removed model's pods to stop.
+model_serving_removal_retries: 30
+model_serving_removal_delay: 10

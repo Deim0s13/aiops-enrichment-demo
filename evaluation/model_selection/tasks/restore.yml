@@ -1,0 +1,50 @@
+---
+# Removes the test consumer, then puts the demo model back on the GPU. The test consumer's key
+# stops working with its subscription, and expires within a day in any case.
+
+- name: Remove the test consumer's policy and subscription
+  kubernetes.core.k8s:
+    state: absent
+    api_version: maas.opendatahub.io/v1alpha1
+    kind: "{{ ms_kind }}"
+    namespace: "{{ maas_consumer_tenant_namespace | default('models-as-a-service') }}"
+    name: "{{ model_selection_consumer.name }}"
+  loop: [MaaSAuthPolicy, MaaSSubscription]
+  loop_control:
+    loop_var: ms_kind
+
+- name: Remove the test consumer's namespace, identity and key
+  kubernetes.core.k8s:
+    state: absent
+    api_version: v1
+    kind: Namespace
+    name: "{{ model_selection_consumer.namespace }}"
+
+- name: Find the models being served
+  kubernetes.core.k8s_info:
+    api_version: serving.kserve.io/v1alpha2
+    kind: LLMInferenceService
+    namespace: "{{ demo_namespaces.models }}"
+  register: ms_served_after
+  until: ms_served_after is not failed
+  retries: 3
+  delay: 5
+
+- name: Remove the candidates to free the GPU for the demo model
+  ansible.builtin.include_role:
+    name: model_serving
+  vars:
+    model_serving_state: absent
+    model_serving_namespace: "{{ demo_namespaces.models }}"
+    model_serving_model:
+      name: "{{ ms_other_model }}"
+  loop: "{{ ms_served_after.resources | map(attribute='metadata.name') | reject('equalto', demo_model.name) | list }}"
+  loop_control:
+    loop_var: ms_other_model
+
+- name: Serve the demo model again
+  ansible.builtin.include_role:
+    name: model_serving
+  vars:
+    model_serving_model: "{{ demo_model }}"
+    model_serving_namespace: "{{ demo_namespaces.models }}"

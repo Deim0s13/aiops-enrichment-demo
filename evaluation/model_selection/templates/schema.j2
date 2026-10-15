@@ -1,0 +1,41 @@
+{#- The enrichment response schema (design section 5.3) for one request. Citations may only be IDs
+    supplied with this request and the job only one from the catalogue, so a model constrained to
+    this schema cannot invent either. Provenance is added by the service, not the model. -#}
+{%- set ids = (ms_case.evidence | map(attribute='id') | list) + (ms_case.passages | map(attribute='id') | list) -%}
+{%- set citations = {'type': 'array', 'minItems': 1, 'items': {'type': 'string', 'enum': ids}} -%}
+{{ {
+  'type': 'object',
+  'additionalProperties': false,
+  'required': ['status', 'summary', 'symptoms', 'likely_causes', 'next_steps', 'recommended_job', 'gaps',
+               'manual_review_required'],
+  'properties': {
+    'status': {'type': 'string', 'enum': ['enriched', 'insufficient_evidence']},
+    'summary': {'type': 'string'},
+    'symptoms': {'type': 'array', 'maxItems': 6, 'items': {'type': 'string'}},
+    'likely_causes': {'type': 'array', 'maxItems': 3, 'items': {
+      'type': 'object', 'additionalProperties': false,
+      'required': ['statement', 'confidence', 'citations'],
+      'properties': {
+        'statement': {'type': 'string'},
+        'confidence': {'type': 'string', 'enum': ['high', 'medium', 'low']},
+        'citations': citations}}},
+    'next_steps': {'type': 'array', 'maxItems': 5, 'items': {
+      'type': 'object', 'additionalProperties': false,
+      'required': ['step', 'prerequisites', 'risk', 'verify', 'citations'],
+      'properties': {
+        'step': {'type': 'string'},
+        'prerequisites': {'type': 'string'},
+        'risk': {'type': 'string'},
+        'verify': {'type': 'string'},
+        'citations': citations}}},
+    'recommended_job': {'anyOf': [
+      {'type': 'null'},
+      {'type': 'object', 'additionalProperties': false,
+       'required': ['job_id', 'reason', 'inputs'],
+       'properties': {
+         'job_id': {'type': 'string', 'enum': model_selection_catalogue | map(attribute='id') | list},
+         'reason': {'type': 'string'},
+         'inputs': {'type': 'object', 'additionalProperties': {'type': 'string'}}}}]},
+    'gaps': {'type': 'array', 'maxItems': 6, 'items': {'type': 'string'}},
+    'manual_review_required': {'type': 'boolean'}}
+} | to_json }}

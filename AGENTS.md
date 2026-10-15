@@ -16,6 +16,6 @@ This repository builds a demonstration of AI-assisted incident enrichment on Ope
 - Do not use `kubernetes.core.k8s_exec`: in `kubernetes.core` 6.6.0 it fails to import with current Kubernetes Python clients. Run one-off work in a cluster as a Job instead.
 - Add any new non-builtin module to `mock_modules` in `.ansible-lint`, and lint in an environment without collections installed, as pre-commit and CI do.
 - Use fictional organisation and service names only: the organisation is ACME Bank.
-- Keep `playbooks/` (build phases, run from a laptop) separate from `automation/` and `rulebooks/` (content AAP runs).
+- Keep `playbooks/` (build phases, run from a laptop) and `evaluation/` (tests run from a laptop, not part of the build) separate from `automation/` and `rulebooks/` (content AAP runs).
 - Documentation uses British English and does not use em dashes.
 - If a change departs from the implementation design, update the design in the same change and say why.

@@ -10,7 +10,7 @@ argument_specs:
       model_serving_model:
         type: dict
         required: true
-        description: The model to serve.
+        description: The model to serve or remove. Serving needs every field; removing needs only the name.
         options:
           name:
             type: str
@@ -18,16 +18,17 @@ argument_specs:
             description: Name of the LLMInferenceService and its MaaS registration.
           display_name:
             type: str
-            required: true
             description: Name shown in the OpenShift AI dashboard and the MaaS model list.
           modelcar_image:
             type: str
-            required: true
             description: The model's ModelCar image, as an oci:// URI pinned to a tag.
           max_model_len:
             type: int
-            required: true
             description: Context length vLLM serves, in tokens.
+      model_serving_state:
+        type: str
+        choices: [present, absent]
+        description: Serve the model, or remove it and wait until its pods have gone.
       model_serving_gateway_name:
         type: str
         description: Name of the MaaS gateway.
@@ -50,5 +51,11 @@ argument_specs:
         type: int
         description: How many times to check whether the model is ready.
       model_serving_ready_delay:
+        type: int
+        description: Seconds between those checks.
+      model_serving_removal_retries:
+        type: int
+        description: How many times to check that a removed model's pods have gone.
+      model_serving_removal_delay:
         type: int
         description: Seconds between those checks.

@@ -1,0 +1,78 @@
+---
+# Model selection test (OI04): serves each candidate model in turn, sends the same cases through the
+# MaaS gateway as the enrichment service would, scores the answers and writes a report to
+# docs/model-selection/. Design, decision rule and limits: docs/model-selection.md.
+#   ansible-navigator run evaluation/model_selection.yml
+#
+# Run phase 02 first. Takes 1.5 to 2 hours, mostly pulling each model's image the first time. It
+# ends by serving demo_model again; rerun phase 02 afterwards to confirm the enrichment service's access.
+#
+# To score an earlier run again with the current scoring, without the cluster or any model calls,
+# name its results file from docs/model-selection/:
+#   ansible-navigator run evaluation/model_selection.yml -e model_selection_rescore=results-STAMP.json
+
+- name: "Model selection test | candidates through the MaaS gateway"
+  hosts: localhost
+  gather_facts: false
+  tags: [model_selection]
+
+  # See playbooks/01_platform.yml for why the modules are listed one by one.
+  module_defaults:
+    kubernetes.core.k8s: &cluster_auth
+      host: "{{ secrets_values.cluster_api_url }}"
+      api_key: "{{ secrets_values.cluster_api_token }}"
+      validate_certs: "{{ demo_cluster_validate_certs }}"
+      ca_cert: "{{ secrets_cluster_ca_file | default(omit) }}"
+    kubernetes.core.k8s_info: *cluster_auth
+
+  vars_files:
+    - model_selection/settings.yml
+    - model_selection/catalogue.yml
+
+  tasks:
+    - name: Resolve the cluster secrets
+      ansible.builtin.include_role:
+        name: secrets
+      vars:
+        secrets_groups: [cluster]
+      when: model_selection_rescore is not defined
+
+    - name: Load the cases
+      ansible.builtin.set_fact:
+        ms_cases: "{{ ms_cases | default([]) + [lookup('ansible.builtin.file', item) | from_yaml] }}"
+      loop: "{{ query('ansible.builtin.fileglob', playbook_dir ~ '/model_selection/cases/*.yml') | sort }}"
+      loop_control:
+        label: "{{ item | basename }}"
+
+    - name: Check the cases and candidates
+      ansible.builtin.assert:
+        that:
+          - ms_cases | length > 0
+          - model_selection_candidates | length > 0
+          - model_selection_candidates | map(attribute='name') | unique | list | length == model_selection_candidates | length
+        fail_msg: Expected at least one case and one candidate, with unique candidate names.
+        quiet: true
+
+    - name: Start with no results
+      ansible.builtin.set_fact:
+        ms_scored: []
+        ms_report_lines: []
+
+    - name: Test each candidate
+      ansible.builtin.include_tasks: model_selection/tasks/candidate.yml
+      loop: "{{ model_selection_candidates }}"
+      loop_control:
+        loop_var: ms_candidate
+        label: "{{ ms_candidate.name }}"
+      when: model_selection_rescore is not defined
+
+    - name: Remove the test consumer and serve the demo model again
+      ansible.builtin.include_tasks: model_selection/tasks/restore.yml
+      when: model_selection_rescore is not defined
+
+    - name: Score an earlier run again
+      ansible.builtin.include_tasks: model_selection/tasks/rescore.yml
+      when: model_selection_rescore is defined
+
+    - name: Write the report and the raw results
+      ansible.builtin.include_tasks: model_selection/tasks/report.yml

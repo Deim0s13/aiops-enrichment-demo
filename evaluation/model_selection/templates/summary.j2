@@ -1,0 +1,49 @@
+{#- One summary per candidate, as JSON. Gates and correctness use the constrained runs only. -#}
+{%- set acc = namespace(out=[]) -%}
+{%- for cand in model_selection_candidates -%}
+  {%- set mine = ms_scored | selectattr('model', 'equalto', cand.name) | list -%}
+  {%- set con = mine | selectattr('constrained') | list -%}
+  {%- set unc = mine | rejectattr('constrained') | list -%}
+  {%- set ok_calls = con | selectattr('http_status', 'equalto', 200) | list -%}
+  {%- set secs = ok_calls | map(attribute='seconds') | map('float') | sort | list -%}
+  {%- set median = (secs[(secs | length) // 2] if secs | length % 2 == 1
+                    else ((secs[(secs | length) // 2 - 1] + secs[(secs | length) // 2]) / 2)) if secs else none -%}
+  {%- set tokens = ok_calls | map(attribute='completion_tokens') | map('int') | list -%}
+  {%- set prompt_tokens = ok_calls | map(attribute='prompt_tokens') | map('int') | list -%}
+  {%- set fails = namespace(list=[]) -%}
+  {%- for r in con if not r.gate_ok -%}
+    {%- set fails.list = fails.list + [r.case ~ ' ' ~ r.run ~ ': '
+          ~ ((r.gate_failures | join(', ')) if r.http_status == 200 else ('HTTP ' ~ r.http_status ~ ' ' ~ r.error))] -%}
+  {%- endfor -%}
+  {%- set failures = fails.list -%}
+  {%- set gates = con | length > 0 and failures | length == 0 -%}
+  {%- set correct = con | selectattr('correct') | list | length -%}
+  {%- set mean_tokens = ((tokens | sum) / (tokens | length)) | round | int if tokens else none -%}
+  {%- set mean_prompt = ((prompt_tokens | sum) / (prompt_tokens | length)) | round | int if prompt_tokens else none -%}
+  {%- set skipped = ms_not_tested | default([]) | selectattr('model', 'equalto', cand.name) | first | default({}) -%}
+  {%- set acc.out = acc.out + [{
+    'model': cand.name,
+    'display_name': cand.display_name,
+    'constrained_runs': con | length,
+    'gates_passed': gates,
+    'gate_failures': failures,
+    'correct': correct,
+    'median_seconds': median,
+    'within_latency_target': median is not none and median <= model_selection_latency_target | float,
+    'mean_completion_tokens': mean_tokens,
+    'mean_prompt_tokens': mean_prompt,
+    'unconstrained_runs': unc | length,
+    'unconstrained_valid_json': unc | selectattr('valid_json') | list | length,
+    'unconstrained_fenced': unc | selectattr('fenced') | list | length,
+    'unconstrained_invented_citations': unc | map(attribute='invented_citations') | map('length') | sum,
+    'unconstrained_off_catalogue': unc | rejectattr('job_in_catalogue') | list | length,
+    'unconstrained_gate_ok': unc | selectattr('gate_ok') | list | length,
+    'not_tested': skipped.reason | default(''),
+    'line': (cand.display_name ~ ': not tested, ' ~ skipped.reason | default('') | truncate(150)) if skipped else
+            cand.display_name ~ ': gates ' ~ ('passed' if gates else 'failed (' ~ failures | length ~ ' runs)')
+            ~ ', correct ' ~ correct ~ ' of ' ~ con | length
+            ~ ', median ' ~ (median | string if median is not none else 'n/a') ~ ' s'
+            ~ ', about ' ~ (mean_tokens | string if mean_tokens is not none else 'n/a') ~ ' output tokens'
+  }] -%}
+{%- endfor -%}
+{{ acc.out | to_json }}

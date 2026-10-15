@@ -1,0 +1,16 @@
+---
+# The level 2 catalogue supplied with every request: the only jobs enrichment may recommend
+# (design section 5.3). Fictional ACME Bank automation.
+model_selection_catalogue:
+  - id: payments-heapdump-restart
+    description: >-
+      Capture a heap dump from one payments-notify pod to the support volume, then restart that pod.
+      Use when the JVM heap is exhausted, to preserve evidence before recovery.
+  - id: payments-scale-out
+    description: >-
+      Add one replica to payments-notify, up to a maximum of six. Use to absorb load while a cause is
+      investigated.
+  - id: payments-db-failover
+    description: >-
+      Fail the payments database over to its standby. High risk: interrupts every payments service for
+      up to two minutes. Use only for a confirmed primary database failure.

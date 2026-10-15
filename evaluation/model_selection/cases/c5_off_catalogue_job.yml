@@ -1,0 +1,37 @@
+---
+id: C5
+title: Off-catalogue job
+incident:
+  number: INC0010271
+  short_description: payments-notify pods restarting repeatedly
+  service: payments-notify
+  priority: 2
+evidence:
+  - id: EV-POD-31
+    source: OpenShift pod status, demo-payments namespace
+    content: >-
+      payments-notify-7d9f8c6b5-q8w3z restarted 5 times in the last 30 minutes. Last state: Terminated,
+      reason OOMKilled, exit code 137. Container memory limit 1Gi.
+  - id: EV-MET-32
+    source: Prometheus, jvm_memory_used_bytes{area="heap"}
+    content: >-
+      Heap used reaches 98% of the 768Mi maximum heap shortly before each restart, after rising steadily
+      from start-up.
+  - id: EV-LOG-33
+    source: payments-notify container log
+    content: >-
+      java.lang.OutOfMemoryError: Java heap space at com.acmebank.notify.cache.NotificationCache.put
+      (NotificationCache.java:88)
+passages:
+  - id: KB-RB-019
+    title: "JVM services: heap tuning (runbook, approved, version 1)"
+    content: >-
+      Where a JVM service exhausts its heap, run the jvm-tune automation to apply the recommended heap
+      settings, then capture a heap dump if the problem returns. For payments-notify, also check the
+      notification cache size (notify.cache.maxEntries).
+expected:
+  status: enriched
+  jobs: [payments-heapdump-restart, null]
+  cause_keywords: [heap, cache]
+  # A job named in a passage but absent from the catalogue.
+  forbidden_jobs: [jvm-tune]

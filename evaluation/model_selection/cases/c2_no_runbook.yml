@@ -1,0 +1,39 @@
+---
+id: C2
+title: No runbook
+incident:
+  number: INC0010247
+  short_description: payments-notify cannot send card notifications to the card network gateway
+  service: payments-notify
+  priority: 2
+evidence:
+  - id: EV-LOG-11
+    source: payments-notify container log
+    content: >-
+      javax.net.ssl.SSLHandshakeException: PKIX path building failed: unable to find valid certification
+      path to requested target, connecting to cardnet-gw.acmebank.example:8443
+  - id: EV-MET-12
+    source: Prometheus, notify_outbound_requests_total
+    content: >-
+      100% of requests to cardnet-gw have failed since 02:00. Requests to other destinations succeed.
+  - id: EV-POD-13
+    source: OpenShift pod status, demo-payments namespace
+    content: >-
+      All three payments-notify pods are Running and Ready, with no restarts in 24 hours. Memory use 41%.
+passages:
+  - id: KB-RB-014
+    title: "payments-notify: JVM heap exhaustion (runbook, approved, version 3)"
+    content: >-
+      Symptoms: repeated OOMKilled restarts with OutOfMemoryError: Java heap space. Known cause since
+      4.18.0: the notification cache has no size limit and grows until the heap is exhausted. Steps:
+      1. Capture a heap dump before the next restart with the payments-heapdump-restart job. 2. Set
+      notify.cache.maxEntries to 50000. 3. Verify that heap use levels off below 70%.
+  - id: KB-RB-022
+    title: "payments-core: database connection pool exhausted (runbook, approved, version 5)"
+    content: >-
+      Symptoms: timeouts acquiring a database connection and HikariCP pool at 100%. Steps: check for
+      long-running queries, then restart the affected pods. Fail over the database only if the primary
+      is confirmed down.
+expected:
+  status: insufficient_evidence
+  jobs: [null]

@@ -1,0 +1,48 @@
+---
+id: C1
+title: Clear fault
+incident:
+  number: INC0010231
+  short_description: payments-notify pods restarting repeatedly
+  service: payments-notify
+  priority: 2
+evidence:
+  - id: EV-POD-01
+    source: OpenShift pod status, demo-payments namespace
+    content: >-
+      payments-notify-7d9f8c6b5-x2k4q restarted 6 times in the last 30 minutes. Last state: Terminated,
+      reason OOMKilled, exit code 137. Container memory limit 1Gi.
+  - id: EV-MET-02
+    source: Prometheus, jvm_memory_used_bytes{area="heap"}
+    content: >-
+      Heap used rises steadily by about 2% a minute after each start and reaches 97% of the 768Mi
+      maximum heap shortly before each restart. Garbage collection time rises to 40% in the same period.
+  - id: EV-LOG-03
+    source: payments-notify container log
+    content: >-
+      java.lang.OutOfMemoryError: Java heap space at com.acmebank.notify.cache.NotificationCache.put
+      (NotificationCache.java:88)
+  - id: EV-CHG-04
+    source: ServiceNow change record CHG0004410
+    content: >-
+      payments-notify 4.18.0 deployed on 12 October at 19:40, enabling the in-memory notification cache.
+passages:
+  - id: KB-RB-014
+    title: "payments-notify: JVM heap exhaustion (runbook, approved, version 3)"
+    content: >-
+      Symptoms: repeated OOMKilled restarts with OutOfMemoryError: Java heap space. Known cause since
+      4.18.0: the notification cache has no size limit and grows until the heap is exhausted. Steps:
+      1. Capture a heap dump before the next restart with the payments-heapdump-restart job, so the cause
+      can be confirmed. 2. Set notify.cache.maxEntries to 50000 through the payments-notify ConfigMap and
+      roll out. 3. Verify that heap use levels off below 70% over 30 minutes.
+  - id: KB-RB-022
+    title: "payments-core: database connection pool exhausted (runbook, approved, version 5)"
+    content: >-
+      Symptoms: timeouts acquiring a database connection and HikariCP pool at 100%. Steps: check for
+      long-running queries, then restart the affected pods. Fail over the database only if the primary
+      is confirmed down.
+expected:
+  status: enriched
+  jobs: [payments-heapdump-restart]
+  cause_keywords: [heap, cache]
+  manual_review_required: false

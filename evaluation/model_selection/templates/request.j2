@@ -1,0 +1,24 @@
+INCIDENT
+Number: {{ ms_case.incident.number }}
+Service: {{ ms_case.incident.service }}
+Priority: {{ ms_case.incident.priority }}
+Description: {{ ms_case.incident.short_description }}
+
+EVIDENCE
+{% for ev in ms_case.evidence %}
+<evidence id="{{ ev.id }}" source="{{ ev.source }}">
+{{ ev.content }}
+</evidence>
+{% endfor %}
+
+PASSAGES
+{% for p in ms_case.passages %}
+<passage id="{{ p.id }}" title="{{ p.title }}">
+{{ p.content }}
+</passage>
+{% endfor %}
+
+CATALOGUE
+{% for job in model_selection_catalogue %}
+- {{ job.id }}: {{ job.description }}
+{% endfor %}

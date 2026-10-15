@@ -1,0 +1,46 @@
+---
+# Settings for the model selection test (docs/model-selection.md).
+
+# Red Hat AI validated models with an FP8 ModelCar that fits one L4. request_extra is merged into
+# each request for that model. Qwen3's thinking mode is switched off: it is slow on an L4 and the
+# enrichment service needs a direct answer.
+model_selection_candidates:
+  - name: granite-3-1-8b-instruct
+    display_name: Granite 3.1 8B Instruct (FP8)
+    modelcar_image: oci://registry.redhat.io/rhelai1/modelcar-granite-3-1-8b-instruct-fp8-dynamic:1.5
+    max_model_len: 16384
+    request_extra: {}
+  - name: llama-3-1-8b-instruct
+    display_name: Llama 3.1 8B Instruct (FP8)
+    modelcar_image: oci://registry.redhat.io/rhelai1/modelcar-llama-3-1-8b-instruct-fp8-dynamic:1.5
+    max_model_len: 16384
+    request_extra: {}
+  - name: qwen3-8b
+    display_name: Qwen3 8B (FP8)
+    modelcar_image: oci://registry.redhat.io/rhelai1/modelcar-qwen3-8b-fp8-dynamic:1.5
+    max_model_len: 16384
+    request_extra:
+      chat_template_kwargs:
+        enable_thinking: false
+
+# The test's own consumer, onboarded to each candidate in turn with the maas_consumer role and
+# removed at the end. Its key expires after a day.
+model_selection_consumer:
+  name: model-evaluation
+  namespace: aiops-evaluation
+  token_limit: 500000
+  token_window: 1h
+  key_expiry: 1d
+
+# Constrained runs per case, which the decision uses; plus one unconstrained run per case.
+model_selection_repeats: 3
+model_selection_temperature: 0.2
+model_selection_max_tokens: 1200
+model_selection_request_timeout: 180
+
+# Median latency of the model call, in seconds, that leaves room within the work note's 60 seconds.
+model_selection_latency_target: 20
+
+# Where the report and raw results are written: the repository's docs, through the project
+# directory that ansible-navigator mounts into the execution environment.
+model_selection_report_dir: "{{ playbook_dir }}/../docs/model-selection"

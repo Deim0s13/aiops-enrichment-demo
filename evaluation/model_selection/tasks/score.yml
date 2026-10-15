@@ -1,0 +1,28 @@
+---
+# Scores one answer. A model may return text that is not JSON, so parsing is allowed to fail.
+
+- name: Start the score for {{ ms_result.case ~ ' ' ~ ms_result.run }}
+  ansible.builtin.set_fact:
+    ms_parsed: {}
+    ms_parse_error: false
+
+- name: Parse the answer
+  block:
+    - name: Read the answer as JSON, allowing for a Markdown code fence around it
+      ansible.builtin.set_fact:
+        ms_parsed: >-
+          {{ ms_result.content | regex_replace('^\s*```(?:json)?\s*', '') | regex_replace('\s*```\s*$', '')
+             | from_json }}
+  rescue:
+    - name: Record that the answer is not JSON
+      ansible.builtin.set_fact:
+        ms_parse_error: true
+
+- name: Check the answer against the case
+  ansible.builtin.set_fact:
+    ms_scored: >-
+      {{ ms_scored + [ms_result | combine(
+           {'answer': ms_parsed if ms_parsed is mapping else {}}, ms_check)] }}
+  vars:
+    ms_case: "{{ ms_cases | selectattr('id', 'equalto', ms_result.case) | first }}"
+    ms_check: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/model_selection/templates/score.j2') | from_json }}"

@@ -104,16 +104,24 @@
 
 # The client view of MaaS: the models this key may use, each with the ID to put in the request's
 # model field and the URL to send it to. MaaS routes the shared OpenAI-style endpoint on that ID,
-# so the build stores what MaaS publishes rather than assuming a name or a path.
-- name: List the models MaaS offers the new key
+# so the build stores what MaaS publishes rather than assuming a name or a path. Retried briefly:
+# after a subscription changes, MaaS can take a moment to offer the model to the key.
+- name: List the models MaaS offers the key
   ansible.builtin.uri:
     url: "{{ maas_consumer_maas_url }}/maas-api/v1/models"
     headers:
-      Authorization: "Bearer {{ maas_consumer_new_key.json.key }}"
+      Authorization: >-
+        Bearer {{ maas_consumer_new_key.json.key if maas_consumer_mint_key | bool
+        else maas_consumer_stored_key.resources[0].data['api-key'] | b64decode }}
     status_code: [200]
     validate_certs: "{{ maas_consumer_validate_certs }}"
-  register: maas_consumer_new_key_models
-  when: maas_consumer_mint_key | bool
+  register: maas_consumer_model_list
+  until: >-
+    maas_consumer_model_list.json.data | default([])
+    | selectattr('owned_by', 'equalto', maas_consumer_model.namespace ~ '/' ~ maas_consumer_model.name)
+    | selectattr('ready', 'equalto', true) | list | length > 0
+  retries: "{{ maas_consumer_offer_retries }}"
+  delay: "{{ maas_consumer_offer_delay }}"
   failed_when: false
   no_log: true
 
@@ -123,8 +131,6 @@
     maas_consumer_published_model: >-
       {{ maas_consumer_model_list.json.data | default([])
          | selectattr('owned_by', 'equalto', maas_consumer_model.namespace ~ '/' ~ maas_consumer_model.name) | first | default({}) }}
-  vars:
-    maas_consumer_model_list: "{{ maas_consumer_new_key_models if maas_consumer_mint_key | bool else maas_consumer_stored_key_check }}"
 
 - name: Report a model MaaS does not offer the consumer
   ansible.builtin.assert:

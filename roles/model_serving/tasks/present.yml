@@ -1,0 +1,118 @@
+---
+# The model owner's part (DD04, DD14): one model, served by vLLM as an LLMInferenceService behind
+# the MaaS gateway, and registered with Models-as-a-Service. The Red Hat vLLM image and its start-up
+# command come from OpenShift AI's default LLMInferenceServiceConfig, so nothing here names an
+# OpenShift AI version. Cluster access comes from the module_defaults the calling play sets.
+
+- name: Check that the model is fully described
+  ansible.builtin.assert:
+    that:
+      - model_serving_model.display_name | default('') | length > 0
+      - model_serving_model.modelcar_image | default('') | length > 0
+      - model_serving_model.max_model_len | default(0) | int > 0
+    fail_msg: >-
+      To serve {{ model_serving_model.name }}, model_serving_model needs display_name, modelcar_image
+      and max_model_len as well as name.
+    quiet: true
+
+- name: Create the models namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ model_serving_namespace }}"
+
+# The gateway reference puts the model behind the MaaS gateway, so every call is checked against
+# a MaaS API key and counted against a subscription. Without it, the model would be served on the
+# standard gateway and MaaS would not apply.
+- name: Deploy the model
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: serving.kserve.io/v1alpha2
+      kind: LLMInferenceService
+      metadata:
+        name: "{{ model_serving_model.name }}"
+        namespace: "{{ model_serving_namespace }}"
+        annotations:
+          openshift.io/display-name: "{{ model_serving_model.display_name }}"
+      spec:
+        model:
+          uri: "{{ model_serving_model.modelcar_image }}"
+          name: "{{ model_serving_model.name }}"
+        replicas: 1
+        router:
+          route: {}
+          gateway:
+            refs:
+              - name: "{{ model_serving_gateway_name }}"
+                namespace: "{{ model_serving_gateway_namespace }}"
+        template:
+          containers:
+            - name: main
+              env:
+                - name: VLLM_ADDITIONAL_ARGS
+                  value: "--max-model-len={{ model_serving_model.max_model_len }}"
+              resources:
+                requests:
+                  cpu: "{{ model_serving_cpu }}"
+                  memory: "{{ model_serving_memory }}"
+                  nvidia.com/gpu: "{{ model_serving_gpus | string }}"
+                limits:
+                  memory: "{{ model_serving_memory_limit }}"
+                  nvidia.com/gpu: "{{ model_serving_gpus | string }}"
+
+- name: Wait for the model to be ready
+  kubernetes.core.k8s_info:
+    api_version: serving.kserve.io/v1alpha2
+    kind: LLMInferenceService
+    namespace: "{{ model_serving_namespace }}"
+    name: "{{ model_serving_model.name }}"
+  register: model_serving_llmisvc
+  until: >-
+    (model_serving_llmisvc.resources | first | default({})).status.conditions | default([])
+    | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length > 0
+  retries: "{{ model_serving_ready_retries }}"
+  delay: "{{ model_serving_ready_delay }}"
+  failed_when: false
+
+- name: Report a model that is not ready
+  ansible.builtin.assert:
+    that: >-
+      (model_serving_llmisvc.resources | first | default({})).status.conditions | default([])
+      | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length > 0
+    fail_msg: >-
+      The model {{ model_serving_model.name }} is not ready:
+      {{ (model_serving_llmisvc.resources | first | default({})).status.conditions | default([])
+         | selectattr('status', 'equalto', 'False') | map(attribute='message', default='')
+         | select | join('; ') or 'no status yet' }}.
+      Check the pod with: oc get pods -n {{ model_serving_namespace }}, and its log for vLLM errors.
+    quiet: true
+
+# MaaS keeps the reference Pending ("Awaiting governance pairing") until an auth policy and a
+# subscription both cover the model, so no model is exposed before someone has decided who may use
+# it and how much. The maas_consumer role creates the pair, then waits for MaaS to accept the model.
+- name: Register the model with Models-as-a-Service
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaaSModelRef
+      metadata:
+        name: "{{ model_serving_model.name }}"
+        namespace: "{{ model_serving_namespace }}"
+        annotations:
+          openshift.io/display-name: "{{ model_serving_model.display_name }}"
+          opendatahub.io/genai-use-case: chat
+          opendatahub.io/context-window: "{{ model_serving_model.max_model_len | string }}"
+      spec:
+        modelRef:
+          kind: LLMInferenceService
+          name: "{{ model_serving_model.name }}"
+
+- name: Record the model result
+  ansible.builtin.set_fact:
+    model_serving_report: >-
+      {{ model_serving_report + ['Model: ' ~ model_serving_model.name ~ ' ready on the GPU and registered with MaaS'] }}

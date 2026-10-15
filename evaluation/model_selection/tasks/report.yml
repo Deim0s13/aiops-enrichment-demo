@@ -1,0 +1,33 @@
+---
+# Writes the report for the judge and the raw results, both under docs/model-selection/.
+
+- name: Summarise each candidate
+  ansible.builtin.set_fact:
+    ms_summary: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/model_selection/templates/summary.j2') | from_json }}"
+    ms_stamp: >-
+      {{ (ms_rescored_from | regex_replace('^results-', '') | regex_replace('[.]json$', '') ~ '-rescored')
+         if ms_rescored_from is defined else now(utc=true).strftime('%Y-%m-%d-%H%M') }}
+
+- name: Create the report directory
+  ansible.builtin.file:
+    path: "{{ model_selection_report_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Write the raw results
+  ansible.builtin.copy:
+    content: "{{ {'summary': ms_summary, 'results': ms_scored} | to_nice_json }}\n"
+    dest: "{{ model_selection_report_dir }}/results-{{ ms_stamp }}.json"
+    mode: "0644"
+
+- name: Write the report
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/model_selection/templates/report.md.j2"
+    dest: "{{ model_selection_report_dir }}/report-{{ ms_stamp }}.md"
+    mode: "0644"
+
+- name: Show the summary
+  ansible.builtin.debug:
+    msg: >-
+      {{ ms_summary | map(attribute='line') | list
+         + ['Report: docs/model-selection/report-' ~ ms_stamp ~ '.md. Rerun phase 02 to confirm the enrichment service.'] }}

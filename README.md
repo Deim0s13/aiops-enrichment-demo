@@ -37,6 +37,7 @@ aiops-enrichment-demo/
 ├── inventory/                        environment settings (no secrets)
 ├── playbooks/                        build phases, run from your laptop
 ├── roles/                            roles used by the build phases
+├── evaluation/                       the model selection test (docs/model-selection.md), run from your laptop
 ├── automation/                       playbooks AAP runs as job templates
 │   ├── integration/                  stand-in for the monitoring-to-ITSM integration
 │   ├── diagnostics/                  read-only evidence gathering

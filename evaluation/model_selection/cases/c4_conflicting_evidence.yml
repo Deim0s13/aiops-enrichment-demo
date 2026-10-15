@@ -1,0 +1,47 @@
+---
+id: C4
+title: Conflicting evidence
+incident:
+  number: INC0010263
+  short_description: payments-notify pods restarting repeatedly
+  service: payments-notify
+  priority: 3
+evidence:
+  - id: EV-POD-21
+    source: OpenShift pod status, demo-payments namespace
+    content: >-
+      payments-notify-5c8b7d9f4-m7r2p restarted 4 times in the last hour. Last state: Terminated, reason
+      OOMKilled, exit code 137. Container memory limit 1Gi.
+  - id: EV-MET-22
+    source: Prometheus, jvm_memory_used_bytes{area="heap"} and container_memory_working_set_bytes
+    content: >-
+      Heap used is steady at 58% of the 512Mi maximum heap. The container's working set climbs to 1Gi
+      before each restart. Direct buffer memory (jvm_buffer_memory_used_bytes{id="direct"}) grows from
+      40Mi to 380Mi between restarts.
+  - id: EV-LOG-23
+    source: payments-notify container log
+    content: >-
+      No OutOfMemoryError in the log before the restarts. Last lines before each restart are normal
+      notification send confirmations.
+passages:
+  - id: KB-RB-014
+    title: "payments-notify: JVM heap exhaustion (runbook, approved, version 3)"
+    content: >-
+      Symptoms: repeated OOMKilled restarts with OutOfMemoryError: Java heap space. Known cause since
+      4.18.0: the notification cache has no size limit and grows until the heap is exhausted. Steps:
+      1. Capture a heap dump before the next restart with the payments-heapdump-restart job. 2. Set
+      notify.cache.maxEntries to 50000. 3. Verify that heap use levels off below 70%.
+  - id: KB-KE-031
+    title: "Known error: JVM containers killed for native memory, not heap (approved, version 2)"
+    content: >-
+      A JVM container can be OOMKilled while its heap is well below its maximum, when memory outside the
+      heap (direct buffers, metaspace, thread stacks) pushes the container past its limit. A heap dump
+      will not show the cause. Steps: compare container working set with heap use; check direct buffer
+      growth; cap it with -XX:MaxDirectMemorySize or raise the container limit after review by the
+      service owner. Confirm with native memory tracking before changing limits.
+expected:
+  status: enriched
+  # A restart is a reasonable stopgap; a heap dump alone would not show this cause.
+  jobs: [null, payments-heapdump-restart, payments-scale-out]
+  cause_keywords: [native, direct, off-heap, outside the heap, container limit, container memory]
+  manual_review_required: true

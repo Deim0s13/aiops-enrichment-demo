@@ -1,0 +1,35 @@
+---
+# Scores the answers saved by an earlier run with the current scoring, so a correction to the scoring
+# can be applied to the same answers. The earlier report and results are left as they were.
+
+- name: Read the earlier results
+  ansible.builtin.set_fact:
+    ms_previous: "{{ lookup('ansible.builtin.file', model_selection_report_dir ~ '/' ~ model_selection_rescore) | from_json }}"
+    ms_rescored_from: "{{ model_selection_rescore }}"
+
+- name: Check the earlier results
+  ansible.builtin.assert:
+    that: ms_previous.results | default([]) | length > 0
+    fail_msg: "{{ model_selection_rescore }} holds no results to score."
+    quiet: true
+
+- name: Strip the earlier scores from each answer
+  ansible.builtin.set_fact:
+    ms_previous_raw: >-
+      {{ (ms_previous_raw if ms_prev_index | int > 0 else [])
+         + [dict(ms_prev | dict2items | selectattr('key', 'in', ms_raw_keys) | items2dict)] }}
+  vars:
+    ms_raw_keys: [model, display_name, case, run, constrained, http_status, error, seconds, content,
+                  finish_reason, prompt_tokens, completion_tokens]
+  loop: "{{ ms_previous.results }}"
+  loop_control:
+    loop_var: ms_prev
+    index_var: ms_prev_index
+    label: "{{ ms_prev.model }} {{ ms_prev.case }} {{ ms_prev.run }}"
+
+- name: Score each answer again
+  ansible.builtin.include_tasks: score.yml
+  loop: "{{ ms_previous_raw }}"
+  loop_control:
+    loop_var: ms_result
+    label: "{{ ms_result.model }} {{ ms_result.case }} {{ ms_result.run }}"

@@ -1,0 +1,178 @@
+---
+# One candidate: free the GPU, serve the candidate, onboard the test consumer to it, send every case
+# through the MaaS gateway, and score the answers.
+
+- name: Find the models being served
+  kubernetes.core.k8s_info:
+    api_version: serving.kserve.io/v1alpha2
+    kind: LLMInferenceService
+    namespace: "{{ demo_namespaces.models }}"
+  register: ms_served
+  until: ms_served is not failed
+  retries: 3
+  delay: 5
+
+- name: Remove other models to free the GPU
+  ansible.builtin.include_role:
+    name: model_serving
+  vars:
+    model_serving_state: absent
+    model_serving_namespace: "{{ demo_namespaces.models }}"
+    model_serving_model:
+      name: "{{ ms_other_model }}"
+  loop: "{{ ms_served.resources | map(attribute='metadata.name') | reject('equalto', ms_candidate.name) | list }}"
+  loop_control:
+    loop_var: ms_other_model
+
+# A candidate that will not start, or cannot be reached, is recorded and skipped, so one failure
+# does not lose the results of the others.
+- name: Test {{ ms_candidate.display_name }}
+  block:
+    - name: Serve {{ ms_candidate.display_name }}
+      ansible.builtin.include_role:
+        name: model_serving
+      vars:
+        model_serving_namespace: "{{ demo_namespaces.models }}"
+        model_serving_model:
+          name: "{{ ms_candidate.name }}"
+          display_name: "{{ ms_candidate.display_name }}"
+          modelcar_image: "{{ ms_candidate.modelcar_image }}"
+          max_model_len: "{{ ms_candidate.max_model_len }}"
+
+    - name: Onboard the test consumer to {{ ms_candidate.display_name }}
+      ansible.builtin.include_role:
+        name: maas_consumer
+      vars:
+        maas_consumer_name: "{{ model_selection_consumer.name }}"
+        maas_consumer_namespace: "{{ model_selection_consumer.namespace }}"
+        maas_consumer_description: the model selection test
+        maas_consumer_model:
+          name: "{{ ms_candidate.name }}"
+          namespace: "{{ demo_namespaces.models }}"
+        maas_consumer_token_limit: "{{ model_selection_consumer.token_limit }}"
+        maas_consumer_token_window: "{{ model_selection_consumer.token_window }}"
+        maas_consumer_key_expiry: "{{ model_selection_consumer.key_expiry }}"
+        maas_consumer_key_labels:
+          app: "{{ model_selection_consumer.name }}"
+          environment: demo
+        maas_consumer_secret: "{{ model_selection_consumer.name }}-key"
+        maas_consumer_api_validate_certs: "{{ demo_cluster_validate_certs }}"
+        maas_consumer_run_checks: false
+
+    # Only what the enrichment service will have: the key, the URL and the model ID from the Secret.
+    - name: Read the test consumer's key and the model's address
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: "{{ model_selection_consumer.namespace }}"
+        name: "{{ model_selection_consumer.name }}-key"
+      register: ms_key_secret
+      until: ms_key_secret is not failed
+      retries: 3
+      delay: 5
+      no_log: true
+
+    - name: Set the address and model ID for {{ ms_candidate.display_name }}
+      ansible.builtin.set_fact:
+        ms_url: "{{ ms_key_secret.resources[0].data.url | b64decode }}/v1/chat/completions"
+        ms_model_id: "{{ ms_key_secret.resources[0].data.model | b64decode }}"
+
+    # Every case, model_selection_repeats times with output constrained to the schema, and once without.
+    - name: Send every case to {{ ms_candidate.display_name }}
+      ansible.builtin.uri:
+        url: "{{ ms_url }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ ms_key_secret.resources[0].data['api-key'] | b64decode }}"
+        body_format: json
+        body: >-
+          {{ ms_body | combine(ms_candidate.request_extra | default({}))
+             | combine({'response_format': ms_response_format} if ms_constrained else {}) }}
+        status_code: [200]
+        timeout: "{{ model_selection_request_timeout }}"
+        validate_certs: "{{ maas_consumer_validate_certs | default(true) }}"
+      vars:
+        ms_case: "{{ ms_cases | selectattr('id', 'equalto', ms_run[0]) | first }}"
+        ms_constrained: "{{ ms_run[1] is match('constrained') }}"
+        ms_body:
+          model: "{{ ms_model_id }}"
+          temperature: "{{ model_selection_temperature | float }}"
+          max_tokens: "{{ model_selection_max_tokens | int }}"
+          messages:
+            - role: system
+              content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/model_selection/templates/system.j2') }}"
+            - role: user
+              content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/model_selection/templates/request.j2') }}"
+        ms_response_format:
+          type: json_schema
+          json_schema:
+            name: enrichment
+            strict: true
+            schema: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/model_selection/templates/schema.j2') | from_json }}"
+      loop: >-
+        {{ ms_cases | map(attribute='id') | list
+           | product(range(1, model_selection_repeats | int + 1) | map('regex_replace', '^', 'constrained-') | list
+                     + ['unconstrained-1'])
+           | list }}
+      loop_control:
+        loop_var: ms_run
+        label: "{{ ms_run[0] }} {{ ms_run[1] }}"
+      register: ms_calls
+      failed_when: false
+      no_log: true
+
+    # Reduced to what scoring needs first: looping over the registered calls would print each request,
+    # key included, at -vv.
+    - name: Keep the answers, timings and token counts
+      ansible.builtin.set_fact:
+        ms_candidate_raw: >-
+          {{ (ms_candidate_raw if ms_raw_index | int > 0 else []) + [{
+               'model': ms_candidate.name,
+               'display_name': ms_candidate.display_name,
+               'case': ms_call.ms_run[0],
+               'run': ms_call.ms_run[1],
+               'constrained': ms_call.ms_run[1] is match('constrained'),
+               'http_status': ms_call.status | default(-1),
+               'error': '' if ms_call.status | default(-1) == 200 else
+                        (ms_call.json.error.message | default(ms_call.json.message | default(ms_call.msg | default(''))))
+                        | string | truncate(300),
+               'seconds': ms_call.elapsed | default(0),
+               'content': (ms_call.json.choices | default([{}]))[0].message.content | default(''),
+               'finish_reason': (ms_call.json.choices | default([{}]))[0].finish_reason | default(''),
+               'prompt_tokens': ms_call.json.usage.prompt_tokens | default(0),
+               'completion_tokens': ms_call.json.usage.completion_tokens | default(0)}] }}
+      loop: "{{ ms_calls.results }}"
+      loop_control:
+        loop_var: ms_call
+        index_var: ms_raw_index
+      no_log: true
+
+    - name: Score the answers from {{ ms_candidate.display_name }}
+      ansible.builtin.include_tasks: score.yml
+      loop: "{{ ms_candidate_raw }}"
+      loop_control:
+        loop_var: ms_result
+        label: "{{ ms_result.case }} {{ ms_result.run }}"
+
+    - name: Show the results for {{ ms_candidate.display_name }}
+      ansible.builtin.debug:
+        msg: >-
+          {{ ms_candidate.display_name }}: constrained runs passing every gate
+          {{ ms_scored | selectattr('model', 'equalto', ms_candidate.name) | selectattr('constrained')
+             | selectattr('gate_ok') | list | length }} of
+          {{ ms_scored | selectattr('model', 'equalto', ms_candidate.name) | selectattr('constrained') | list | length }},
+          correct {{ ms_scored | selectattr('model', 'equalto', ms_candidate.name) | selectattr('constrained')
+             | selectattr('correct') | list | length }}
+  rescue:
+    - name: Record a candidate that could not be tested, {{ ms_candidate.display_name }}
+      ansible.builtin.set_fact:
+        ms_not_tested: >-
+          {{ ms_not_tested | default([]) + [{'model': ms_candidate.name, 'display_name': ms_candidate.display_name,
+              'task': ansible_failed_task.name | default(''),
+              'reason': ansible_failed_result.msg | default('unknown') | string | truncate(400)}] }}
+
+    - name: Show why the candidate could not be tested, {{ ms_candidate.display_name }}
+      ansible.builtin.debug:
+        msg: >-
+          {{ ms_candidate.display_name }} was skipped at "{{ ansible_failed_task.name | default('') }}":
+          {{ ansible_failed_result.msg | default('unknown') | string | truncate(400) }}
