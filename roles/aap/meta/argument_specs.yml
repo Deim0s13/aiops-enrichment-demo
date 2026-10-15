@@ -1,0 +1,32 @@
+---
+argument_specs:
+  main:
+    short_description: Install Ansible Automation Platform on OpenShift
+    options:
+      aap_operator:
+        type: dict
+        required: true
+        description: The AAP operator, installed from the Red Hat catalogue if the environment lacks it.
+        options:
+          package: {type: str, required: true, description: OLM package name.}
+          channel: {type: str, required: true, description: Channel to subscribe to. A namespace-scoped channel keeps the operator to its own namespace.}
+          min_version: {type: str, required: true, description: Lowest acceptable version.}
+      aap_namespace:
+        type: str
+        required: true
+        description: Namespace for the AAP operator and instance.
+      aap_instance_name:
+        type: str
+        description: Name of the AnsibleAutomationPlatform resource.
+      aap_components:
+        type: dict
+        description: The platform's components, each with disabled true or false.
+      aap_validate_certs:
+        type: bool
+        description: Verify the platform's certificate when checking it.
+      aap_ready_retries:
+        type: int
+        description: How many times to check whether the platform is ready.
+      aap_ready_delay:
+        type: int
+        description: Seconds between those checks.

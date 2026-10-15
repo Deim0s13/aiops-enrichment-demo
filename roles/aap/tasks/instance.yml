@@ -1,0 +1,114 @@
+---
+# The AAP instance: one AnsibleAutomationPlatform resource, which the operator turns into the
+# platform gateway, Controller and Event-Driven Ansible, each with its own database. The operator
+# generates the admin password and keeps it in a Secret.
+
+- name: Describe the platform
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: aap.ansible.com/v1alpha1
+      kind: AnsibleAutomationPlatform
+      metadata:
+        name: "{{ aap_instance_name }}"
+        namespace: "{{ aap_namespace }}"
+      spec: "{{ aap_components }}"
+
+- name: Wait for the platform to be ready
+  kubernetes.core.k8s_info:
+    api_version: aap.ansible.com/v1alpha1
+    kind: AnsibleAutomationPlatform
+    namespace: "{{ aap_namespace }}"
+    name: "{{ aap_instance_name }}"
+  register: aap_instance
+  until: >-
+    (aap_instance.resources | first | default({})).status.conditions | default([])
+    | selectattr('type', 'equalto', 'Successful') | selectattr('status', 'equalto', 'True') | list | length > 0
+  retries: "{{ aap_ready_retries }}"
+  delay: "{{ aap_ready_delay }}"
+  failed_when: false
+
+- name: Report a platform that is not ready
+  ansible.builtin.assert:
+    that: >-
+      (aap_instance.resources | first | default({})).status.conditions | default([])
+      | selectattr('type', 'equalto', 'Successful') | selectattr('status', 'equalto', 'True') | list | length > 0
+    fail_msg: >-
+      The platform is not ready. Its conditions:
+      {{ (aap_instance.resources | first | default({})).status.conditions | default([])
+         | map(attribute='type') | zip((aap_instance.resources | first | default({})).status.conditions | default([])
+         | map(attribute='status')) | map('join', '=') | join(', ') or 'none yet' }}.
+      Check it with: oc get ansibleautomationplatform {{ aap_instance_name }} -n {{ aap_namespace }} -o yaml,
+      and the pods with: oc get pods -n {{ aap_namespace }}
+    quiet: true
+
+- name: Find the platform's address
+  kubernetes.core.k8s_info:
+    api_version: route.openshift.io/v1
+    kind: Route
+    namespace: "{{ aap_namespace }}"
+    name: "{{ aap_instance_name }}"
+  register: aap_route
+  until: aap_route is not failed
+  retries: 3
+  delay: 5
+
+- name: Report a platform with no route
+  ansible.builtin.assert:
+    that: aap_route.resources | length > 0
+    fail_msg: >-
+      There is no route named {{ aap_instance_name }} in {{ aap_namespace }}. List the routes with:
+      oc get routes -n {{ aap_namespace }}
+    quiet: true
+
+- name: Record the platform's address
+  ansible.builtin.set_fact:
+    aap_url: "https://{{ aap_route.resources[0].spec.host }}"
+
+- name: Read the admin password the operator generated
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ aap_namespace }}"
+    name: "{{ aap_instance_name }}-admin-password"
+  register: aap_admin_secret
+  until: aap_admin_secret is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+# Logging in through the gateway proves the platform answers and the password works.
+- name: Log in to the platform as admin
+  ansible.builtin.uri:
+    url: "{{ aap_url }}/api/gateway/v1/me/"
+    url_username: admin
+    url_password: "{{ aap_admin_secret.resources[0].data.password | b64decode }}"
+    force_basic_auth: true
+    status_code: [200, 401, 403, 404, 502, 503]
+    validate_certs: "{{ aap_validate_certs }}"
+  register: aap_login
+  until: aap_login.status | default(-1) == 200
+  retries: 12
+  delay: 10
+  when: aap_admin_secret.resources | length > 0
+  failed_when: false
+  no_log: true
+
+- name: Report a platform that cannot be logged in to
+  ansible.builtin.assert:
+    that:
+      - aap_admin_secret.resources | length > 0
+      - aap_login.status | default(-1) == 200
+    fail_msg: >-
+      {{ ('There is no Secret ' ~ aap_instance_name ~ '-admin-password in ' ~ aap_namespace ~ '.')
+         if aap_admin_secret.resources | length == 0 else
+         ('Logging in to ' ~ aap_url ~ ' as admin returned HTTP ' ~ aap_login.status | default('no response') ~ '.') }}
+      Check the platform with: oc get pods -n {{ aap_namespace }}
+    quiet: true
+
+- name: Record the platform result
+  ansible.builtin.set_fact:
+    aap_report: >-
+      {{ aap_report + ['AAP: ready at ' ~ aap_url ~ ' with '
+           ~ (aap_components | dict2items | rejectattr('value.disabled') | map(attribute='key') | join(', '))
+           ~ '; admin password in ' ~ aap_namespace ~ '/' ~ aap_instance_name ~ '-admin-password'] }}

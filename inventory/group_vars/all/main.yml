@@ -14,6 +14,8 @@ demo_versions:
 demo_operators:
   openshift_ai: { package: rhods-operator, channel: stable-3.x, min_version: "3.5.0" }
   connectivity_link: { package: rhcl-operator, channel: stable, min_version: "1.4.0" }
+  # Namespace-scoped channel: the operator watches only its own namespace (demo_namespaces.aap).
+  aap: { package: ansible-automation-platform-operator, channel: stable-2.7, min_version: "2.7.0" }
 
 # Instance profile drives resource requests. Change to g6.12xlarge for four L4 GPUs.
 demo_instance_profile: g6.16xlarge

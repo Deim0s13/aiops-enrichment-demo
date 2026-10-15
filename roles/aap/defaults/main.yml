@@ -1,0 +1,21 @@
+---
+# Ansible Automation Platform (DD11). The operator to install and its namespace are inputs
+# (meta/argument_specs.yml).
+
+# The platform instance. Controller and Event-Driven Ansible are what the demo uses (DD03); the other
+# components are switched off to save the node's resources.
+aap_instance_name: aap
+aap_components:
+  controller: { disabled: false }
+  eda: { disabled: false }
+  hub: { disabled: true }
+  lightspeed: { disabled: true }
+  mcp: { disabled: true }
+  metrics: { disabled: true }
+
+# Callers verify the platform's certificate: its route uses the environment's trusted *.apps one.
+aap_validate_certs: true
+
+# The first install pulls several images, so the wait is long.
+aap_ready_retries: 60
+aap_ready_delay: 20

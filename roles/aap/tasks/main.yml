@@ -1,0 +1,29 @@
+---
+# The automation platform team's part (DD11, DD13): the AAP operator in its own namespace, then the
+# platform instance with Controller and Event-Driven Ansible. The subscription manifest is still to
+# come (OI06). Cluster access comes from the module_defaults the calling play sets.
+
+- name: Start the AAP report
+  ansible.builtin.set_fact:
+    aap_report: []
+
+- name: Install or adopt the AAP operator
+  ansible.builtin.include_role:
+    name: olm_operator
+  vars:
+    olm_operator_package: "{{ aap_operator.package }}"
+    olm_operator_channel: "{{ aap_operator.channel }}"
+    olm_operator_min_version: "{{ aap_operator.min_version }}"
+    olm_operator_namespace: "{{ aap_namespace }}"
+
+- name: Record the operator
+  ansible.builtin.set_fact:
+    aap_report: >-
+      {{ aap_report + [item.package ~ ' ' ~ item.version ~ ': ' ~ item.action
+                       ~ ' (channel ' ~ item.channel ~ ', namespace ' ~ item.namespace ~ ')'] }}
+  loop: "{{ olm_operator_results | default([]) | selectattr('package', 'equalto', aap_operator.package) | list }}"
+  loop_control:
+    label: "{{ item.package }}"
+
+- name: Run the platform
+  ansible.builtin.include_tasks: instance.yml

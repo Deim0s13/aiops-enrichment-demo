@@ -1,9 +1,38 @@
 ---
+# Phase 03: Ansible Automation Platform (DD11). Part 1 installs the AAP operator into its own
+# namespace; part 2 adds the instance (Controller and Event-Driven Ansible) and the manifest.
+#   ansible-navigator run playbooks/03_aap.yml
+#
+# Safe to rerun. Run preflight and phase 01 first.
+
 - name: "Phase 03 | AAP: operator, instance and subscription manifest"
   hosts: localhost
   gather_facts: false
   tags: [aap]
+
+  # See playbooks/01_platform.yml for why the modules are listed one by one.
+  module_defaults:
+    kubernetes.core.k8s: &cluster_auth
+      host: "{{ secrets_values.cluster_api_url }}"
+      api_key: "{{ secrets_values.cluster_api_token }}"
+      validate_certs: "{{ demo_cluster_validate_certs }}"
+      ca_cert: "{{ secrets_cluster_ca_file | default(omit) }}"
+    kubernetes.core.k8s_info: *cluster_auth
+
   tasks:
-    - name: Report that phase 03 is not implemented yet
+    - name: Resolve the cluster secrets
+      ansible.builtin.include_role:
+        name: secrets
+      vars:
+        secrets_groups: [cluster]
+
+    - name: Install Ansible Automation Platform
+      ansible.builtin.include_role:
+        name: aap
+      vars:
+        aap_operator: "{{ demo_operators.aap }}"
+        aap_namespace: "{{ demo_namespaces.aap }}"
+
+    - name: Report what phase 03 found and changed
       ansible.builtin.debug:
-        msg: "Phase 03 (aap) is a stub. See docs/implementation-design.md DD11."
+        msg: "{{ aap_report }}"
