@@ -268,6 +268,10 @@ Judge: useful / partly useful / not useful. Note:
 
 To be completed by the judge, applying the rule in [model-selection.md](../model-selection.md): gates first, then correctness and the judged answers, then latency and tokens, with Granite as the tie-break.
 
-- Chosen model:
-- Reason:
-- Recorded in DD04 and OI04 on:
+- Chosen model: Qwen3 8B (FP8)
+- Reason: Qwen demonstrates useful technical reasoning, generally handles conflicting evidence appropriately and avoids some of the more concerning behaviour seen with Llama.
+Its slightly slower inference time doesn't concern me. An additional two or three seconds is relatively insignificant compared with the consequences of recommending an incorrect remediation.
+It is also worth distinguishing between an enrichment demo and an autonomous remediation system.
+For an enrichment demo where an engineer reviews recommendations, Qwen is a reasonable starting point.
+For autonomous remediation, I wouldn't approve any of these models based on the current evidence.
+- Recorded in DD04 and OI04 on: 
