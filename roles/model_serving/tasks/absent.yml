@@ -1,6 +1,8 @@
 ---
-# Removes the model and its MaaS registration, then waits until its pods have gone, so the GPU is
+# Removes a model and its MaaS registration, then waits until its pods have gone, so the GPU is
 # free for the next model. Consumers whose subscriptions name the model lose access to it.
+# model_serving_target is the model to remove: this role's model, or another one when present.yml
+# frees the GPU (model_serving_exclusive).
 
 - name: Remove the model's MaaS registration
   kubernetes.core.k8s:
@@ -8,7 +10,7 @@
     api_version: maas.opendatahub.io/v1alpha1
     kind: MaaSModelRef
     namespace: "{{ model_serving_namespace }}"
-    name: "{{ model_serving_model.name }}"
+    name: "{{ model_serving_target }}"
     wait: true
     wait_timeout: 120
 
@@ -18,7 +20,7 @@
     api_version: serving.kserve.io/v1alpha2
     kind: LLMInferenceService
     namespace: "{{ model_serving_namespace }}"
-    name: "{{ model_serving_model.name }}"
+    name: "{{ model_serving_target }}"
     wait: true
     wait_timeout: 300
   register: model_serving_removed
@@ -32,7 +34,7 @@
   until: >-
     model_serving_pods is not failed and
     model_serving_pods.resources | map(attribute='metadata.name')
-    | select('match', model_serving_model.name ~ '-') | list | length == 0
+    | select('match', model_serving_target ~ '-') | list | length == 0
   retries: "{{ model_serving_removal_retries }}"
   delay: "{{ model_serving_removal_delay }}"
   failed_when: false
@@ -41,14 +43,14 @@
   ansible.builtin.assert:
     that: >-
       model_serving_pods.resources | default([]) | map(attribute='metadata.name')
-      | select('match', model_serving_model.name ~ '-') | list | length == 0
+      | select('match', model_serving_target ~ '-') | list | length == 0
     fail_msg: >-
-      The pods of {{ model_serving_model.name }} are still running, so the GPU is not free.
+      The pods of {{ model_serving_target }} are still running, so the GPU is not free.
       Check them with: oc get pods -n {{ model_serving_namespace }}
     quiet: true
 
 - name: Record the removal
   ansible.builtin.set_fact:
     model_serving_report: >-
-      {{ model_serving_report + ['Model: ' ~ model_serving_model.name
+      {{ model_serving_report + ['Model: ' ~ model_serving_target
            ~ (' removed and its GPU freed' if model_serving_removed is changed else ' not present, nothing to remove')] }}

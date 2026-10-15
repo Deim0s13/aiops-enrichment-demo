@@ -50,18 +50,21 @@ demo_gpu_reclaimable_namespaces:
 # routes are reachable from the internet with a publicly trusted certificate, so push.
 demo_trigger_mode: push
 
-# Model selection (DD04). Granite is the starting point; the final choice depends on the
-# citation-adherence test (OI04). Candidates from Red Hat's validated ModelCar images:
-#   granite-3-1-8b-instruct  oci://registry.redhat.io/rhelai1/modelcar-granite-3-1-8b-instruct-fp8-dynamic:1.5
-#   llama-3-1-8b-instruct    oci://registry.redhat.io/rhelai1/modelcar-llama-3-1-8b-instruct-fp8-dynamic:1.5
-#   qwen2-5-7b-instruct      oci://registry.redhat.io/rhelai1/modelcar-qwen2-5-7b-instruct-fp8-dynamic:1.5
-# The name is used for the LLMInferenceService, its MaaS entry and the model field in requests.
+# The model (DD04), chosen by the model selection test (OI04, docs/model-selection.md) for
+# engineer-reviewed enrichment only. Changing it and rerunning phase 02 replaces the model served;
+# the candidates tested are in evaluation/model_selection/settings.yml.
+# The name is used for the LLMInferenceService and its MaaS entry. Consumers read the model ID MaaS
+# publishes for it from their Secret.
 demo_model:
-  name: granite-3-1-8b-instruct
-  display_name: Granite 3.1 8B Instruct (FP8)
-  modelcar_image: oci://registry.redhat.io/rhelai1/modelcar-granite-3-1-8b-instruct-fp8-dynamic:1.5
+  name: qwen3-8b
+  display_name: Qwen3 8B (FP8)
+  modelcar_image: oci://registry.redhat.io/rhelai1/modelcar-qwen3-8b-fp8-dynamic:1.5
   # Fits the L4's memory with room for the KV cache; enrichment prompts are well under this.
   max_model_len: 16384
+  # Added to every request: Qwen3's thinking mode is slow on an L4, and enrichment needs a direct answer.
+  request_extra:
+    chat_template_kwargs:
+      enable_thinking: false
 
 # Governed model access for the enrichment service (DD14, ADR06). The enrichment service calls the
 # model as its own service account, through a MaaS subscription with a token budget.

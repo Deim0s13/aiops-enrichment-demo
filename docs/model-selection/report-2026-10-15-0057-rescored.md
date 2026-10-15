@@ -274,4 +274,4 @@ Its slightly slower inference time doesn't concern me. An additional two or thre
 It is also worth distinguishing between an enrichment demo and an autonomous remediation system.
 For an enrichment demo where an engineer reviews recommendations, Qwen is a reasonable starting point.
 For autonomous remediation, I wouldn't approve any of these models based on the current evidence.
-- Recorded in DD04 and OI04 on: 
+- Recorded in DD04 and OI04 on: 2026-10-15

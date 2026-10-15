@@ -55,6 +55,8 @@
       vars:
         model_serving_model: "{{ demo_model }}"
         model_serving_namespace: "{{ demo_namespaces.models }}"
+        # One GPU: changing demo_model replaces the model served before.
+        model_serving_exclusive: true
 
     - name: Onboard the enrichment service to the model
       ansible.builtin.include_role:
@@ -73,6 +75,7 @@
           app: "{{ demo_maas_consumer.service_account }}"
           environment: demo
         maas_consumer_api_validate_certs: "{{ demo_cluster_validate_certs }}"
+        maas_consumer_request_extra: "{{ demo_model.request_extra | default({}) }}"
 
     - name: Report what phase 02 found and changed
       ansible.builtin.debug:

@@ -70,6 +70,9 @@ argument_specs:
       maas_consumer_offer_delay:
         type: int
         description: Seconds between those checks.
+      maas_consumer_request_extra:
+        type: dict
+        description: Options added to every check request for this model.
       maas_consumer_run_checks:
         type: bool
         description: Run the access checks after onboarding.

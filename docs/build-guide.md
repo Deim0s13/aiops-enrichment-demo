@@ -146,13 +146,13 @@ What it does, in the order the teams that would own each part in production woul
 
 **The model** (role `model_serving`, the model owner's part)
 
-8. **Serves the model** set in `demo_model` (Granite 3.1 8B Instruct, FP8, to start with) as an `LLMInferenceService` in `aiops-models`, on the GPU, behind the MaaS gateway. OpenShift AI supplies the Red Hat vLLM image and its start-up command. The first start pulls the vLLM image and the model's ModelCar image, several GB each, then loads the model onto the GPU: allow up to 30 minutes, with `FAILED - RETRYING` lines while it waits. Later starts take a few minutes.
+8. **Serves the model** set in `demo_model` (Qwen3 8B, FP8, chosen by the model selection test in [model-selection.md](model-selection.md)) as an `LLMInferenceService` in `aiops-models`, on the GPU, behind the MaaS gateway. The L4 holds one model, so any other model in `aiops-models` is removed first: changing `demo_model` and rerunning the phase swaps the model. OpenShift AI supplies the Red Hat vLLM image and its start-up command. The first start pulls the vLLM image and the model's ModelCar image, several GB each, then loads the model onto the GPU: allow up to 30 minutes, with `FAILED - RETRYING` lines while it waits. Later starts take a few minutes.
 9. **Registers the model with Models-as-a-Service** with a `MaaSModelRef`. MaaS holds it at `Pending` ("Awaiting governance pairing") until a policy and a subscription cover it, so no model is exposed before someone has decided who may use it and how much.
 
 **The consumer** (role `maas_consumer`, the application team's part)
 
 10. **Gives the enrichment service governed access.** The service gets its own identity, the `aiops-enrichment` service account in `aiops-enrichment`. A `MaaSAuthPolicy` allows that identity to call the model and a `MaaSSubscription` gives it a token budget (100,000 tokens an hour, set in `demo_maas_consumer`). Both are in `models-as-a-service`. Once both are active, MaaS accepts the model and routes requests for it.
-11. **Mints the enrichment service's API key.** The phase asks Kubernetes for a 10-minute token for the service account and uses it to mint a MaaS API key, so the key belongs to the service account rather than to you. It then asks MaaS which models the key may use, as any client would, and finds the model there. MaaS publishes each model with an ID, such as `publishers/aiops-models/models/granite-3-1-8b-instruct`, and routes requests on the shared OpenAI-style endpoint by that ID, so the build uses what MaaS publishes rather than assuming a name. The key is stored in the `maas-api-key` Secret in `aiops-enrichment`, with its ID and expiry, the URL to send requests to and the model ID: everything the enrichment service needs. On a rerun the stored key is tested and kept if it still works; a new one is minted only if it does not.
+11. **Mints the enrichment service's API key.** The phase asks Kubernetes for a 10-minute token for the service account and uses it to mint a MaaS API key, so the key belongs to the service account rather than to you. It then asks MaaS which models the key may use, as any client would, and finds the model there. MaaS publishes each model with an ID, such as `publishers/aiops-models/models/qwen3-8b`, and routes requests on the shared OpenAI-style endpoint by that ID, so the build uses what MaaS publishes rather than assuming a name. The key is stored in the `maas-api-key` Secret in `aiops-enrichment`, with its ID and expiry, the URL to send requests to and the model ID: everything the enrichment service needs. On a rerun the stored key is tested and kept if it still works; a new one is minted only if it does not.
 12. **Checks access through the gateway**, as a client would: a request with the enrichment key gets an answer from the model, a request with no key is refused, and a temporary key is minted, used, revoked and refused. Revocation takes effect when the gateway's cache of the key expires, so this check can wait up to two minutes. Keys never appear in the output; only status codes and the model's one-word reply do.
 
 On the first run, expect:
@@ -165,8 +165,8 @@ On the first run, expect:
 - 'MaaS gateway: https://maas.apps... (certificate cert-manager-ingress-cert)'
 - 'Models-as-a-Service: ready'
 - 'MLflow: ready, metadata in PostgreSQL, artifacts on a 10Gi volume'
-- 'Model: granite-3-1-8b-instruct ready on the GPU and registered with MaaS'
-- 'Access: model accepted by MaaS, policy and subscription active for system:serviceaccount:aiops-enrichment:aiops-enrichment (100000 tokens per 1h); API key minted and stored in aiops-enrichment/maas-api-key with model ID publishers/aiops-models/models/granite-3-1-8b-instruct'
+- 'Model: qwen3-8b ready on the GPU and registered with MaaS'
+- 'Access: model accepted by MaaS, policy and subscription active for system:serviceaccount:aiops-enrichment:aiops-enrichment (100000 tokens per 1h); API key minted and stored in aiops-enrichment/maas-api-key with model ID publishers/aiops-models/models/qwen3-8b'
 - 'Checks: with key 200 (model replied "ready"), no key 401, revoked key 403'
 ```
 
@@ -194,11 +194,11 @@ To call the model yourself as the enrichment service, read the key into a variab
 ```bash
 MAAS_KEY=$(oc get secret maas-api-key -n aiops-enrichment -o jsonpath='{.data.api-key}' | base64 -d)
 MAAS_URL=$(oc get secret maas-api-key -n aiops-enrichment -o jsonpath='{.data.url}' | base64 -d)
-curl -s "$MAAS_URL/v1/chat/completions" -H "Authorization: Bearer $MAAS_KEY" -H 'Content-Type: application/json' -d '{"model": "publishers/aiops-models/models/granite-3-1-8b-instruct", "messages": [{"role": "user", "content": "In one sentence, what is a Java heap?"}], "max_tokens": 60}'
+curl -s "$MAAS_URL/v1/chat/completions" -H "Authorization: Bearer $MAAS_KEY" -H 'Content-Type: application/json' -d '{"model": "publishers/aiops-models/models/qwen3-8b", "messages": [{"role": "user", "content": "In one sentence, what is a Java heap?"}], "max_tokens": 60, "chat_template_kwargs": {"enable_thinking": false}}'
 unset MAAS_KEY
 ```
 
-The key is a real credential for the life of the environment. Do not paste it anywhere, and unset the variable when you are done.
+`chat_template_kwargs` switches off Qwen3's thinking mode, as the build and the enrichment service do; without it, the reply starts with the model's reasoning. The key is a real credential for the life of the environment. Do not paste it anywhere, and unset the variable when you are done.
 
 ## Finish your session
 

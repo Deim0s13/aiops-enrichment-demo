@@ -13,4 +13,6 @@
 
 - name: Remove the model
   ansible.builtin.include_tasks: absent.yml
+  vars:
+    model_serving_target: "{{ model_serving_model.name }}"
   when: model_serving_state == 'absent'

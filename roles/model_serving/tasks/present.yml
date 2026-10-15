@@ -15,6 +15,28 @@
       and max_model_len as well as name.
     quiet: true
 
+# The demo has one GPU, so serving a model can mean removing another first (DD04).
+- name: Find the other models being served
+  kubernetes.core.k8s_info:
+    api_version: serving.kserve.io/v1alpha2
+    kind: LLMInferenceService
+    namespace: "{{ model_serving_namespace }}"
+  register: model_serving_existing
+  until: model_serving_existing is not failed
+  retries: 3
+  delay: 5
+  when: model_serving_exclusive | bool
+
+- name: Remove the other models to free the GPU
+  ansible.builtin.include_tasks: absent.yml
+  vars:
+    model_serving_target: "{{ model_serving_other }}"
+  loop: >-
+    {{ model_serving_existing.resources | default([]) | map(attribute='metadata.name')
+       | reject('equalto', model_serving_model.name) | list if model_serving_exclusive | bool else [] }}
+  loop_control:
+    loop_var: model_serving_other
+
 - name: Create the models namespace
   kubernetes.core.k8s:
     state: present

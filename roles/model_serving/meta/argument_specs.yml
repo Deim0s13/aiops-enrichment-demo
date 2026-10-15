@@ -25,10 +25,18 @@ argument_specs:
           max_model_len:
             type: int
             description: Context length vLLM serves, in tokens.
+          request_extra:
+            type: dict
+            description: >-
+              Options clients add to each request for this model, such as switching off Qwen3's thinking
+              mode. Carried with the model for its consumers; not used for serving.
       model_serving_state:
         type: str
         choices: [present, absent]
         description: Serve the model, or remove it and wait until its pods have gone.
+      model_serving_exclusive:
+        type: bool
+        description: Remove any other model in the namespace first, for a GPU that holds one model at a time.
       model_serving_gateway_name:
         type: str
         description: Name of the MaaS gateway.

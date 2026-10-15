@@ -34,6 +34,9 @@ maas_consumer_resource_delay: 10
 maas_consumer_offer_retries: 6
 maas_consumer_offer_delay: 10
 
+# Options added to every check request for this model, such as switching off Qwen3's thinking mode.
+maas_consumer_request_extra: {}
+
 # Run the access checks after onboarding. Revocation takes effect when the gateway's cache of the
 # key expires, so the revocation check waits up to two minutes.
 maas_consumer_run_checks: true

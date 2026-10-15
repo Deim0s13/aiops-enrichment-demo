@@ -5,6 +5,9 @@
 # present serves the model; absent removes it and waits until its pods have gone, freeing the GPU.
 model_serving_state: present
 
+# true removes any other model in the namespace first, for a GPU that holds one model at a time.
+model_serving_exclusive: false
+
 # The MaaS gateway the model is published on. Its name and namespace are fixed by MaaS.
 model_serving_gateway_name: maas-default-gateway
 model_serving_gateway_namespace: openshift-ingress
