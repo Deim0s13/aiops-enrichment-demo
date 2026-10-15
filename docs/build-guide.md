@@ -2,7 +2,7 @@
 
 This guide builds the demo on a demo environment, one phase at a time. Follow it for every new environment. It assumes [laptop-setup.md](laptop-setup.md) is complete: Vault holds your entitlements and ServiceNow credentials, the execution environment is built, and preflight passes with the cluster checks skipped.
 
-Sections are added as each phase is implemented. Phases 01 and 02 are implemented. Phases 03 onwards are not implemented yet.
+Sections are added as each phase is implemented. Phases 01 to 03 are implemented, except the AAP subscription manifest in phase 03. Phases 04 onwards are not implemented yet.
 
 | Step | What you end up with | Time |
 |---|---|---|
@@ -12,6 +12,7 @@ Sections are added as each phase is implemented. Phases 01 and 02 are implemente
 | 4 | Preflight passing, including the cluster | 1 minute |
 | 5 | Phase 01: GPU freed, GPU stack checked, user workload monitoring enabled | 5 minutes, up to 25 on a fresh environment |
 | 6 | Phase 02: OpenShift AI checked, Connectivity Link installed, PostgreSQL deployed, Models-as-a-Service and MLflow enabled, the model served and published, the enrichment service given governed access, and the access checks passed | About 15 minutes, plus up to 30 for the first model start |
+| 7 | Phase 03: AAP operator installed and the platform running, with Controller and Event-Driven Ansible | About 20 minutes on the first run |
 
 Run each command on its own line. Pasting several lines at once, or a line containing `read`, can go wrong in zsh.
 
@@ -200,6 +201,33 @@ unset MAAS_KEY
 
 `chat_template_kwargs` switches off Qwen3's thinking mode, as the build and the enrichment service do; without it, the reply starts with the model's reasoning. The key is a real credential for the life of the environment. Do not paste it anywhere, and unset the variable when you are done.
 
+## 7 Phase 03: Ansible Automation Platform
+
+```bash
+ansible-navigator run playbooks/03_aap.yml
+```
+
+What it does (role `aap`, the automation platform team's part):
+
+1. **Installs the AAP operator** from the Red Hat catalogue on the channel in `demo_operators.aap` (`stable-2.7`), into the `aap` namespace. The channel is namespace-scoped, so the operator manages only that namespace. If the operator is already installed, it is left as it is.
+2. **Runs the platform**: one `AnsibleAutomationPlatform` resource named `aap`, with automation controller and Event-Driven Ansible switched on and Automation Hub, Lightspeed, the MCP server and metrics switched off (`aap_components` in the role's defaults). The operator deploys the platform gateway, the components and their databases. The first run pulls several images, so allow 15 to 20 minutes, with `FAILED - RETRYING` lines while it waits.
+3. **Checks the platform** by logging in through the gateway as `admin`, with the password the operator generated. The password stays in the `aap-admin-password` Secret in `aap`.
+
+On the first run, expect:
+
+```text
+- 'ansible-automation-platform-operator 2.7.0+0...: installed (channel stable-2.7, namespace aap)'
+- 'AAP: ready at https://aap-aap.apps... with controller, eda; admin password in aap/aap-admin-password'
+```
+
+To log in to the web console, open that address and use `admin` with the password from:
+
+```bash
+oc get secret aap-admin-password -n aap -o jsonpath='{.data.password}' | base64 -d; echo
+```
+
+The platform runs without a subscription until the manifest is added (OI06), which is still to be built.
+
 ## Finish your session
 
 Stop Vault. Your secrets stay encrypted on its volume:
@@ -235,5 +263,6 @@ podman stop aiops-demo-vault
 | "MaaS refused to mint the key" | The message quotes MaaS's status and error. A 401 or 403 means MaaS did not accept the service account token; a 400 often names a subscription that is missing or not active |
 | "MaaS does not offer ... to the enrichment service's key" | The message lists the models MaaS offers the key. Check that the subscription names the model and its namespace |
 | "Access checks (HTTP status): ..." | The message lists each check's status. 404 for every check, including the one with no key, means the gateway found no route for the request: the model ID in the Secret is not one MaaS publishes; a 429 means the token budget is used up for this hour; a 200 with no key means the gateway is not enforcing keys; a revoked key that still gets 200 means the revocation wait was too short, so rerun |
+| "The platform is not ready" (phase 03) | The message lists the platform's conditions. `oc get ansibleautomationplatform aap -n aap -o yaml` shows the operator's detail and `oc get pods -n aap` which component is not running |
 | "Kuadrant is not ready" | Check the message, then `oc get kuadrant kuadrant -n kuadrant-system -o yaml` and the pods in `kuadrant-system` |
 | Monitoring wait times out | Check `oc get pods -n openshift-user-workload-monitoring` and `oc get co monitoring` |

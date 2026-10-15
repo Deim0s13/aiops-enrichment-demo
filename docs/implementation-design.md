@@ -306,7 +306,7 @@ The no-scripting rule applies to deployment and configuration. The enrichment se
 | 00 | `00_preflight.yml` | Confirms every required secret and the cluster connection before any change |
 | 01 | `01_platform.yml` | Frees the GPU, checks Node Feature Discovery, the GPU Operator and storage, and enables user workload monitoring with its Alertmanager (DD13) |
 | 02 | `02_openshift_ai.yml` | PostgreSQL; the AI platform: Red Hat Connectivity Link, Models-as-a-Service and MLflow; the model as an `LLMInferenceService`; and the enrichment service onboarded with its policy, subscription and API key, checked through the gateway (DD14, DD15) |
-| 03 | `03_aap.yml` | AAP operator, instance and subscription manifest |
+| 03 | `03_aap.yml` | AAP operator (namespace-scoped, `stable-2.7`) and the platform with automation controller and Event-Driven Ansible; the subscription manifest is still to come (OI06) |
 | 04 | `04_aap_content.yml` | Projects, credentials, job templates, workflow, catalogue and rulebook activations, declared with `infra.aap_configuration` |
 | 05 | `05_workload.yml` | Sample service, alert rules and Alertmanager routing |
 | 06 | `06_knowledge.yml` | Knowledge index and ingestion of the approved corpus |

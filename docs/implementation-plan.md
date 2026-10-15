@@ -70,7 +70,7 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 | M1.5 | ~~Confirm whether MLflow tracing is provided~~ Done: the `mlflowoperator` component | OI03 |
 | M1.6 | ~~Test two or three candidate models for citation adherence~~ Done (2026-10-15): Granite 3.1 8B, Llama 3.1 8B and Qwen3 8B tested through MaaS ([model-selection.md](model-selection.md)); Qwen3 8B chosen for engineer-reviewed enrichment and served by phase 02 | OI04 |
 | M1.7 | Phase 02, in three parts: (1) OpenShift AI version check and Red Hat Connectivity Link, with the reusable operator role; (2) PostgreSQL, the MaaS gateway, and enabling MaaS and MLflow; (3) the model, its subscription, the enrichment service's API key and access checks. Parts 1 and 2 done (2026-10-14): Connectivity Link, PostgreSQL, the MaaS gateway, and MaaS and MLflow enabled. Part 2b, the MLflow server, done the same day. Part 3 done (2026-10-14): Granite served on the L4, the enrichment service's policy, subscription and key, and the access checks passing through the gateway. Then split into roles by owning team (DD15), with retries on reads | |
-| M1.8 | Phase 03: AAP operator, instance and manifest upload | |
+| M1.8 | Phase 03: AAP operator, instance and manifest upload. Operator and platform done (2026-10-15): AAP 2.7 with Controller and Event-Driven Ansible on the shared node. Manifest upload waits for OI06 | OI06 |
 | M1.9 | ~~Confirm whether the cluster's routes are reachable from the internet~~ Done: reachable, with a publicly trusted certificate, so the trigger is a push | OI01 |
 | M1.10 | Rebuild from empty and time each phase | |
 
@@ -80,7 +80,7 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 
 **Decision point:** if the rebuild takes much longer than 90 minutes, decide whether to accept it, cache more (for example, mirror operator images) or split the build so the slow phases run once per environment.
 
-**Progress and lessons so far (2026-10-14).** Phases 01 and 02 (parts 1, 2 and 2b) run on the first environment. Lessons:
+**Progress and lessons so far (2026-10-15).** Phases 01, 02 and 03 (without the manifest) run on the first environment, and the model is chosen. Lessons:
 
 - The environment is the RHDP OpenShift AI catalogue item and already provides the GPU stack and OpenShift AI (design section 7.1), so phase 01 checks rather than installs (DD13).
 - The cluster API uses a certificate from the cluster's own CA. The build verifies it against `kube-root-ca.crt`, loaded into Vault with the URL and token, rather than turning verification off.
@@ -94,6 +94,7 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 - A missing MaaS key is refused with 401 and a revoked one with 403; the checks accept either.
 - The cluster session token expires daily, and an expired token used to surface as a traceback from whichever task first called the cluster. The `secrets` role now checks the token whenever a phase reads the cluster group, and stops with a clear message before anything changes.
 - The model selection test: constrained output works through MaaS (all 45 constrained answers valid, with only supplied IDs). Llama 3.1 8B once added a database failover step because a planted log line asked it to, and Granite 3.1 8B declined cases its runbook covered. Qwen3 8B was the only candidate both safe and useful, but cautious: prompt work in M3 targets its declined C4 and missing job on C3. Two gates first measured more than safety; they were corrected, recorded and applied to the saved answers.
+- AAP 2.7 fits beside OpenShift AI and the model on one g6.16xlarge: before AAP, about a quarter of the node's CPU and a fifth of its memory were requested.
 - The single-node API server dropped connections three times in two days, part way through a response. Waits already retried; single-shot reads now retry too. Writes do not, so a failed change stops the build.
 - Looping a later task over a Kubernetes task's registered results prints the cluster token at `-vv`, because each item carries the module invocation. Such results are reduced to the fields needed first.
 
