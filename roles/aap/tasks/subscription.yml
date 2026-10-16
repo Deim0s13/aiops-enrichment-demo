@@ -1,0 +1,103 @@
+---
+# The subscription (OI06): the manifest from the operator's Vault, applied to automation controller
+# through the platform gateway, as the certified ansible.controller.license module does. Applied only
+# when no valid subscription is attached, so a rerun changes nothing. The manifest is read from the
+# secrets role, never passed in as a role input, so it is not printed with the role's arguments, and
+# it is never written to disk.
+
+- name: Read the platform's subscription status
+  ansible.builtin.uri:
+    url: "{{ aap_url }}/api/controller/v2/config/"
+    url_username: admin
+    url_password: "{{ aap_admin_secret.resources[0].data.password | b64decode }}"
+    force_basic_auth: true
+    status_code: [200]
+    validate_certs: "{{ aap_validate_certs }}"
+  register: aap_config
+  until: aap_config.status | default(-1) == 200
+  retries: 6
+  delay: 10
+  failed_when: false
+  no_log: true
+
+- name: Report a subscription status that cannot be read
+  ansible.builtin.assert:
+    that: aap_config.status | default(-1) == 200
+    fail_msg: >-
+      Reading {{ aap_url }}/api/controller/v2/config/ as admin returned HTTP
+      {{ aap_config.status | default('no response') }}. Check the platform with: oc get pods -n {{ aap_namespace }}
+    quiet: true
+
+- name: Decide whether the manifest is needed
+  ansible.builtin.set_fact:
+    aap_subscription_needed: "{{ not (aap_config.json.license_info.valid_key | default(false) | bool) }}"
+    aap_manifest_available: "{{ secrets_values.aap_manifest_b64 | default('') | length > 0 }}"
+
+- name: Apply the subscription manifest
+  ansible.builtin.uri:
+    url: "{{ aap_url }}/api/controller/v2/config/"
+    method: POST
+    url_username: admin
+    url_password: "{{ aap_admin_secret.resources[0].data.password | b64decode }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      eula_accepted: true
+      manifest: "{{ secrets_values.aap_manifest_b64 | regex_replace('\\s', '') }}"
+    status_code: [200, 201]
+    timeout: 120
+    validate_certs: "{{ aap_validate_certs }}"
+  register: aap_manifest_applied
+  when: aap_subscription_needed | bool and aap_manifest_available | bool
+  changed_when: aap_manifest_applied.status | default(-1) in [200, 201]
+  failed_when: false
+  no_log: true
+
+# Reports the outcome without the manifest: only the status code and the platform's error text.
+- name: Report a manifest the platform would not accept
+  ansible.builtin.assert:
+    that: aap_manifest_applied.status | default(-1) in [200, 201]
+    fail_msg: >-
+      The platform did not accept the manifest (HTTP {{ aap_manifest_applied.status | default('no response') }}:
+      {{ aap_manifest_applied.json.error | default(aap_manifest_applied.json.detail
+         | default(aap_manifest_applied.msg | default(''))) | string | truncate(300) }}).
+      Check that aap_manifest_b64 in aiops-demo/entitlements is the manifest .zip, base64-encoded, and that its
+      allocation has not expired.
+    quiet: true
+  when: aap_subscription_needed | bool and aap_manifest_available | bool
+
+- name: Read the subscription now attached
+  ansible.builtin.uri:
+    url: "{{ aap_url }}/api/controller/v2/config/"
+    url_username: admin
+    url_password: "{{ aap_admin_secret.resources[0].data.password | b64decode }}"
+    force_basic_auth: true
+    status_code: [200]
+    validate_certs: "{{ aap_validate_certs }}"
+  register: aap_config_after
+  when: aap_manifest_applied is not skipped
+  failed_when: false
+  no_log: true
+
+- name: Summarise the subscription
+  ansible.builtin.set_fact:
+    aap_license: "{{ (aap_config_after if aap_manifest_applied is not skipped else aap_config).json.license_info | default({}) }}"
+
+- name: Check that a valid subscription is attached
+  ansible.builtin.assert:
+    that: aap_license.valid_key | default(false) | bool or not aap_manifest_available | bool
+    fail_msg: >-
+      The platform reports no valid subscription after the manifest was applied
+      ({{ aap_license.license_type | default('no licence information') }}).
+      Check Settings, Subscription in the platform's web console.
+    quiet: true
+
+- name: Record the subscription result
+  ansible.builtin.set_fact:
+    aap_report: >-
+      {{ aap_report + [('Subscription: ' ~ ('applied' if aap_manifest_applied is not skipped else 'already attached')
+           ~ ', ' ~ aap_license.subscription_name | default('unnamed')
+           ~ (', expires ' ~ ('%Y-%m-%d' | ansible.builtin.strftime(aap_license.license_date | default(0) | int))
+              if aap_license.license_date | default(0) | int > 0 else ''))
+          if aap_license.valid_key | default(false) | bool else
+          'Subscription: none, because aap_manifest_b64 is empty in aiops-demo/entitlements'] }}

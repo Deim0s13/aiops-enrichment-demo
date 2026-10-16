@@ -1,6 +1,6 @@
 ---
-# Phase 03: Ansible Automation Platform (DD11). Part 1 installs the AAP operator into its own
-# namespace; part 2 adds the instance (Controller and Event-Driven Ansible) and the manifest.
+# Phase 03: Ansible Automation Platform (DD11): the AAP operator in its own namespace, the platform
+# with Controller and Event-Driven Ansible, and the subscription manifest from Vault.
 #   ansible-navigator run playbooks/03_aap.yml
 #
 # Safe to rerun. Run preflight and phase 01 first.
@@ -24,7 +24,8 @@
       ansible.builtin.include_role:
         name: secrets
       vars:
-        secrets_groups: [cluster]
+        # entitlements holds the AAP subscription manifest.
+        secrets_groups: [cluster, entitlements]
 
     - name: Install Ansible Automation Platform
       ansible.builtin.include_role:

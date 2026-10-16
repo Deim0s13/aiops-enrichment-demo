@@ -2,7 +2,7 @@
 
 This guide builds the demo on a demo environment, one phase at a time. Follow it for every new environment. It assumes [laptop-setup.md](laptop-setup.md) is complete: Vault holds your entitlements and ServiceNow credentials, the execution environment is built, and preflight passes with the cluster checks skipped.
 
-Sections are added as each phase is implemented. Phases 01 to 03 are implemented, except the AAP subscription manifest in phase 03. Phases 04 onwards are not implemented yet.
+Sections are added as each phase is implemented. Phases 01 to 03 are implemented. Phases 04 onwards are not implemented yet.
 
 | Step | What you end up with | Time |
 |---|---|---|
@@ -12,7 +12,7 @@ Sections are added as each phase is implemented. Phases 01 to 03 are implemented
 | 4 | Preflight passing, including the cluster | 1 minute |
 | 5 | Phase 01: GPU freed, GPU stack checked, user workload monitoring enabled | 5 minutes, up to 25 on a fresh environment |
 | 6 | Phase 02: OpenShift AI checked, Connectivity Link installed, PostgreSQL deployed, Models-as-a-Service and MLflow enabled, the model served and published, the enrichment service given governed access, and the access checks passed | About 15 minutes, plus up to 30 for the first model start |
-| 7 | Phase 03: AAP operator installed and the platform running, with Controller and Event-Driven Ansible | About 20 minutes on the first run |
+| 7 | Phase 03: AAP operator installed, the platform running with Controller and Event-Driven Ansible, and its subscription attached | About 20 minutes on the first run |
 
 Run each command on its own line. Pasting several lines at once, or a line containing `read`, can go wrong in zsh.
 
@@ -212,21 +212,23 @@ What it does (role `aap`, the automation platform team's part):
 1. **Installs the AAP operator** from the Red Hat catalogue on the channel in `demo_operators.aap` (`stable-2.7`), into the `aap` namespace. The channel is namespace-scoped, so the operator manages only that namespace. If the operator is already installed, it is left as it is.
 2. **Runs the platform**: one `AnsibleAutomationPlatform` resource named `aap`, with automation controller and Event-Driven Ansible switched on and Automation Hub, Lightspeed, the MCP server and metrics switched off (`aap_components` in the role's defaults). The operator deploys the platform gateway, the components and their databases. The first run pulls several images, so allow 15 to 20 minutes, with `FAILED - RETRYING` lines while it waits.
 3. **Checks the platform** by logging in through the gateway as `admin`, with the password the operator generated. The password stays in the `aap-admin-password` Secret in `aap`.
+4. **Attaches the subscription.** It applies the manifest from `aap_manifest_b64` in Vault (laptop setup) through the platform's API, accepting the EULA, unless a valid subscription is already attached. The manifest is never written to disk or printed; the report shows the subscription's name and expiry.
 
 On the first run, expect:
 
 ```text
 - 'ansible-automation-platform-operator 2.7.0+0...: installed (channel stable-2.7, namespace aap)'
 - 'AAP: ready at https://aap-aap.apps... with controller, eda; admin password in aap/aap-admin-password'
+- 'Subscription: applied, Red Hat Ansible Automation Platform, ... expires ...'
 ```
+
+On a rerun, the subscription is `already attached` and the play recap shows `changed=0`.
 
 To log in to the web console, open that address and use `admin` with the password from:
 
 ```bash
 oc get secret aap-admin-password -n aap -o jsonpath='{.data.password}' | base64 -d; echo
 ```
-
-The platform runs without a subscription until the manifest is added (OI06), which is still to be built.
 
 ## Finish your session
 
@@ -265,5 +267,6 @@ podman stop aiops-demo-vault
 | "MaaS does not offer ... to the enrichment service's key" | The message lists the models MaaS offers the key. Check that the subscription names the model and its namespace |
 | "Access checks (HTTP status): ..." | The message lists each check's status. 404 for every check, including the one with no key, means the gateway found no route for the request: the model ID in the Secret is not one MaaS publishes; a 429 means the token budget is used up for this hour; a 200 with no key means the gateway is not enforcing keys; a revoked key that still gets 200 means the revocation wait was too short, so rerun |
 | "The platform is not ready" (phase 03) | The message lists the platform's conditions. `oc get ansibleautomationplatform aap -n aap -o yaml` shows the operator's detail and `oc get pods -n aap` which component is not running |
+| "The platform did not accept the manifest" (phase 03) | The message quotes the platform's reason. Check that `aap_manifest_b64` holds the manifest .zip from the Customer Portal, base64-encoded as in laptop setup, and that its allocation has not expired. Download a fresh manifest and repeat the laptop setup line if needed |
 | "Kuadrant is not ready" | Check the message, then `oc get kuadrant kuadrant -n kuadrant-system -o yaml` and the pods in `kuadrant-system` |
 | Monitoring wait times out | Check `oc get pods -n openshift-user-workload-monitoring` and `oc get co monitoring` |

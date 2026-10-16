@@ -4,7 +4,7 @@ A reproducible demonstration of AI-assisted incident enrichment using Red Hat An
 
 The whole environment is built and configured with Ansible playbooks, so it can be rebuilt from an empty cluster whenever a demo environment expires.
 
-> **Status:** milestone M1 (platform). Vault on the laptop, the secrets role, preflight and build phases 01 (platform), 02 (OpenShift AI, Models-as-a-Service and the model) and 03 (AAP, without the subscription manifest yet) are implemented. Phases 04 onwards are stubs.
+> **Status:** milestone M1 (platform). Vault on the laptop, the secrets role, preflight and build phases 01 (platform), 02 (OpenShift AI, Models-as-a-Service and the model) and 03 (AAP and its subscription) are implemented. Phases 04 onwards are stubs.
 
 ## What the demo shows
 

@@ -307,7 +307,7 @@ The no-scripting rule applies to deployment and configuration. The enrichment se
 | 00 | `00_preflight.yml` | Confirms every required secret and the cluster connection before any change |
 | 01 | `01_platform.yml` | Frees the GPU, checks Node Feature Discovery, the GPU Operator and storage, and enables user workload monitoring with its Alertmanager (DD13) |
 | 02 | `02_openshift_ai.yml` | PostgreSQL; the AI platform: Red Hat Connectivity Link, Models-as-a-Service and MLflow; the model as an `LLMInferenceService`; and the enrichment service onboarded with its policy, subscription and API key, checked through the gateway (DD14, DD15) |
-| 03 | `03_aap.yml` | AAP operator (namespace-scoped, `stable-2.7`) and the platform with automation controller and Event-Driven Ansible; the subscription manifest is still to come (OI06) |
+| 03 | `03_aap.yml` | AAP operator (namespace-scoped, `stable-2.7`), the platform with automation controller and Event-Driven Ansible, and the subscription manifest from the operator's Vault |
 | 04 | `04_aap_content.yml` | Projects, credentials, job templates, workflow, catalogue and rulebook activations, declared with `infra.aap_configuration` |
 | 05 | `05_workload.yml` | Sample service, alert rules and Alertmanager routing |
 | 06 | `06_knowledge.yml` | Knowledge index and ingestion of the approved corpus |
@@ -396,7 +396,7 @@ Scenarios S1 to S5 are presented to the audience. `verify.yml` also checks the f
 | OI03 | ~~Confirm whether OpenShift AI 3.5 provides MLflow tracing in the environment, or whether a standalone server is required.~~ Closed: provided by the `mlflowoperator` component, not enabled by default (DD07). | Phase 02 |
 | OI04 | ~~Select the model by testing citation adherence against a hand-built prompt and sample evidence.~~ Closed 2026-10-15: Qwen3 8B, for engineer-reviewed enrichment only. See "Decision" in [model-selection.md](model-selection.md). | Before phase 05 |
 | OI05 | Confirm that pgvector is available in the chosen supported PostgreSQL image. | Phase 06 |
-| OI06 | Confirm that an AAP subscription manifest can be obtained for demo environments. | Phase 03 |
+| OI06 | ~~Confirm that an AAP subscription manifest can be obtained for demo environments.~~ Closed 2026-10-16: the operator has one; phase 03 applies it from Vault. | Phase 03 |
 | OI07 | ~~Name the fictional organisation and its services for the corpus and demo data.~~ Closed: the organisation is ACME Bank; service names are chosen with the corpus. | Phase 06 |
 | OI08 | ~~Confirm whether the audience's own highest-volume incident family can be reproduced, as a replacement for DD01.~~ Closed: DD01 (JVM memory exhaustion) stands; a second reproducible family is designed in M5. | Before corpus authoring |
 | OI09 | ~~Confirm licence and publication approval.~~ Closed: a personal learning and demonstration kit, kept private in the author's GitHub under Apache 2.0 and shared with colleagues as collaborators. Making it public is a later decision, once the kit is mature, and follows the review in M6.7. | Not applicable |

@@ -31,7 +31,7 @@ The playbooks are written in this repository and run from the operator's laptop 
 
 | ID | Task | Closes |
 |---|---|---|
-| M0.1 | Obtain an AAP subscription manifest that can be used in demo environments | OI06 |
+| M0.1 | ~~Obtain an AAP subscription manifest that can be used in demo environments~~ Done | OI06 |
 | M0.2 | Request a ServiceNow PDI, choose a release, and load demo data | |
 | M0.3 | Generate an Automation Hub token and log in to registry.redhat.io on the laptop | |
 | M0.4 | Install Podman, `ansible-navigator`, `ansible-builder` and `pre-commit` on the laptop | |
@@ -70,9 +70,9 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 | M1.5 | ~~Confirm whether MLflow tracing is provided~~ Done: the `mlflowoperator` component | OI03 |
 | M1.6 | ~~Test two or three candidate models for citation adherence~~ Done (2026-10-15): Granite 3.1 8B, Llama 3.1 8B and Qwen3 8B tested through MaaS ([model-selection.md](model-selection.md)); Qwen3 8B chosen for engineer-reviewed enrichment and served by phase 02 | OI04 |
 | M1.7 | Phase 02, in three parts: (1) OpenShift AI version check and Red Hat Connectivity Link, with the reusable operator role; (2) PostgreSQL, the MaaS gateway, and enabling MaaS and MLflow; (3) the model, its subscription, the enrichment service's API key and access checks. Parts 1 and 2 done (2026-10-14): Connectivity Link, PostgreSQL, the MaaS gateway, and MaaS and MLflow enabled. Part 2b, the MLflow server, done the same day. Part 3 done (2026-10-14): Granite served on the L4, the enrichment service's policy, subscription and key, and the access checks passing through the gateway. Then split into roles by owning team (DD15), with retries on reads | |
-| M1.8 | Phase 03: AAP operator, instance and manifest upload. Operator and platform done (2026-10-15): AAP 2.7 with Controller and Event-Driven Ansible on the shared node. Manifest upload waits for OI06 | OI06 |
+| M1.8 | Phase 03: AAP operator, instance and manifest upload. Operator and platform done (2026-10-15): AAP 2.7 with Controller and Event-Driven Ansible on the shared node. Manifest upload built 2026-10-16, applied from Vault by phase 03 | OI06 |
 | M1.9 | ~~Confirm whether the cluster's routes are reachable from the internet~~ Done: reachable, with a publicly trusted certificate, so the trigger is a push | OI01 |
-| M1.10 | Rebuild from empty and time each phase | |
+| M1.10 | Rebuild from empty and time each phase. First rebuild done (2026-10-16) on a second environment, following the build guide; phases 02 and 03 took roughly 20 minutes together, not timed precisely. It found one environment difference (a standalone Authorino), now handled. Time each phase with `time` on the next rebuild | |
 
 **Exit criteria:** a request with the enrichment service's gateway key returns a model response, and the same request with no key or a revoked key is refused. AAP is licensed and reachable. Phase timings are recorded in section 7 of the design.
 

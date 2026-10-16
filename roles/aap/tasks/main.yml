@@ -1,7 +1,7 @@
 ---
 # The automation platform team's part (DD11, DD13): the AAP operator in its own namespace, then the
-# platform instance with Controller and Event-Driven Ansible. The subscription manifest is still to
-# come (OI06). Cluster access comes from the module_defaults the calling play sets.
+# platform instance with Controller and Event-Driven Ansible, and its subscription manifest. Cluster
+# access comes from the module_defaults the calling play sets; the manifest comes from the secrets role.
 
 - name: Start the AAP report
   ansible.builtin.set_fact:
@@ -27,3 +27,6 @@
 
 - name: Run the platform
   ansible.builtin.include_tasks: instance.yml
+
+- name: Attach the subscription
+  ansible.builtin.include_tasks: subscription.yml
