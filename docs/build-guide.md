@@ -139,7 +139,7 @@ What it does, in the order the teams that would own each part in production woul
 **The AI platform** (role `openshift_ai`, the platform team's part)
 
 2. **Checks OpenShift AI.** The environment must provide OpenShift AI 3.5 or later. The phase does not install or change it.
-3. **Installs Red Hat Connectivity Link** from the Red Hat catalogue, on the channel set in `demo_operators`. It first checks that the catalogue offers that channel. If Connectivity Link is already installed, it is left as it is.
+3. **Installs Red Hat Connectivity Link** from the Red Hat catalogue, on the channel set in `demo_operators`. It first checks that the catalogue offers that channel. If Connectivity Link is already installed, it is left as it is. Connectivity Link installs the Authorino operator at one exact version; some environments ship Authorino on its own at another version, which would stop OLM installing Connectivity Link. Before installing Connectivity Link, the phase removes such a standalone Authorino and says so in its report (`demo_replace_standalone_authorino`).
 4. **Creates the Kuadrant instance** in `kuadrant-system`, which deploys the policy components Models-as-a-Service relies on.
 5. **Creates the Models-as-a-Service gateway** `maas-default-gateway` in `openshift-ingress`, on `maas.` followed by the cluster's application domain, using the environment's trusted `*.apps` certificate. It configures TLS between the gateway and Authorino as the MaaS documentation describes.
 6. **Gives Models-as-a-Service its database connection** and **switches on Models-as-a-Service and MLflow** in the DataScienceCluster, then waits for Models-as-a-Service to be ready. Other DataScienceCluster settings are left as they are.
@@ -249,6 +249,7 @@ podman stop aiops-demo-vault
 | "Expected Node Feature Discovery and the NVIDIA GPU Operator to be installed" | The environment does not provide the GPU stack. Check that you ordered the RHDP OpenShift AI catalogue item. Phase 01 does not install operators (DD13) |
 | "The NVIDIA ClusterPolicy is not ready" | The driver is still compiling, or failed. Rerun in a few minutes. If it persists, check `oc get pods -n nvidia-gpu-operator` |
 | "The catalogue offers ... channels ..., but this kit asks for channel ..." | The channel in `demo_operators` does not exist in this environment's catalogue. Set it to one of the channels listed in the message |
+| "This environment already has the Authorino operator ..." | `demo_replace_standalone_authorino` is false, so the phase will not remove the Authorino the environment ships. Run the two `oc delete` commands in the message and rerun, or set the setting to true |
 | "OLM has not installed ..." | OLM could not resolve the subscription, often because of a dependency on another operator. The message quotes OLM's reason |
 | "demo_images.postgresql is ... Pin it to a tag" | Set the tag as described at the start of step 6 |
 | PostgreSQL never becomes ready | `oc get pods -n aiops-data` and `oc logs deployment/postgres -n aiops-data`. An image pull error usually means the tag does not exist |

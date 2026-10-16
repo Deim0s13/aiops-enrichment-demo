@@ -24,6 +24,11 @@ argument_specs:
         elements: str
         required: true
         description: Namespaces whose models may attach routes to the MaaS gateway.
+      openshift_ai_replace_standalone_authorino:
+        type: bool
+        description: >-
+          Before Connectivity Link is installed, remove an Authorino operator the environment ships on
+          its own, which would stop Connectivity Link installing the exact version it requires.
       openshift_ai_database:
         type: dict
         required: true

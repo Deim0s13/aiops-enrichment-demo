@@ -2,6 +2,9 @@
 # Red Hat Connectivity Link provides Kuadrant: gateway policies for authentication (Authorino)
 # and rate limiting (Limitador). MaaS needs it, and the environment does not provide it.
 
+- name: Make way for the Authorino version Connectivity Link requires
+  ansible.builtin.include_tasks: authorino.yml
+
 - name: Install or adopt the Connectivity Link operator
   ansible.builtin.include_role:
     name: olm_operator

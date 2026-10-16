@@ -5,6 +5,10 @@
 # Kuadrant is the policy layer of Red Hat Connectivity Link. MaaS uses it, through Authorino and
 # Limitador, to check API keys and enforce token rate limits at the gateway (DD14).
 openshift_ai_kuadrant_namespace: kuadrant-system
+# Connectivity Link installs Authorino at one exact version. A standalone Authorino the environment
+# ships is removed before Connectivity Link is installed when this is true (authorino.yml).
+openshift_ai_authorino_package: authorino-operator
+openshift_ai_replace_standalone_authorino: false
 openshift_ai_kuadrant_api_version: kuadrant.io/v1beta1
 openshift_ai_kuadrant_ready_retries: 30
 openshift_ai_kuadrant_ready_delay: 10

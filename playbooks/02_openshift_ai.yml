@@ -47,6 +47,7 @@
         openshift_ai_operator: "{{ demo_operators.openshift_ai }}"
         openshift_ai_connectivity_link_operator: "{{ demo_operators.connectivity_link }}"
         openshift_ai_model_namespaces: ["{{ demo_namespaces.models }}"]
+        openshift_ai_replace_standalone_authorino: "{{ demo_replace_standalone_authorino }}"
         openshift_ai_database: "{{ postgres_connection }}"
 
     - name: Serve the model and register it with Models-as-a-Service

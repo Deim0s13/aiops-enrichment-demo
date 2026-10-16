@@ -48,6 +48,12 @@ demo_free_gpu: true
 demo_gpu_reclaimable_namespaces:
   - my-first-model
 
+# Authorino in phase 02 (DD13). Some RHDP environments ship the Authorino operator on its own, at a
+# version Connectivity Link does not accept. When true, phase 02 removes it before installing
+# Connectivity Link, which then installs the version it requires. When false, phase 02 stops and
+# says how to remove it.
+demo_replace_standalone_authorino: true
+
 # Trigger mode from ServiceNow to EDA (DD03): push or poll. OI01 is closed: the environment's
 # routes are reachable from the internet with a publicly trusted certificate, so push.
 demo_trigger_mode: push

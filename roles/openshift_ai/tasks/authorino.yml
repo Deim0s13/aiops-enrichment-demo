@@ -1,0 +1,75 @@
+---
+# Connectivity Link requires one exact version of the Authorino operator, which it installs as a
+# dependency. Some environments ship Authorino on its own, at a version Connectivity Link does not
+# accept, and OLM then cannot install Connectivity Link at all. Before Connectivity Link is installed,
+# a standalone Authorino is removed, if openshift_ai_replace_standalone_authorino allows it, so OLM
+# can install the version Connectivity Link needs. Removing an operator leaves its resource types and
+# resources in place. Once Connectivity Link is installed, Authorino is left alone.
+
+- name: Find the subscriptions to Connectivity Link and Authorino
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+  register: openshift_ai_operator_subscriptions
+  until: openshift_ai_operator_subscriptions is not failed
+  retries: 3
+  delay: 5
+
+- name: Decide whether a standalone Authorino is in the way
+  ansible.builtin.set_fact:
+    openshift_ai_rhcl_installed: >-
+      {{ openshift_ai_operator_subscriptions.resources
+         | selectattr('spec.name', 'equalto', openshift_ai_connectivity_link_operator.package)
+         | map(attribute='status.installedCSV', default='') | select | list | length > 0 }}
+    openshift_ai_standalone_authorino: >-
+      {{ openshift_ai_operator_subscriptions.resources
+         | selectattr('spec.name', 'equalto', openshift_ai_authorino_package) | list }}
+
+- name: Stop if a standalone Authorino is in the way and may not be replaced
+  ansible.builtin.assert:
+    that: >-
+      openshift_ai_rhcl_installed | bool or openshift_ai_standalone_authorino | length == 0
+      or openshift_ai_replace_standalone_authorino | bool
+    fail_msg: >-
+      This environment already has the Authorino operator
+      ({{ openshift_ai_standalone_authorino | map(attribute='status.installedCSV', default='unknown') | join(', ') }}),
+      and Connectivity Link installs its own at one exact version, so OLM would not be able to install
+      Connectivity Link. Remove it with: oc delete subscription
+      {{ (openshift_ai_standalone_authorino | first | default({})).metadata.name | default('authorino-operator') }}
+      -n {{ (openshift_ai_standalone_authorino | first | default({})).metadata.namespace | default('openshift-operators') }},
+      then oc delete csv for its version, and rerun. Or set demo_replace_standalone_authorino to true.
+    quiet: true
+
+- name: Remove the standalone Authorino subscription
+  kubernetes.core.k8s:
+    state: absent
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    namespace: "{{ item.metadata.namespace }}"
+    name: "{{ item.metadata.name }}"
+  loop: "{{ openshift_ai_standalone_authorino if not openshift_ai_rhcl_installed | bool else [] }}"
+  loop_control:
+    label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
+
+- name: Remove the standalone Authorino operator
+  kubernetes.core.k8s:
+    state: absent
+    api_version: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    namespace: "{{ item.metadata.namespace }}"
+    name: "{{ item.status.installedCSV }}"
+    wait: true
+    wait_timeout: 300
+  loop: >-
+    {{ (openshift_ai_standalone_authorino if not openshift_ai_rhcl_installed | bool else [])
+       | selectattr('status.installedCSV', 'defined') | list }}
+  loop_control:
+    label: "{{ item.metadata.namespace }}/{{ item.status.installedCSV | default('') }}"
+
+- name: Record the Authorino result
+  ansible.builtin.set_fact:
+    openshift_ai_report: >-
+      {{ openshift_ai_report + ['Authorino: removed '
+           ~ (openshift_ai_standalone_authorino | map(attribute='status.installedCSV', default='authorino-operator') | join(', '))
+           ~ ', which came with the environment, so Connectivity Link can install the version it requires'] }}
+  when: not openshift_ai_rhcl_installed | bool and openshift_ai_standalone_authorino | length > 0
