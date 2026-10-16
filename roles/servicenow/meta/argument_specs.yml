@@ -1,0 +1,41 @@
+---
+argument_specs:
+  main:
+    short_description: Prepare the ServiceNow PDI for the demo
+    description:
+      - Custom incident fields and choices, the on-call assignment group, a custom role per service identity,
+        and the service identities with generated passwords kept in the cluster.
+      - Reads the PDI URL and administrator credential from secrets_values (group servicenow).
+    options:
+      servicenow_assignment_group:
+        type: str
+        required: true
+        description: Name of the on-call assignment group the trigger matches.
+      servicenow_secret_namespace:
+        type: str
+        required: true
+        description: Namespace for the Secrets that hold the service identities' credentials.
+      servicenow_fields:
+        type: list
+        elements: dict
+        description: Custom incident fields, each with its choices.
+      servicenow_roles:
+        type: list
+        elements: dict
+        description: Custom roles, each with a name and description.
+      servicenow_identities:
+        type: list
+        elements: dict
+        description: Service identities, each with user_name, first_name, last_name and role.
+      servicenow_identity_secret_prefix:
+        type: str
+        description: Prefix for the name of each identity's Secret.
+      servicenow_password_length:
+        type: int
+        description: Length of the generated passwords.
+      servicenow_probe_acl:
+        type: bool
+        description: Check whether the PDI accepts access rule changes over the API.
+      servicenow_timeout:
+        type: int
+        description: Seconds to wait for each ServiceNow API call.

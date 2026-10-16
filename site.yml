@@ -14,17 +14,17 @@
 - name: Ansible Automation Platform
   ansible.builtin.import_playbook: playbooks/03_aap.yml
 
+- name: ServiceNow
+  ansible.builtin.import_playbook: playbooks/04_servicenow.yml
+
 - name: AAP content
-  ansible.builtin.import_playbook: playbooks/04_aap_content.yml
+  ansible.builtin.import_playbook: playbooks/05_aap_content.yml
 
 - name: Workload
-  ansible.builtin.import_playbook: playbooks/05_workload.yml
+  ansible.builtin.import_playbook: playbooks/06_workload.yml
 
 - name: Knowledge
-  ansible.builtin.import_playbook: playbooks/06_knowledge.yml
+  ansible.builtin.import_playbook: playbooks/07_knowledge.yml
 
 - name: Enrichment service
-  ansible.builtin.import_playbook: playbooks/07_enrichment.yml
-
-- name: ServiceNow
-  ansible.builtin.import_playbook: playbooks/08_servicenow.yml
+  ansible.builtin.import_playbook: playbooks/08_enrichment.yml

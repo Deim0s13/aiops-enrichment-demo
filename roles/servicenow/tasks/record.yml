@@ -1,0 +1,60 @@
+---
+# Creates a ServiceNow record if it is missing and changes only the fields that differ. The api
+# module itself always creates on post and always reports a change on patch, hence the comparison.
+# Input: servicenow_record with kind, label, table, query, data and, to remember its sys_id, key.
+
+- name: "Find {{ servicenow_record.label }}"
+  servicenow.itsm.api_info:
+    instance: "{{ servicenow_instance }}"
+    resource: "{{ servicenow_record.table }}"
+    sysparm_query: "{{ servicenow_record.query }}"
+    columns: "{{ ['sys_id'] + (servicenow_record.data | list) }}"
+    exclude_reference_link: true
+  register: servicenow_found
+  until: servicenow_found is not failed
+  retries: 3
+  delay: 5
+
+- name: "Compare with what is wanted: {{ servicenow_record.label }}"
+  ansible.builtin.set_fact:
+    servicenow_existing: "{{ servicenow_found.record | first | default({}) }}"
+    servicenow_changes: "{{ servicenow_changes_json | from_json }}"
+  vars:
+    servicenow_changes_json: >-
+      {%- set have = servicenow_found.record | first | default({}) -%}
+      {%- set ns = namespace(out={}) -%}
+      {%- for k, v in servicenow_record.data.items() if have[k] | default('') | string != v | string -%}
+      {%- set ns.out = ns.out | combine({k: v}) -%}
+      {%- endfor -%}
+      {{ ns.out | to_json }}
+
+- name: "Create {{ servicenow_record.label }}"
+  servicenow.itsm.api:
+    instance: "{{ servicenow_instance }}"
+    resource: "{{ servicenow_record.table }}"
+    action: post
+    data: "{{ servicenow_record.data }}"
+  register: servicenow_created
+  when: servicenow_existing | length == 0
+
+- name: "Update {{ servicenow_record.label }}"
+  servicenow.itsm.api:
+    instance: "{{ servicenow_instance }}"
+    resource: "{{ servicenow_record.table }}"
+    action: patch
+    sys_id: "{{ servicenow_existing.sys_id }}"
+    data: "{{ servicenow_changes }}"
+  when:
+    - servicenow_existing | length > 0
+    - servicenow_changes | length > 0
+
+- name: "Record what happened to {{ servicenow_record.label }}"
+  ansible.builtin.set_fact:
+    servicenow_ids: >-
+      {{ servicenow_ids | combine({servicenow_record.key:
+           (servicenow_existing.sys_id if servicenow_existing | length > 0 else servicenow_created.record.sys_id)})
+         if servicenow_record.key is defined else servicenow_ids }}
+    servicenow_results: >-
+      {{ servicenow_results + [{'kind': servicenow_record.kind, 'label': servicenow_record.label,
+         'action': 'created' if servicenow_existing | length == 0
+                   else ('updated' if servicenow_changes | length > 0 else 'unchanged')}] }}

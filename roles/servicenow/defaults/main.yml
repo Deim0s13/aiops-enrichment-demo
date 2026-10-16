@@ -1,0 +1,62 @@
+---
+# ServiceNow foundation for phase 04 (design sections 5.1, 5.4 and 6.1). The assignment group and
+# the namespace for the identities' Secrets are inputs (meta/argument_specs.yml). The PDI's URL and
+# administrator credential are read from secrets_values (group servicenow).
+
+# Values ServiceNow returns as strings are written as strings here ("true", "10"), so the role can
+# compare what it wants with what is there and change only what differs.
+
+# Custom incident fields (design section 5.4).
+servicenow_fields:
+  - element: u_ai_enrichment_state
+    column_label: AI enrichment state
+    internal_type: string
+    max_length: "40"
+    choice: "1"
+    choices:
+      - { value: pending, label: Pending }
+      - { value: complete, label: Complete }
+      - { value: insufficient_evidence, label: Insufficient evidence }
+      - { value: unavailable, label: Unavailable }
+  - element: u_ai_enrichment_rev
+    column_label: AI enrichment revision
+    internal_type: integer
+    choices: []
+  - element: u_ai_enrichment_rating
+    column_label: AI enrichment rating
+    internal_type: string
+    max_length: "40"
+    choice: "1"
+    choices:
+      - { value: useful, label: Useful }
+      - { value: incorrect, label: Incorrect }
+      - { value: unsafe, label: Unsafe }
+
+# One custom role per identity, instead of itil, which would let them reassign and close
+# incidents (design section 6.1). The access rules that give each role its rights come with them.
+servicenow_roles:
+  - name: acme_monitoring_integration
+    description: ACME Bank monitoring integration stand-in. Creates incidents; cannot write AI enrichment fields.
+  - name: acme_ai_enrichment
+    description: ACME Bank AI enrichment writer. Writes work notes and AI enrichment fields only.
+
+# Web service only accounts: they cannot sign in to the ServiceNow interface.
+servicenow_identities:
+  - user_name: svc-monitoring
+    first_name: Monitoring
+    last_name: Integration
+    role: acme_monitoring_integration
+  - user_name: svc-ai-enrichment
+    first_name: AI
+    last_name: Enrichment
+    role: acme_ai_enrichment
+
+# Each identity's credentials go to a Secret named <prefix><user_name> in servicenow_secret_namespace.
+servicenow_identity_secret_prefix: servicenow-
+servicenow_password_length: 32
+
+# Check whether the PDI accepts access rule (ACL) changes over the API. Creates one inactive rule and
+# removes it straight away.
+servicenow_probe_acl: true
+
+servicenow_timeout: 30

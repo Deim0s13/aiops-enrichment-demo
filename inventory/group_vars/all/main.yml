@@ -31,6 +31,11 @@ demo_namespaces:
   data: aiops-data
   aap: aap
 
+# ServiceNow (phase 04). The trigger matches incidents in this group and category (design section 5.1).
+demo_servicenow:
+  assignment_group: ACME Payments On-call
+  category: software
+
 # Container images (DD12). Pinned; the build never pulls latest.
 demo_images:
   postgresql: registry.redhat.io/rhel9/postgresql-16:1791897894

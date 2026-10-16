@@ -1,0 +1,9 @@
+---
+- name: "Phase 05 | AAP content: projects, credentials, templates, workflow, catalogue and rulebook activations"
+  hosts: localhost
+  gather_facts: false
+  tags: [aap_content]
+  tasks:
+    - name: Report that phase 05 is not implemented yet
+      ansible.builtin.debug:
+        msg: "Phase 05 (aap_content) is a stub. See docs/implementation-design.md sections 5 and 6.1."

@@ -1,0 +1,40 @@
+---
+# Phase 04: the ServiceNow foundation (design sections 5.1, 5.4 and 6.1): custom incident fields, the
+# on-call assignment group, a custom role per service identity and the service identities, whose
+# generated passwords are kept in the cluster.
+#   ansible-navigator run playbooks/04_servicenow.yml
+#
+# Safe to rerun. Run preflight (to wake the PDI) and phase 03 first: the identities' Secrets go in
+# the AAP namespace, where phase 05 reads them.
+
+- name: "Phase 04 | ServiceNow: incident fields, assignment group, roles and service identities"
+  hosts: localhost
+  gather_facts: false
+  tags: [servicenow]
+
+  # See playbooks/01_platform.yml for why the modules are listed one by one.
+  module_defaults:
+    kubernetes.core.k8s: &cluster_auth
+      host: "{{ secrets_values.cluster_api_url }}"
+      api_key: "{{ secrets_values.cluster_api_token }}"
+      validate_certs: "{{ demo_cluster_validate_certs }}"
+      ca_cert: "{{ secrets_cluster_ca_file | default(omit) }}"
+    kubernetes.core.k8s_info: *cluster_auth
+
+  tasks:
+    - name: Resolve the cluster and ServiceNow secrets
+      ansible.builtin.include_role:
+        name: secrets
+      vars:
+        secrets_groups: [cluster, servicenow]
+
+    - name: Prepare ServiceNow
+      ansible.builtin.include_role:
+        name: servicenow
+      vars:
+        servicenow_assignment_group: "{{ demo_servicenow.assignment_group }}"
+        servicenow_secret_namespace: "{{ demo_namespaces.aap }}"
+
+    - name: Report what phase 04 found and changed
+      ansible.builtin.debug:
+        msg: "{{ servicenow_report }}"

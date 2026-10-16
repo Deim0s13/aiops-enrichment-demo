@@ -1,0 +1,122 @@
+---
+# One service identity's password. The PDI outlives the cluster, so the password lives in a Secret
+# in the cluster and is reset only when the cluster has none or the stored one no longer works
+# (design section 6.3). Input: servicenow_identity.
+
+- name: "Read the stored credentials for {{ servicenow_identity.user_name }}"
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ servicenow_secret_namespace }}"
+    name: "{{ servicenow_identity_secret_prefix }}{{ servicenow_identity.user_name }}"
+  register: servicenow_secret_read
+  until: servicenow_secret_read is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Keep only the stored password
+  ansible.builtin.set_fact:
+    servicenow_stored_password: >-
+      {{ ((servicenow_secret_read.resources | first | default({})).data | default({})).password | default('') | b64decode }}
+  no_log: true
+
+- name: "Check whether the stored password still works for {{ servicenow_identity.user_name }}"
+  ansible.builtin.uri:
+    url: "{{ servicenow_url }}/api/now/table/sys_user_role?sysparm_limit=1&sysparm_fields=sys_id"
+    url_username: "{{ servicenow_identity.user_name }}"
+    url_password: "{{ servicenow_stored_password }}"
+    force_basic_auth: true
+    follow_redirects: none
+    headers:
+      Accept: application/json
+    status_code: [200, 401, 403]
+    timeout: "{{ servicenow_timeout }}"
+  register: servicenow_login
+  when: servicenow_stored_password | length > 0
+  no_log: true
+
+# 403 means signed in but not allowed to read that table, which is expected for these identities.
+- name: Decide whether the password needs setting
+  ansible.builtin.set_fact:
+    servicenow_password_reason: >-
+      {{ 'no stored password in the cluster' if servicenow_stored_password | length == 0
+         else ('the stored password no longer works' if servicenow_login.status | default(401) == 401 else '') }}
+
+- name: "Set a new password for {{ servicenow_identity.user_name }}"
+  when: servicenow_password_reason | length > 0
+  block:
+    # The fixed ending makes sure every character class a PDI password policy may ask for is present.
+    - name: Generate the password
+      ansible.builtin.set_fact:
+        servicenow_new_password: >-
+          {{ lookup('ansible.builtin.password', '/dev/null', length=servicenow_password_length,
+                    chars=['ascii_letters', 'digits']) ~ '-9aZ' }}
+      no_log: true
+
+    # ServiceNow hashes user_password only when it is sent as a display value.
+    - name: "Set the password in ServiceNow for {{ servicenow_identity.user_name }}"
+      servicenow.itsm.api:
+        instance: "{{ servicenow_instance }}"
+        resource: sys_user
+        action: patch
+        sys_id: "{{ servicenow_ids['user:' ~ servicenow_identity.user_name] }}"
+        query_params:
+          sysparm_input_display_value: "true"
+        data:
+          user_password: "{{ servicenow_new_password }}"
+      no_log: true
+
+    - name: "Store in the cluster the credentials for {{ servicenow_identity.user_name }}"
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          type: Opaque
+          metadata:
+            name: "{{ servicenow_identity_secret_prefix }}{{ servicenow_identity.user_name }}"
+            namespace: "{{ servicenow_secret_namespace }}"
+            labels:
+              app.kubernetes.io/part-of: aiops-enrichment-demo
+              app.kubernetes.io/component: servicenow-identity
+          data:
+            instance_url: "{{ servicenow_url | b64encode }}"
+            username: "{{ servicenow_identity.user_name | b64encode }}"
+            password: "{{ servicenow_new_password | b64encode }}"
+      no_log: true
+
+    - name: "Check that the new password works for {{ servicenow_identity.user_name }}"
+      ansible.builtin.uri:
+        url: "{{ servicenow_url }}/api/now/table/sys_user_role?sysparm_limit=1&sysparm_fields=sys_id"
+        url_username: "{{ servicenow_identity.user_name }}"
+        url_password: "{{ servicenow_new_password }}"
+        force_basic_auth: true
+        follow_redirects: none
+        headers:
+          Accept: application/json
+        status_code: [200, 401, 403]
+        timeout: "{{ servicenow_timeout }}"
+      register: servicenow_login_new
+      no_log: true
+
+    - name: Keep only the outcome of the check
+      ansible.builtin.set_fact:
+        servicenow_login_new_status: "{{ servicenow_login_new.status | default(-1) }}"
+      no_log: true
+
+    - name: Stop if ServiceNow did not accept the new password
+      ansible.builtin.assert:
+        that: servicenow_login_new_status | int in [200, 403]
+        fail_msg: >-
+          ServiceNow did not accept the new password for {{ servicenow_identity.user_name }}
+          (HTTP {{ servicenow_login_new_status }}). Check the account in the PDI (locked out, inactive or
+          a password policy that rejects the generated password).
+        quiet: true
+
+- name: "Report {{ servicenow_identity.user_name }}"
+  ansible.builtin.set_fact:
+    servicenow_report: >-
+      {{ servicenow_report + [servicenow_identity.user_name ~ ': '
+         ~ (('password set (' ~ servicenow_password_reason ~ '); API sign-in checked')
+            if servicenow_password_reason | length > 0 else 'stored password works')
+         ~ '; credentials in Secret ' ~ servicenow_identity_secret_prefix ~ servicenow_identity.user_name] }}

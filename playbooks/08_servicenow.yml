@@ -1,9 +1,0 @@
----
-- name: "Phase 08 | ServiceNow: fields, business rule, notification, service identities and demo data"
-  hosts: localhost
-  gather_facts: false
-  tags: [servicenow]
-  tasks:
-    - name: Report that phase 08 is not implemented yet
-      ansible.builtin.debug:
-        msg: "Phase 08 (servicenow) is a stub. See docs/implementation-design.md sections 5.1, 5.4 and 6.1."

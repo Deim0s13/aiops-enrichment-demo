@@ -1,0 +1,76 @@
+---
+# ServiceNow usually requires the elevated security_admin role to change access rules (ACLs). This
+# creates one inactive rule, which grants nothing, reads back how the PDI stored it and removes it,
+# so the next step knows whether the roles' rights can be ACLs or must be enforcing business rules.
+
+- name: Try to create an inactive access rule as the administrator
+  ansible.builtin.uri:
+    url: "{{ servicenow_url }}/api/now/table/sys_security_acl?{{ servicenow_acl_query }}"
+    method: POST
+    url_username: "{{ secrets_values.servicenow_admin_username }}"
+    url_password: "{{ secrets_values.servicenow_admin_password }}"
+    force_basic_auth: true
+    follow_redirects: none
+    headers:
+      Accept: application/json
+    body_format: json
+    body:
+      name: incident.u_ai_enrichment_rating
+      operation: read
+      type: record
+      active: "false"
+      description: Temporary check by the aiops-enrichment-demo build. Removed straight away.
+    status_code: [200, 201, 400, 401, 403]
+    timeout: "{{ servicenow_timeout }}"
+  vars:
+    servicenow_acl_query: >-
+      sysparm_input_display_value=true&sysparm_display_value=all&sysparm_exclude_reference_link=true&sysparm_fields=sys_id,name,operation,type,active
+  register: servicenow_acl_try
+  failed_when: false
+  no_log: true
+
+- name: Keep only the outcome of the attempt
+  ansible.builtin.set_fact:
+    servicenow_acl_probe:
+      status: "{{ servicenow_acl_try.status | default(-1) }}"
+      sys_id: "{{ ((servicenow_acl_try.json | default({})).result | default({})).sys_id.value | default('') }}"
+      operation: "{{ ((servicenow_acl_try.json | default({})).result | default({})).operation | default({}) }}"
+      error: >-
+        {{ (((servicenow_acl_try.json | default({})).error | default({})).message | default(servicenow_acl_try.msg | default('')))
+           ~ ' ' ~ (((servicenow_acl_try.json | default({})).error | default({})).detail | default('')) }}
+  no_log: true
+
+- name: Remove the inactive access rule
+  ansible.builtin.uri:
+    url: "{{ servicenow_url }}/api/now/table/sys_security_acl/{{ servicenow_acl_probe.sys_id }}"
+    method: DELETE
+    url_username: "{{ secrets_values.servicenow_admin_username }}"
+    url_password: "{{ secrets_values.servicenow_admin_password }}"
+    force_basic_auth: true
+    follow_redirects: none
+    headers:
+      Accept: application/json
+    status_code: [200, 204, 401, 403, 404]
+    timeout: "{{ servicenow_timeout }}"
+  register: servicenow_acl_remove
+  when: servicenow_acl_probe.sys_id | length > 0
+  failed_when: false
+  no_log: true
+
+- name: Keep only the outcome of the removal
+  ansible.builtin.set_fact:
+    servicenow_acl_removed_status: "{{ servicenow_acl_remove.status | default(-1) }}"
+  no_log: true
+
+- name: Report the access rule check
+  ansible.builtin.set_fact:
+    servicenow_report: >-
+      {{ servicenow_report + ['Access rule check: '
+         ~ ('the PDI accepts access rule changes over the API (operation stored as '
+              ~ servicenow_acl_probe.operation | to_json ~ ')'
+              ~ ('; the temporary rule was removed' if servicenow_acl_removed_status | int in [200, 204]
+                 else '; the temporary rule ' ~ servicenow_acl_probe.sys_id ~ ' could not be removed (HTTP '
+                      ~ servicenow_acl_removed_status ~ '); it is inactive and grants nothing, but delete it in the PDI')
+            if servicenow_acl_probe.sys_id | length > 0
+            else 'the PDI refused access rule changes over the API (HTTP ' ~ servicenow_acl_probe.status ~ ': '
+                 ~ servicenow_acl_probe.error | trim | truncate(200) ~ ')')] }}

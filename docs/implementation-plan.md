@@ -105,11 +105,11 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 
 | ID | Task | Closes |
 |---|---|---|
-| M2.1 | Phase 08 (part): custom incident fields, service identities, the business rule or polling configuration, and the "enrichment ready" notification | |
+| M2.1 | Phase 04 (part): custom incident fields, assignment group, custom roles with field-level access rules, service identities, and the "enrichment ready" notification. Phases renumbered so ServiceNow comes before AAP content, which needs the identities and writes the EDA event stream address back. Fields, group, roles, identities and the access rule check done (2026-10-16). The PDI refuses ACL changes over the API, so the identities hold `itil` narrowed by guard business rules (design section 6.1); guards, a negative test as each identity and the notification next. The business rule moves to M2.3, with the event stream it calls | |
 | M2.2 | Rulebook `incident_enrichment.yml`: receive, validate and pass only the defined fields | |
-| M2.3 | Phase 04 (part): project, credentials, EDA activation and the enrichment workflow with its failure branch | |
+| M2.3 | Phase 05 (part): project, credentials, EDA activation and the enrichment workflow with its failure branch | |
 | M2.4 | Role `itsm_worknote`: idempotent, AI-labelled work note and enrichment fields | |
-| M2.5 | Phase 07 (part): enrichment service skeleton returning a fixed, schema-valid response, built in-cluster, with network policies | |
+| M2.5 | Phase 08 (part): enrichment service skeleton returning a fixed, schema-valid response, built in-cluster, with network policies | |
 | M2.6 | Start `verify.yml` with the idempotency, recursion and concurrent update checks | |
 | M2.7 | Start `reset.yml`: close demo incidents and clear enrichment fields | |
 
@@ -124,10 +124,10 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 | ID | Task | Closes |
 |---|---|---|
 | M3.1 | Sample service `payments-notify` with a heap growth endpoint, sized to fail predictably | |
-| M3.2 | Phase 05: deployment, alert rules for heap usage and restarts, and Alertmanager routing | |
+| M3.2 | Phase 06: deployment, alert rules for heap usage and restarts, and Alertmanager routing | |
 | M3.3 | Integration stand-in: rulebook `integration_alerts.yml`, its playbook in `automation/integration/` and its own ServiceNow identity | |
 | M3.4 | Roles `evidence`, `diag_pod_status`, `diag_metrics`, `diag_changes` and `diag_logs`, with runtime and output limits | |
-| M3.5 | Phase 04 (part): diagnostic job templates in the workflow, run as the read-only `aiops-diagnostics` service account | |
+| M3.5 | Phase 05 (part): diagnostic job templates in the workflow, run as the read-only `aiops-diagnostics` service account | |
 | M3.6 | Extend `reset.yml` to restart the sample service and clear heap dumps | |
 
 **Exit criteria:** triggering the fault raises an incident within two minutes, and the workflow passes evidence in the common format to the enrichment service. A diagnostic that times out or returns too much output is handled without failing the workflow.
@@ -142,7 +142,7 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 |---|---|---|
 | M4.1 | Write the corpus: current runbooks and resolutions, near-miss runbooks, a superseded runbook, a restricted document, and a deliberate gap | |
 | M4.2 | Confirm pgvector is available in the chosen PostgreSQL image | OI05 |
-| M4.3 | Phase 06: knowledge index and ingestion job, storing labels with each passage | |
+| M4.3 | Phase 07: knowledge index and ingestion job, storing labels with each passage | |
 | M4.4 | Enrichment service: sanitisation, filtered retrieval, the prompt, the gateway call, schema and citation validation, the insufficient-evidence path and provenance | |
 | M4.5 | Tracing of every model call, with the trace ID written into the work note | |
 | M4.6 | Extend `verify.yml` with the wrong-version, access filtering, prompt injection, sensitive data, and latency and cost checks | |

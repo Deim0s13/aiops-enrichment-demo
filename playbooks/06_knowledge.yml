@@ -1,9 +1,0 @@
----
-- name: "Phase 06 | Knowledge: index and ingestion of the approved corpus"
-  hosts: localhost
-  gather_facts: false
-  tags: [knowledge]
-  tasks:
-    - name: Report that phase 06 is not implemented yet
-      ansible.builtin.debug:
-        msg: "Phase 06 (knowledge) is a stub. See docs/implementation-design.md section 5.6 and DD06."

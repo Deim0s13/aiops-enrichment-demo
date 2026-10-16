@@ -1,0 +1,171 @@
+---
+# Phase 04: the ServiceNow foundation. Every record is found first, created if missing and changed
+# only where it differs, so the role is safe to rerun against the same PDI from any cluster.
+
+- name: Prepare the connection to the ServiceNow PDI
+  ansible.builtin.set_fact:
+    servicenow_url: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}"
+    servicenow_instance:
+      host: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}"
+      username: "{{ secrets_values.servicenow_admin_username }}"
+      password: "{{ secrets_values.servicenow_admin_password }}"
+      timeout: "{{ servicenow_timeout }}"
+    servicenow_report: []
+    servicenow_results: []
+    servicenow_ids: {}
+  no_log: true
+
+- name: Check that the PDI is awake (an awake instance answers 401 without credentials)
+  ansible.builtin.uri:
+    url: "{{ servicenow_url }}/api/now/table/sys_user?sysparm_limit=1"
+    follow_redirects: none
+    headers:
+      Accept: application/json
+    status_code: [200, 301, 302, 401]
+    timeout: "{{ servicenow_timeout }}"
+  register: servicenow_awake
+  failed_when: false
+
+- name: Stop if the PDI is hibernating or unreachable
+  ansible.builtin.assert:
+    that: servicenow_awake.status | default(-1) == 401
+    fail_msg: >-
+      {{ 'The ServiceNow PDI looks like it is hibernating. Wake it at developer.servicenow.com and rerun.'
+         if servicenow_awake.status | default(-1) in [200, 301, 302] else
+         'Cannot reach the ServiceNow PDI (' ~ (servicenow_awake.msg | default('no response') | truncate(200)) ~ ').' }}
+    quiet: true
+
+- name: Create or update the custom incident fields
+  ansible.builtin.include_tasks: record.yml
+  loop: "{{ servicenow_fields }}"
+  loop_control:
+    loop_var: servicenow_field
+    label: "{{ servicenow_field.element }}"
+  vars:
+    servicenow_record:
+      kind: field
+      label: "incident.{{ servicenow_field.element }}"
+      table: sys_dictionary
+      query: "name=incident^element={{ servicenow_field.element }}"
+      data: >-
+        {{ servicenow_field | dict2items | rejectattr('key', 'equalto', 'choices') | items2dict
+           | combine({'name': 'incident'}) }}
+
+- name: Create or update the fields' choices
+  ansible.builtin.include_tasks: record.yml
+  loop: "{{ servicenow_fields | subelements('choices') }}"
+  loop_control:
+    loop_var: servicenow_choice
+    index_var: servicenow_choice_index
+    label: "{{ servicenow_choice.0.element }}={{ servicenow_choice.1.value }}"
+  vars:
+    servicenow_record:
+      kind: choice
+      label: "incident.{{ servicenow_choice.0.element }} = {{ servicenow_choice.1.value }}"
+      table: sys_choice
+      query: "name=incident^element={{ servicenow_choice.0.element }}^value={{ servicenow_choice.1.value }}^language=en"
+      data:
+        name: incident
+        element: "{{ servicenow_choice.0.element }}"
+        value: "{{ servicenow_choice.1.value }}"
+        label: "{{ servicenow_choice.1.label }}"
+        language: en
+        sequence: "{{ ((servicenow_choice_index + 1) * 10) | string }}"
+        inactive: "false"
+
+- name: Create or update the on-call assignment group
+  ansible.builtin.include_tasks: record.yml
+  vars:
+    servicenow_record:
+      kind: group
+      label: "{{ servicenow_assignment_group }}"
+      table: sys_user_group
+      query: "name={{ servicenow_assignment_group }}"
+      data:
+        name: "{{ servicenow_assignment_group }}"
+        description: ACME Bank payments on-call team. Incidents assigned here qualify for AI enrichment.
+        active: "true"
+
+- name: Create or update the custom roles
+  ansible.builtin.include_tasks: record.yml
+  loop: "{{ servicenow_roles }}"
+  loop_control:
+    loop_var: servicenow_role
+    label: "{{ servicenow_role.name }}"
+  vars:
+    servicenow_record:
+      kind: role
+      key: "role:{{ servicenow_role.name }}"
+      label: "{{ servicenow_role.name }}"
+      table: sys_user_role
+      query: "name={{ servicenow_role.name }}"
+      data:
+        name: "{{ servicenow_role.name }}"
+        description: "{{ servicenow_role.description }}"
+
+- name: Create or update the service identities
+  ansible.builtin.include_tasks: record.yml
+  loop: "{{ servicenow_identities }}"
+  loop_control:
+    loop_var: servicenow_identity
+    label: "{{ servicenow_identity.user_name }}"
+  vars:
+    servicenow_record:
+      kind: identity
+      key: "user:{{ servicenow_identity.user_name }}"
+      label: "{{ servicenow_identity.user_name }}"
+      table: sys_user
+      query: "user_name={{ servicenow_identity.user_name }}"
+      data:
+        user_name: "{{ servicenow_identity.user_name }}"
+        first_name: "{{ servicenow_identity.first_name }}"
+        last_name: "{{ servicenow_identity.last_name }}"
+        active: "true"
+        locked_out: "false"
+        web_service_access_only: "true"
+        password_needs_reset: "false"
+
+- name: Give each identity its custom role
+  ansible.builtin.include_tasks: record.yml
+  loop: "{{ servicenow_identities }}"
+  loop_control:
+    loop_var: servicenow_identity
+    label: "{{ servicenow_identity.user_name }} has {{ servicenow_identity.role }}"
+  vars:
+    servicenow_record:
+      kind: role assignment
+      label: "{{ servicenow_identity.user_name }} has {{ servicenow_identity.role }}"
+      table: sys_user_has_role
+      query: "user={{ servicenow_ids['user:' ~ servicenow_identity.user_name] }}^role={{ servicenow_ids['role:' ~ servicenow_identity.role] }}"
+      data:
+        user: "{{ servicenow_ids['user:' ~ servicenow_identity.user_name] }}"
+        role: "{{ servicenow_ids['role:' ~ servicenow_identity.role] }}"
+
+- name: Summarise the records
+  ansible.builtin.set_fact:
+    servicenow_report: "{{ servicenow_summary_json | from_json }}"
+  vars:
+    servicenow_summary_json: >-
+      {%- set ns = namespace(lines=[]) -%}
+      {%- set plural = {'field': 'Fields', 'choice': 'Choices', 'group': 'Groups', 'role': 'Roles',
+                        'identity': 'Identities', 'role assignment': 'Role assignments'} -%}
+      {%- for k in plural -%}
+      {%- set r = servicenow_results | selectattr('kind', 'equalto', k) | list -%}
+      {%- set c = r | selectattr('action', 'equalto', 'created') | map(attribute='label') | list -%}
+      {%- set u = r | selectattr('action', 'equalto', 'updated') | map(attribute='label') | list -%}
+      {%- set ns.lines = ns.lines + [plural[k] ~ ': ' ~ r | length ~ '; '
+          ~ (('created ' ~ c | join(', ')) if c else 'none created') ~ '; '
+          ~ (('updated ' ~ u | join(', ')) if u else 'none updated')] -%}
+      {%- endfor -%}
+      {{ ns.lines | to_json }}
+
+- name: Make sure each identity has a working password stored in the cluster
+  ansible.builtin.include_tasks: identity.yml
+  loop: "{{ servicenow_identities }}"
+  loop_control:
+    loop_var: servicenow_identity
+    label: "{{ servicenow_identity.user_name }}"
+
+- name: Check whether the PDI accepts access rule changes over the API
+  ansible.builtin.include_tasks: acl_probe.yml
+  when: servicenow_probe_acl | bool

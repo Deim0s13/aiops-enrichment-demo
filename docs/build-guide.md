@@ -2,7 +2,7 @@
 
 This guide builds the demo on a demo environment, one phase at a time. Follow it for every new environment. It assumes [laptop-setup.md](laptop-setup.md) is complete: Vault holds your entitlements and ServiceNow credentials, the execution environment is built, and preflight passes with the cluster checks skipped.
 
-Sections are added as each phase is implemented. Phases 01 to 03 are implemented. Phases 04 onwards are not implemented yet.
+Sections are added as each phase is implemented. Phases 01 to 03 are implemented, and phase 04 in part (M2). Phases 05 onwards are not implemented yet.
 
 | Step | What you end up with | Time |
 |---|---|---|
@@ -13,6 +13,7 @@ Sections are added as each phase is implemented. Phases 01 to 03 are implemented
 | 5 | Phase 01: GPU freed, GPU stack checked, user workload monitoring enabled | 5 minutes, up to 25 on a fresh environment |
 | 6 | Phase 02: OpenShift AI checked, Connectivity Link installed, PostgreSQL deployed, Models-as-a-Service and MLflow enabled, the model served and published, the enrichment service given governed access, and the access checks passed | About 15 minutes, plus up to 30 for the first model start |
 | 7 | Phase 03: AAP operator installed, the platform running with Controller and Event-Driven Ansible, and its subscription attached | About 20 minutes on the first run |
+| 8 | Phase 04: ServiceNow incident fields, assignment group, custom roles and service identities, with their passwords in the cluster | About 2 minutes |
 
 Run each command on its own line. Pasting several lines at once, or a line containing `read`, can go wrong in zsh.
 
@@ -229,6 +230,35 @@ To log in to the web console, open that address and use `admin` with the passwor
 ```bash
 oc get secret aap-admin-password -n aap -o jsonpath='{.data.password}' | base64 -d; echo
 ```
+
+## 8 Phase 04: ServiceNow
+
+Run preflight first if the PDI may have gone to sleep: it tells you when to wake it.
+
+```bash
+ansible-navigator run playbooks/04_servicenow.yml
+```
+
+What it does (role `servicenow`), against the PDI in Vault, as its administrator:
+
+1. **Adds the enrichment fields** to the incident table: `u_ai_enrichment_state` and `u_ai_enrichment_rating`, with their choices, and `u_ai_enrichment_rev` (design section 5.4).
+2. **Creates the on-call group**, ACME Payments On-call (`demo_servicenow.assignment_group`). Incidents assigned to it, in the Software category, are the ones the trigger will pick up.
+3. **Creates a custom role per service identity**, `acme_monitoring_integration` and `acme_ai_enrichment`, which marks what each identity is for. Guard business rules, added next, use them to limit what `itil` would otherwise allow (design section 6.1).
+4. **Creates the service identities**, `svc-monitoring` and `svc-ai-enrichment`, as web service only accounts that cannot sign in to the ServiceNow interface, each with its role.
+5. **Sets their passwords.** The PDI outlives the cluster, so each password is kept in a Secret in the `aap` namespace (`servicenow-svc-monitoring`, `servicenow-svc-ai-enrichment`), where phase 05 will read it. A password is generated and set only when the cluster has none or the stored one no longer works, so the first run on a new environment resets both, and a rerun changes nothing. Either way, it signs in as the identity to prove the password works.
+6. **Checks whether the PDI accepts access rule (ACL) changes over the API**, by creating one inactive rule and removing it. It does not (HTTP 403, `security_admin` needed), which is why the identities' limits are enforced by guard business rules instead. This check is replaced by the guards in the next step.
+
+Each record is found first, created if missing and changed only where it differs, so the phase is safe to rerun. On the first run against a PDI, expect something like:
+
+```text
+- 'Fields: 3; created incident.u_ai_enrichment_state, ...; none updated'
+- 'Choices: 7; created ...; none updated'
+- ...
+- 'svc-monitoring: password set (no stored password in the cluster); API sign-in checked; credentials in Secret servicenow-svc-monitoring'
+- 'Access rule check: ...'
+```
+
+On a rerun, every line reads `none created; none updated`, each identity's `stored password works`, and the play recap shows `changed=0`.
 
 ## Finish your session
 
