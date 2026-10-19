@@ -1,0 +1,187 @@
+---
+# The first hands-off run: incidents raised as svc-monitoring, as the integration stand-in will raise
+# them, and nothing else touched. A qualifying incident must be enriched and its "AI enrichment ready"
+# email queued; the same incident at a priority outside the rule must be left alone. Both are removed
+# at the end, with the emails ServiceNow queued for them.
+
+- name: Read the svc-monitoring credentials
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ servicenow_secret_namespace }}"
+    name: "{{ servicenow_identity_secret_prefix }}svc-monitoring"
+  register: servicenow_trigger_monitoring
+  until: servicenow_trigger_monitoring is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Keep only its password, and name this run's incidents
+  ansible.builtin.set_fact:
+    servicenow_trigger_monitoring_password: >-
+      {{ ((servicenow_trigger_monitoring.resources | first | default({})).data | default({})).password | default('') | b64decode }}
+    servicenow_trigger_run: "{{ servicenow_check_prefix }} {{ now(utc=true, fmt='%Y%m%d%H%M%S') }}"
+  no_log: true
+
+# impact and urgency 2 make priority 3, inside the rule; urgency 3 makes priority 4, outside it.
+- name: Raise a qualifying incident and one outside the rule, as svc-monitoring
+  ansible.builtin.uri:
+    url: "{{ servicenow_url }}/api/now/table/incident?sysparm_fields=sys_id,number,priority"
+    method: POST
+    url_username: svc-monitoring
+    url_password: "{{ servicenow_trigger_monitoring_password }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+    body_format: json
+    body:
+      short_description: "{{ servicenow_trigger_run }}: {{ item.label }}"
+      description: Raised by the phase 05 build check and removed at the end of it.
+      impact: "2"
+      urgency: "{{ item.urgency }}"
+      category: "{{ servicenow_trigger_category }}"
+      assignment_group: "{{ servicenow_ids.group }}"
+    status_code: [201]
+    timeout: "{{ servicenow_timeout }}"
+  loop:
+    - { key: qualifying, label: "hands-off trigger, priority 3", urgency: "2" }
+    - { key: outside, label: "outside the rule, priority 4", urgency: "3" }
+  loop_control:
+    label: "{{ item.label }}"
+  register: servicenow_trigger_raised
+  no_log: true
+
+- name: Keep only the incidents' IDs
+  ansible.builtin.set_fact:
+    servicenow_trigger_inc: >-
+      {{ dict(['qualifying', 'outside'] | zip(servicenow_trigger_raised.results | map(attribute='json.result'))) }}
+
+- name: Wait for the qualifying incident to be enriched, with nothing but ServiceNow and AAP involved
+  servicenow.itsm.api_info:
+    instance: "{{ servicenow_instance }}"
+    resource: incident
+    sysparm_query: "sys_id={{ servicenow_trigger_inc.qualifying.sys_id }}"
+    columns: [sys_id, u_ai_enrichment_state]
+  register: servicenow_trigger_wait
+  until: >-
+    servicenow_trigger_wait is not failed
+    and (servicenow_trigger_wait.record | map(attribute='u_ai_enrichment_state') | first | default('')) in ['complete', 'unavailable']
+  retries: "{{ servicenow_trigger_check_retries }}"
+  delay: "{{ servicenow_trigger_check_delay }}"
+  failed_when: false
+
+- name: Wait for the enrichment ready email to be queued
+  servicenow.itsm.api_info:
+    instance: "{{ servicenow_instance }}"
+    resource: sys_email
+    sysparm_query: "instance={{ servicenow_trigger_inc.qualifying.sys_id }}^subjectLIKEAI enrichment ready"
+    columns: [sys_id, subject, recipients, mailbox]
+  register: servicenow_trigger_email
+  until: servicenow_trigger_email is not failed and servicenow_trigger_email.record | length > 0
+  retries: 6
+  delay: 10
+  failed_when: false
+
+- name: Read both incidents and the qualifying incident's work notes
+  servicenow.itsm.api_info:
+    instance: "{{ servicenow_instance }}"
+    resource: "{{ item.resource }}"
+    sysparm_query: "{{ item.query }}"
+    columns: "{{ item.columns }}"
+  loop:
+    - resource: incident
+      query: "short_descriptionSTARTSWITH{{ servicenow_trigger_run }}"
+      columns: [sys_id, priority, u_ai_enrichment_state]
+    - resource: sys_journal_field
+      query: "element_id={{ servicenow_trigger_inc.qualifying.sys_id }}^element=work_notes^valueLIKEAI-generated enrichment"
+      columns: [sys_id]
+  loop_control:
+    label: "{{ item.resource }}"
+  register: servicenow_trigger_read_back
+  until: servicenow_trigger_read_back is not failed
+  retries: 3
+  delay: 5
+
+- name: Judge each check
+  ansible.builtin.set_fact:
+    servicenow_trigger_results:
+      - check: a qualifying incident raised by svc-monitoring is enriched with no other action
+        passed: "{{ servicenow_trigger_state.qualifying == 'complete' and servicenow_trigger_read_back.results[1].record | length == 1 }}"
+        detail: >-
+          {{ servicenow_trigger_inc.qualifying.number }}, priority {{ servicenow_trigger_inc.qualifying.priority }},
+          state {{ servicenow_trigger_state.qualifying or 'empty' }}, {{ servicenow_trigger_read_back.results[1].record | length }} note(s)
+      - check: the AI enrichment ready email is queued for the on-call group
+        passed: "{{ servicenow_trigger_email.record | default([]) | length > 0 }}"
+        detail: >-
+          {{ ((servicenow_trigger_email.record | default([]) | first | default({})).recipients | default('no email')) | truncate(80) }}
+      - check: an incident outside the rule is left alone
+        passed: "{{ servicenow_trigger_state.outside == '' }}"
+        detail: >-
+          {{ servicenow_trigger_inc.outside.number }}, priority {{ servicenow_trigger_inc.outside.priority }},
+          state {{ servicenow_trigger_state.outside or 'empty' }}
+  vars:
+    servicenow_trigger_state:
+      qualifying: >-
+        {{ servicenow_trigger_read_back.results[0].record | selectattr('sys_id', 'equalto', servicenow_trigger_inc.qualifying.sys_id)
+           | map(attribute='u_ai_enrichment_state') | first | default('') }}
+      outside: >-
+        {{ servicenow_trigger_read_back.results[0].record | selectattr('sys_id', 'equalto', servicenow_trigger_inc.outside.sys_id)
+           | map(attribute='u_ai_enrichment_state') | first | default('') }}
+
+- name: Find every test incident, including any an earlier run left
+  servicenow.itsm.api_info:
+    instance: "{{ servicenow_instance }}"
+    resource: incident
+    sysparm_query: "short_descriptionSTARTSWITH{{ servicenow_check_prefix }}"
+    columns: [sys_id]
+  register: servicenow_trigger_leftovers
+  until: servicenow_trigger_leftovers is not failed
+  retries: 3
+  delay: 5
+
+- name: Find the emails ServiceNow queued for them
+  servicenow.itsm.api_info:
+    instance: "{{ servicenow_instance }}"
+    resource: sys_email
+    sysparm_query: "instanceIN{{ servicenow_trigger_leftovers.record | map(attribute='sys_id') | join(',') }}"
+    columns: [sys_id]
+  register: servicenow_trigger_emails
+  until: servicenow_trigger_emails is not failed
+  retries: 3
+  delay: 5
+  when: servicenow_trigger_leftovers.record | length > 0
+
+# Test data the check itself created, so removing it is not a change to the configuration.
+- name: Remove the test emails
+  servicenow.itsm.api:
+    instance: "{{ servicenow_instance }}"
+    resource: sys_email
+    action: delete
+    sys_id: "{{ item }}"
+  loop: "{{ servicenow_trigger_emails.record | default([]) | map(attribute='sys_id') | list }}"
+  changed_when: false
+
+- name: Remove the test incidents
+  servicenow.itsm.api:
+    instance: "{{ servicenow_instance }}"
+    resource: incident
+    action: delete
+    sys_id: "{{ item }}"
+  loop: "{{ servicenow_trigger_leftovers.record | map(attribute='sys_id') | list }}"
+  changed_when: false
+
+- name: Report the checks
+  ansible.builtin.set_fact:
+    servicenow_report: "{{ servicenow_report + (servicenow_trigger_lines | from_json) }}"
+  vars:
+    servicenow_trigger_lines: >-
+      {%- set ns = namespace(lines=[]) -%}
+      {%- for c in servicenow_trigger_results -%}
+      {%- set ns.lines = ns.lines + [('Check passed: ' if c.passed | bool else 'CHECK FAILED: ') ~ c.check ~ ' (' ~ c.detail | trim ~ ')'] -%}
+      {%- endfor -%}
+      {{ ns.lines | to_json }}
+
+- name: Stop if a check failed
+  ansible.builtin.assert:
+    that: servicenow_trigger_results | map(attribute='passed') | map('bool') | reject | list | length == 0
+    fail_msg: "{{ servicenow_report | select('match', 'CHECK FAILED') | join('; ') }}"
+    quiet: true

@@ -136,6 +136,8 @@ flowchart LR
 
 A qualifying incident matches the demonstration's on-call assignment group (ACME Payments On-call), the Software category, priority 2 or 3, and an empty enrichment state. The event carries the incident number and system ID, short description, configuration item, priority, opening time, the alert labels supplied by the integration, and an event ID. The EDA rulebook validates these fields and passes only them to the workflow.
 
+An asynchronous business rule on insert posts qualifying incidents through an Outbound REST Message, which holds the event stream's address and token and records each call in ServiceNow's outbound HTTP log. Phase 05 sets the address and token for each environment. Running after the save means a failed call never affects the incident; it is logged instead.
+
 Recursion is prevented in three ways. The business rule fires on insert only, its condition excludes changes made by the enrichment writer identity, and the workflow sets the enrichment state to `pending` as its first action.
 
 ### 5.2 Diagnostic evidence
@@ -392,6 +394,7 @@ Scenarios S1 to S5 are presented to the audience. `verify.yml` also checks the f
 | Identity | Local accounts | Enterprise identity provider with MFA |
 | Secrets | Laptop Vault for bootstrap | Enterprise vault through AAP credential lookup |
 | Separation of duties | One operator holds every role | Duties mapped to named groups, with prohibited combinations technically enforced |
+| Event stream token | Held in the REST Message's header, readable by ServiceNow administrators on the PDI | Held in ServiceNow's credential store or replaced by OAuth, rotated by the platform team |
 | ITSM access control | Service identities hold `itil`, narrowed by guard business rules created by the build | Field-level ACLs owned by the ServiceNow platform team and changed through their own change process with `security_admin`, not by an automation pipeline's administrator account |
 | Data | Fictional | Classified, redacted and governed by residency and retention requirements |
 

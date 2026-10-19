@@ -64,3 +64,53 @@ argument_specs:
       servicenow_timeout:
         type: int
         description: Seconds to wait for each ServiceNow API call.
+  trigger:
+    short_description: Post qualifying incidents to the AAP event stream, and prove it hands-off
+    description:
+      - Phase 05. Keeps an Outbound REST Message with the event stream's address and token, read from the Secret
+        phase 05 stores them in, and an asynchronous business rule that posts each new qualifying incident (design 5.1).
+      - Proves it by raising incidents as svc-monitoring and reading the outcome back, then removes them.
+    options:
+      servicenow_assignment_group:
+        type: str
+        required: true
+        description: Name of the on-call assignment group the trigger matches.
+      servicenow_trigger_category:
+        type: str
+        required: true
+        description: Incident category the trigger matches.
+      servicenow_secret_namespace:
+        type: str
+        required: true
+        description: Namespace holding the event stream Secret and the identities' Secrets.
+      servicenow_trigger_secret:
+        type: str
+        description: Secret holding the event stream's url, header and token.
+      servicenow_trigger_rest_message:
+        type: str
+        description: Name of the Outbound REST Message.
+      servicenow_trigger_rule:
+        type: str
+        description: Name of the trigger business rule.
+      servicenow_trigger_priorities:
+        type: list
+        elements: str
+        description: Incident priorities the trigger matches.
+      servicenow_identity_secret_prefix:
+        type: str
+        description: Prefix of the identities' Secrets; the checks raise incidents as svc-monitoring.
+      servicenow_checks:
+        type: bool
+        description: Prove the trigger hands-off.
+      servicenow_check_prefix:
+        type: str
+        description: Start of the short description of every test incident.
+      servicenow_trigger_check_retries:
+        type: int
+        description: How many times to check for the enrichment.
+      servicenow_trigger_check_delay:
+        type: int
+        description: Seconds between those checks.
+      servicenow_timeout:
+        type: int
+        description: Seconds to wait for each ServiceNow API call.

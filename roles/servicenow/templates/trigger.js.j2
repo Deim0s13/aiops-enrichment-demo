@@ -1,0 +1,32 @@
+// Posts each new incident that qualifies for AI enrichment (design 5.1) to the AAP event stream,
+// through the REST Message the build keeps current. Managed by the aiops-enrichment-demo build.
+(function executeRule(current, previous) {
+    var qualifies = current.getValue('assignment_group') == '{{ servicenow_ids.group }}'
+        && current.getValue('category') == '{{ servicenow_trigger_category }}'
+        && {{ servicenow_trigger_priorities | to_json }}.indexOf(String(current.getValue('priority'))) >= 0
+        && gs.nil(current.getValue('u_ai_enrichment_state'));
+    if (!qualifies) {
+        return;
+    }
+    try {
+        var request = new sn_ws.RESTMessageV2('{{ servicenow_trigger_rest_message }}', 'post');
+        request.setRequestBody(JSON.stringify({
+            event_id: gs.generateGUID(),
+            incident: {
+                sys_id: current.getUniqueValue(),
+                number: current.getValue('number'),
+                short_description: current.getValue('short_description'),
+                cmdb_ci: current.getDisplayValue('cmdb_ci'),
+                priority: current.getValue('priority'),
+                opened_at: current.getValue('opened_at')
+            }
+        }));
+        var response = request.execute();
+        var status = response.getStatusCode();
+        if (status < 200 || status > 299) {
+            gs.error('ACME AI enrichment trigger: the event stream answered HTTP ' + status + ' for ' + current.getValue('number'));
+        }
+    } catch (e) {
+        gs.error('ACME AI enrichment trigger: could not post ' + current.getValue('number') + ': ' + e);
+    }
+})(current, previous);

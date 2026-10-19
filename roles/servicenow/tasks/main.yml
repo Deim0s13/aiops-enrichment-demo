@@ -2,39 +2,8 @@
 # Phase 04: the ServiceNow foundation. Every record is found first, created if missing and changed
 # only where it differs, so the role is safe to rerun against the same PDI from any cluster.
 
-- name: Prepare the connection to the ServiceNow PDI
-  ansible.builtin.set_fact:
-    servicenow_url: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}"
-    servicenow_instance:
-      host: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}"
-      username: "{{ secrets_values.servicenow_admin_username }}"
-      password: "{{ secrets_values.servicenow_admin_password }}"
-      timeout: "{{ servicenow_timeout }}"
-    servicenow_report: []
-    servicenow_results: []
-    servicenow_ids: {}
-    servicenow_credentials: {}
-  no_log: true
-
-- name: Check that the PDI is awake (an awake instance answers 401 without credentials)
-  ansible.builtin.uri:
-    url: "{{ servicenow_url }}/api/now/table/sys_user?sysparm_limit=1"
-    follow_redirects: none
-    headers:
-      Accept: application/json
-    status_code: [200, 301, 302, 401]
-    timeout: "{{ servicenow_timeout }}"
-  register: servicenow_awake
-  failed_when: false
-
-- name: Stop if the PDI is hibernating or unreachable
-  ansible.builtin.assert:
-    that: servicenow_awake.status | default(-1) == 401
-    fail_msg: >-
-      {{ 'The ServiceNow PDI looks like it is hibernating. Wake it at developer.servicenow.com and rerun.'
-         if servicenow_awake.status | default(-1) in [200, 301, 302] else
-         'Cannot reach the ServiceNow PDI (' ~ (servicenow_awake.msg | default('no response') | truncate(200)) ~ ').' }}
-    quiet: true
+- name: Connect to the ServiceNow PDI
+  ansible.builtin.include_tasks: connect.yml
 
 - name: Create or update the custom incident fields
   ansible.builtin.include_tasks: record.yml

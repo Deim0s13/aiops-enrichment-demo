@@ -7,7 +7,7 @@
 #   ansible-playbook playbooks/05_execution_environment.yml
 # Safe to rerun.
 
-- name: "Phase 05 | AAP content: project, credentials, workflow, trigger user, event stream and rulebook activation"
+- name: "Phase 05 | AAP content and the trigger: workflow, event stream, rulebook activation and ServiceNow business rule"
   hosts: localhost
   gather_facts: false
   tags: [aap_content]
@@ -38,6 +38,15 @@
         aap_content_ee_stream: "{{ demo_execution_environment.name }}"
         aap_content_de_image_override: "{{ demo_aap_decision_environment }}"
 
+    - name: Connect ServiceNow to the event stream, and prove it hands-off
+      ansible.builtin.include_role:
+        name: servicenow
+        tasks_from: trigger
+      vars:
+        servicenow_assignment_group: "{{ demo_servicenow.assignment_group }}"
+        servicenow_trigger_category: "{{ demo_servicenow.category }}"
+        servicenow_secret_namespace: "{{ demo_namespaces.aap }}"
+
     - name: Report what phase 05 found and changed
       ansible.builtin.debug:
-        msg: "{{ aap_content_report }}"
+        msg: "{{ aap_content_report + servicenow_report }}"

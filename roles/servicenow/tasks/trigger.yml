@@ -1,0 +1,148 @@
+---
+# Phase 05 entry point: the trigger (design 5.1). An Outbound REST Message holds the event stream's
+# address and token, which change with every environment, and an asynchronous business rule posts
+# each new qualifying incident through it. Then proves it hands-off (trigger_checks.yml).
+
+- name: Connect to the ServiceNow PDI
+  ansible.builtin.include_tasks: connect.yml
+
+- name: Read the event stream's address, header and token, kept by phase 05
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ servicenow_secret_namespace }}"
+    name: "{{ servicenow_trigger_secret }}"
+  register: servicenow_trigger_read
+  until: servicenow_trigger_read is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Keep only the event stream's details
+  ansible.builtin.set_fact:
+    servicenow_stream: >-
+      {{ dict((servicenow_trigger_read.resources | first | default({'data': {}})).data.keys()
+         | zip((servicenow_trigger_read.resources | first | default({'data': {}})).data.values() | map('b64decode'))) }}
+  no_log: true
+
+- name: Stop if phase 05 has not stored the event stream's details
+  ansible.builtin.assert:
+    that: servicenow_stream.url | default('') | length > 0 and servicenow_stream.token | default('') | length > 0
+    fail_msg: "The {{ servicenow_trigger_secret }} Secret has no url or token yet. Run playbooks/05_aap_content.yml."
+    quiet: true
+
+- name: Find the on-call group
+  servicenow.itsm.api_info:
+    instance: "{{ servicenow_instance }}"
+    resource: sys_user_group
+    sysparm_query: "name={{ servicenow_assignment_group }}"
+    columns: [sys_id]
+  register: servicenow_trigger_group
+  until: servicenow_trigger_group is not failed
+  retries: 3
+  delay: 5
+
+- name: Stop if phase 04 has not created the group
+  ansible.builtin.assert:
+    that: servicenow_trigger_group.record | length == 1
+    fail_msg: "There is no group named {{ servicenow_assignment_group }}. Run playbooks/04_servicenow.yml."
+    quiet: true
+
+- name: Remember the group
+  ansible.builtin.set_fact:
+    servicenow_ids: "{{ servicenow_ids | combine({'group': servicenow_trigger_group.record[0].sys_id}) }}"
+
+- name: Create or update the REST Message for the event stream
+  ansible.builtin.include_tasks: record.yml
+  vars:
+    servicenow_record:
+      kind: REST message
+      key: rest_message
+      label: "{{ servicenow_trigger_rest_message }}"
+      table: sys_rest_message
+      query: "name={{ servicenow_trigger_rest_message }}"
+      data:
+        name: "{{ servicenow_trigger_rest_message }}"
+        description: >-
+          Posts qualifying incidents to the AAP event stream for AI enrichment. Address and token are
+          set by the aiops-enrichment-demo build (phase 05) for each environment.
+        rest_endpoint: "{{ servicenow_stream.url }}"
+        authentication_type: no_authentication
+
+- name: Create or update its POST method
+  ansible.builtin.include_tasks: record.yml
+  vars:
+    servicenow_record:
+      kind: REST message
+      key: rest_function
+      label: "{{ servicenow_trigger_rest_message }}: post"
+      table: sys_rest_message_fn
+      query: "rest_message={{ servicenow_ids.rest_message }}^function_name=post"
+      data:
+        rest_message: "{{ servicenow_ids.rest_message }}"
+        function_name: post
+        http_method: post
+        rest_endpoint: "{{ servicenow_stream.url }}"
+        authentication_type: inherit_from_parent
+
+- name: Create or update the method's headers, the token among them
+  ansible.builtin.include_tasks: record.yml
+  loop:
+    - { name: Content-Type, value: application/json }
+    - { name: "{{ servicenow_stream.header }}", value: "{{ servicenow_stream.token }}" }
+  loop_control:
+    loop_var: servicenow_header
+    label: "{{ servicenow_header.name }}"
+  vars:
+    servicenow_record:
+      kind: REST message
+      secret: true
+      label: "{{ servicenow_trigger_rest_message }}: {{ servicenow_header.name }} header"
+      table: sys_rest_message_fn_headers
+      query: "rest_message_function={{ servicenow_ids.rest_function }}^name={{ servicenow_header.name }}"
+      data:
+        rest_message_function: "{{ servicenow_ids.rest_function }}"
+        name: "{{ servicenow_header.name }}"
+        value: "{{ servicenow_header.value }}"
+
+- name: Create or update the trigger business rule
+  ansible.builtin.include_tasks: record.yml
+  vars:
+    servicenow_record:
+      kind: trigger
+      label: "{{ servicenow_trigger_rule }}"
+      table: sys_script
+      query: "collection=incident^name={{ servicenow_trigger_rule }}"
+      data:
+        name: "{{ servicenow_trigger_rule }}"
+        collection: incident
+        when: async
+        order: "100"
+        action_insert: "true"
+        action_update: "false"
+        active: "true"
+        advanced: "true"
+        description: >-
+          Posts each new incident that qualifies for AI enrichment (design 5.1) to the AAP event stream.
+          Runs after the incident is saved, so a failed call never affects it. Managed by the
+          aiops-enrichment-demo build (phase 05).
+        script: "{{ lookup('ansible.builtin.template', 'trigger.js.j2') | trim }}"
+
+- name: Summarise the trigger records
+  ansible.builtin.set_fact:
+    servicenow_report: "{{ servicenow_summary_json | from_json }}"
+  vars:
+    servicenow_summary_json: >-
+      {%- set ns = namespace(lines=[]) -%}
+      {%- for k in ['REST message', 'trigger'] -%}
+      {%- set r = servicenow_results | selectattr('kind', 'equalto', k) | list -%}
+      {%- set c = r | selectattr('action', 'equalto', 'created') | map(attribute='label') | list -%}
+      {%- set u = r | selectattr('action', 'equalto', 'updated') | map(attribute='label') | list -%}
+      {%- set ns.lines = ns.lines + [k | capitalize ~ ' records: ' ~ r | length ~ '; '
+          ~ (('created ' ~ c | join(', ')) if c else 'none created') ~ '; '
+          ~ (('updated ' ~ u | join(', ')) if u else 'none updated')] -%}
+      {%- endfor -%}
+      {{ ns.lines | to_json }}
+
+- name: Prove the trigger hands-off
+  ansible.builtin.include_tasks: trigger_checks.yml
+  when: servicenow_checks | bool

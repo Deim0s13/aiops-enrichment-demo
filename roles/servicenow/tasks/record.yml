@@ -2,6 +2,7 @@
 # Creates a ServiceNow record if it is missing and changes only the fields that differ. The api
 # module itself always creates on post and always reports a change on patch, hence the comparison.
 # Input: servicenow_record with kind, label, table, query, data and, to remember its sys_id, key.
+# secret: true hides the record's values from the output, for records that hold a token.
 
 - name: "Find {{ servicenow_record.label }}"
   servicenow.itsm.api_info:
@@ -14,6 +15,7 @@
   until: servicenow_found is not failed
   retries: 3
   delay: 5
+  no_log: "{{ servicenow_record.secret | default(false) | bool }}"
 
 - name: "Compare with what is wanted: {{ servicenow_record.label }}"
   ansible.builtin.set_fact:
@@ -27,6 +29,7 @@
       {%- set ns.out = ns.out | combine({k: v}) -%}
       {%- endfor -%}
       {{ ns.out | to_json }}
+  no_log: "{{ servicenow_record.secret | default(false) | bool }}"
 
 - name: "Create {{ servicenow_record.label }}"
   servicenow.itsm.api:
@@ -36,6 +39,7 @@
     data: "{{ servicenow_record.data }}"
   register: servicenow_created
   when: servicenow_existing | length == 0
+  no_log: "{{ servicenow_record.secret | default(false) | bool }}"
 
 - name: "Update {{ servicenow_record.label }}"
   servicenow.itsm.api:
@@ -47,6 +51,7 @@
   when:
     - servicenow_existing | length > 0
     - servicenow_changes | length > 0
+  no_log: "{{ servicenow_record.secret | default(false) | bool }}"
 
 - name: "Record what happened to {{ servicenow_record.label }}"
   ansible.builtin.set_fact:

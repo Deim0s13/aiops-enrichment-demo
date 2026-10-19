@@ -307,8 +307,8 @@ What it does (role `aap_content`, the automation team's part). The content is de
    - the trigger's user cannot launch a job template directly
 
    Outcomes are read back from ServiceNow, not trusted from AAP. A failed check stops the play.
-
-The ServiceNow business rule that posts new qualifying incidents to the event stream is added next (M2.3).
+8. **Connects ServiceNow to the event stream** (role `servicenow`, entry point `trigger`): an Outbound REST Message named *ACME AI enrichment event stream* holds the address and token, which change with every environment, and an asynchronous business rule, *ACME trigger: AI enrichment*, posts each new incident in the on-call group, category Software, priority 2 or 3 and with no enrichment state yet. You can see each call under System Logs > Outbound HTTP Requests.
+9. **Proves it hands-off.** As `svc-monitoring`, the identity the integration stand-in will use, it raises a qualifying incident and the same incident at priority 4. Nothing else is touched: the first must be enriched and its "AI enrichment ready" email queued in the Outbox, and the second must be left alone. Both are removed afterwards, with their emails.
 
 ## Finish your session
 
