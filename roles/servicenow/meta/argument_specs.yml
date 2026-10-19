@@ -3,8 +3,9 @@ argument_specs:
   main:
     short_description: Prepare the ServiceNow PDI for the demo
     description:
-      - Custom incident fields and choices, the on-call assignment group, a custom role per service identity,
-        and the service identities with generated passwords kept in the cluster.
+      - Custom incident fields and choices, the on-call assignment group with a fictional engineer, a custom role per
+        service identity, the service identities with generated passwords kept in the cluster, guard business rules
+        that limit them, the enrichment ready notification, and checks that act as each identity.
       - Reads the PDI URL and administrator credential from secrets_values (group servicenow).
     options:
       servicenow_assignment_group:
@@ -33,9 +34,33 @@ argument_specs:
       servicenow_password_length:
         type: int
         description: Length of the generated passwords.
-      servicenow_probe_acl:
+      servicenow_identity_builtin_roles:
+        type: list
+        elements: str
+        description: Built-in roles every identity also holds, such as itil for incident access.
+      servicenow_guards:
+        type: list
+        elements: dict
+        description: Guard business rules, each with name, template, role and description.
+      servicenow_guard_order:
+        type: str
+        description: Order of the guard business rules; low, so they run before others.
+      servicenow_enrichment_writer_fields:
+        type: list
+        elements: str
+        description: The incident fields the enrichment writer may change.
+      servicenow_engineer:
+        type: dict
+        description: The fictional on-call engineer who receives the group's notifications.
+      servicenow_notification:
+        type: dict
+        description: The enrichment ready notification, with name, states, subject and message.
+      servicenow_checks:
         type: bool
-        description: Check whether the PDI accepts access rule changes over the API.
+        description: Prove the identities' limits by acting as each identity.
+      servicenow_check_prefix:
+        type: str
+        description: Start of the short description of every test incident, used to remove them.
       servicenow_timeout:
         type: int
         description: Seconds to wait for each ServiceNow API call.

@@ -1,0 +1,35 @@
+// {{ servicenow_guard.description }}
+(function executeRule(current, previous) {
+    // Looks up the role grant itself: gs.hasRole() is always true for admin, which would block it.
+    var grant = new GlideRecord('sys_user_has_role');
+    grant.addQuery('user', gs.getUserID());
+    grant.addQuery('role.name', '{{ servicenow_guard.role }}');
+    grant.setLimit(1);
+    grant.query();
+    if (!grant.hasNext()) {
+        return;
+    }
+    if (current.operation() == 'insert') {
+        gs.addErrorMessage('{{ servicenow_guard.role }} may not create incidents.');
+        current.setAbortAction(true);
+        return;
+    }
+    var allowed = {{ servicenow_enrichment_writer_fields | to_json }};
+    var denied = [];
+    var elements = current.getElements();
+    var size = elements.size ? elements.size() : elements.length;
+    for (var i = 0; i < size; i++) {
+        var element = elements.get ? elements.get(i) : elements[i];
+        var name = String(element.getName());
+        if (name.indexOf('sys_') === 0 || allowed.indexOf(name) >= 0) {
+            continue;
+        }
+        if (element.changes()) {
+            denied.push(name);
+        }
+    }
+    if (denied.length > 0) {
+        gs.addErrorMessage('{{ servicenow_guard.role }} may not change: ' + denied.join(', '));
+        current.setAbortAction(true);
+    }
+})(current, previous);

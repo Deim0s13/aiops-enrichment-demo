@@ -242,23 +242,27 @@ ansible-navigator run playbooks/04_servicenow.yml
 What it does (role `servicenow`), against the PDI in Vault, as its administrator:
 
 1. **Adds the enrichment fields** to the incident table: `u_ai_enrichment_state` and `u_ai_enrichment_rating`, with their choices, and `u_ai_enrichment_rev` (design section 5.4).
-2. **Creates the on-call group**, ACME Payments On-call (`demo_servicenow.assignment_group`). Incidents assigned to it, in the Software category, are the ones the trigger will pick up.
-3. **Creates a custom role per service identity**, `acme_monitoring_integration` and `acme_ai_enrichment`, which marks what each identity is for. Guard business rules, added next, use them to limit what `itil` would otherwise allow (design section 6.1).
-4. **Creates the service identities**, `svc-monitoring` and `svc-ai-enrichment`, as web service only accounts that cannot sign in to the ServiceNow interface, each with its role.
+2. **Creates the on-call group**, ACME Payments On-call (`demo_servicenow.assignment_group`), with one fictional member, ACME On-call engineer (`oncall@acme-bank.example`), so the group's notifications have a recipient. Incidents assigned to the group, in the Software category, are the ones the trigger will pick up.
+3. **Creates a custom role per service identity**, `acme_monitoring_integration` and `acme_ai_enrichment`, which marks what each identity is for (design section 6.1).
+4. **Creates the service identities**, `svc-monitoring` and `svc-ai-enrichment`, as web service only accounts that cannot sign in to the ServiceNow interface. Each holds its custom role and `itil`, for access to the incident table.
 5. **Sets their passwords.** The PDI outlives the cluster, so each password is kept in a Secret in the `aap` namespace (`servicenow-svc-monitoring`, `servicenow-svc-ai-enrichment`), where phase 05 will read it. A password is generated and set only when the cluster has none or the stored one no longer works, so the first run on a new environment resets both, and a rerun changes nothing. Either way, it signs in as the identity to prove the password works.
-6. **Checks whether the PDI accepts access rule (ACL) changes over the API**, by creating one inactive rule and removing it. It does not (HTTP 403, `security_admin` needed), which is why the identities' limits are enforced by guard business rules instead. This check is replaced by the guards in the next step.
+6. **Adds two guard business rules** that narrow `itil`. They run inside ServiceNow before every incident insert and update, whatever the channel: `svc-ai-enrichment` cannot create incidents and can change only work notes, the enrichment state and the revision; `svc-monitoring` cannot set or change the enrichment fields. ServiceNow refuses access rule (ACL) changes over the API without the elevated `security_admin` role, which is why these are business rules.
+7. **Adds the "AI enrichment ready" notification**, sent to the incident's assignment group when the enrichment state changes to `complete` or `insufficient_evidence`. The PDI does not send email, so it appears in the Outbox (System Mailboxes > Outbound > Outbox).
+8. **Proves the guards** by acting as each identity: `svc-monitoring` creates a test incident and fails to set an enrichment state; `svc-ai-enrichment` fails to create an incident and to reassign the test incident, then writes a work note and sets the state. The outcome is read back as the administrator, not trusted from the response. Test incidents are priority 5, unassigned and begin with "ACME build check", so the trigger never picks them up, and they are deleted at the end. A failed check stops the play.
 
 Each record is found first, created if missing and changed only where it differs, so the phase is safe to rerun. On the first run against a PDI, expect something like:
 
 ```text
 - 'Fields: 3; created incident.u_ai_enrichment_state, ...; none updated'
-- 'Choices: 7; created ...; none updated'
 - ...
+- 'Guards: 2; created ACME guard: AI enrichment writer, ACME guard: monitoring integration; none updated'
+- 'Notifications: 1; created AI enrichment ready; none updated'
 - 'svc-monitoring: password set (no stored password in the cluster); API sign-in checked; credentials in Secret servicenow-svc-monitoring'
-- 'Access rule check: ...'
+- ...
+- 'Check passed: svc-ai-enrichment cannot create an incident (HTTP 403 ...)'
 ```
 
-On a rerun, every line reads `none created; none updated`, each identity's `stored password works`, and the play recap shows `changed=0`.
+On a rerun, every record line reads `none created; none updated`, each identity's `stored password works`, the checks pass again and the play recap shows `changed=0`.
 
 ## Finish your session
 

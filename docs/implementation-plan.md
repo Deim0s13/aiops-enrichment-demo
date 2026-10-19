@@ -98,6 +98,8 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 - AAP 2.7 fits beside OpenShift AI and the model on one g6.16xlarge: before AAP, about a quarter of the node's CPU and a fifth of its memory were requested.
 - The single-node API server dropped connections three times in two days, part way through a response. Waits already retried; single-shot reads now retry too. Writes do not, so a failed change stops the build.
 - Looping a later task over a Kubernetes task's registered results prints the cluster token at `-vv`, because each item carries the module invocation. Such results are reduced to the fields needed first.
+- ServiceNow (M2.1, 2026-10-16 to 19): the PDI refuses access rule (ACL) changes over the API, even from the administrator, so the identities' limits are guard business rules. The first guards looked right but enforced nothing: they called a role check that exists only in the browser, the script failed, and ServiceNow let each write through. The build check, acting as each identity, caught it on the first run. Controls are proved by trying to break them, not by reading their configuration.
+- The second clean build from empty (2026-10-19) needed no fixes, up to and including phase 04. The next build is timed phase by phase (M1.10).
 
 ### M2 Thin end to end
 
@@ -105,7 +107,7 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 
 | ID | Task | Closes |
 |---|---|---|
-| M2.1 | Phase 04 (part): custom incident fields, assignment group, custom roles with field-level access rules, service identities, and the "enrichment ready" notification. Phases renumbered so ServiceNow comes before AAP content, which needs the identities and writes the EDA event stream address back. Fields, group, roles, identities and the access rule check done (2026-10-16). The PDI refuses ACL changes over the API, so the identities hold `itil` narrowed by guard business rules (design section 6.1); guards, a negative test as each identity and the notification next. The business rule moves to M2.3, with the event stream it calls | |
+| M2.1 | Phase 04 (part): custom incident fields, assignment group, custom roles with field-level access rules, service identities, and the "enrichment ready" notification. Phases renumbered so ServiceNow comes before AAP content, which needs the identities and writes the EDA event stream address back. Fields, group, roles and identities done (2026-10-16). The PDI refuses ACL changes over the API, so the identities hold `itil` narrowed by guard business rules (design section 6.1), proved on every build by checks that act as each identity. Guards, checks, notification and a fictional on-call engineer done (2026-10-19); all five checks pass. The business rule moves to M2.3, with the event stream it calls | |
 | M2.2 | Rulebook `incident_enrichment.yml`: receive, validate and pass only the defined fields | |
 | M2.3 | Phase 05 (part): project, credentials, EDA activation and the enrichment workflow with its failure branch | |
 | M2.4 | Role `itsm_worknote`: idempotent, AI-labelled work note and enrichment fields | |

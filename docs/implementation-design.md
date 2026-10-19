@@ -206,7 +206,7 @@ Enrichment uses three custom incident fields:
 
 | Field | Values | Purpose |
 |---|---|---|
-| `u_ai_enrichment_state` | `pending`, `complete`, `insufficient_evidence`, `unavailable` | Drives the trigger condition and the "enrichment ready" notification |
+| `u_ai_enrichment_state` | `pending`, `complete`, `insufficient_evidence`, `unavailable` | Drives the trigger condition and the "AI enrichment ready" notification, sent to the assignment group when the state becomes `complete` or `insufficient_evidence` |
 | `u_ai_enrichment_rev` | Integer | Idempotency: before writing, the workflow checks whether a note for the current revision already exists, so a retried workflow cannot add a duplicate |
 | `u_ai_enrichment_rating` | `useful`, `incorrect`, `unsafe` | Engineer rating, supporting the usefulness value measure. Ratings are recorded, not acted on automatically. |
 
@@ -243,7 +243,7 @@ Each document carries labels for its ID, origin, service, product version, owner
 | Engineer | Personal AAP and ServiceNow accounts | Read incidents; launch the catalogued job | Not applicable |
 | Model | None | Inference only | Any credential or outbound network access |
 
-Each ServiceNow identity holds `itil`, for access to the incident table, and a custom role that marks its function: `acme_monitoring_integration` or `acme_ai_enrichment`. On its own, `itil` would let either identity reassign and close incidents, so phase 04 adds guard business rules that run inside ServiceNow, before every insert and update, and reject anything outside the identity's row above: `svc-ai-enrichment` cannot create incidents and can change only work notes and the enrichment fields; `svc-monitoring` can create incidents but cannot set the enrichment fields. The guards apply whatever the channel, the API included, so the separation does not depend on AAP behaving. Both are web service only accounts, so neither can sign in to the ServiceNow interface.
+Each ServiceNow identity holds `itil`, for access to the incident table, and a custom role that marks its function: `acme_monitoring_integration` or `acme_ai_enrichment`. On its own, `itil` would let either identity reassign and close incidents, so phase 04 adds guard business rules that run inside ServiceNow, before every insert and update, and reject anything outside the identity's row above: `svc-ai-enrichment` cannot create incidents and can change only work notes and the enrichment fields; `svc-monitoring` can create incidents but cannot set the enrichment fields. The guards apply whatever the channel, the API included, so the separation does not depend on AAP behaving. Phase 04 proves them on every build by acting as each identity and reading the result back as the administrator. Both are web service only accounts, so neither can sign in to the ServiceNow interface.
 
 Field-level access rules (ACLs) would be the usual ServiceNow control, but the PDI refuses ACL changes over the API, even from the administrator, because they need the `security_admin` role elevated in an interactive session (confirmed 2026-10-16). Section 10 records the production equivalent.
 

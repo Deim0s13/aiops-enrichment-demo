@@ -120,3 +120,10 @@
          ~ (('password set (' ~ servicenow_password_reason ~ '); API sign-in checked')
             if servicenow_password_reason | length > 0 else 'stored password works')
          ~ '; credentials in Secret ' ~ servicenow_identity_secret_prefix ~ servicenow_identity.user_name] }}
+
+- name: Keep the working password for the checks
+  ansible.builtin.set_fact:
+    servicenow_credentials: >-
+      {{ servicenow_credentials | combine({servicenow_identity.user_name:
+           (servicenow_new_password if servicenow_password_reason | length > 0 else servicenow_stored_password)}) }}
+  no_log: true

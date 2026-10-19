@@ -13,6 +13,7 @@
     servicenow_report: []
     servicenow_results: []
     servicenow_ids: {}
+    servicenow_credentials: {}
   no_log: true
 
 - name: Check that the PDI is awake (an awake instance answers 401 without credentials)
@@ -78,6 +79,7 @@
   vars:
     servicenow_record:
       kind: group
+      key: group
       label: "{{ servicenow_assignment_group }}"
       table: sys_user_group
       query: "name={{ servicenow_assignment_group }}"
@@ -85,6 +87,7 @@
         name: "{{ servicenow_assignment_group }}"
         description: ACME Bank payments on-call team. Incidents assigned here qualify for AI enrichment.
         active: "true"
+        include_members: "true"
 
 - name: Create or update the custom roles
   ansible.builtin.include_tasks: record.yml
@@ -125,21 +128,122 @@
         web_service_access_only: "true"
         password_needs_reset: "false"
 
-- name: Give each identity its custom role
+- name: Find the built-in roles the identities also hold
+  servicenow.itsm.api_info:
+    instance: "{{ servicenow_instance }}"
+    resource: sys_user_role
+    sysparm_query: "nameIN{{ servicenow_identity_builtin_roles | join(',') }}"
+    columns: [sys_id, name]
+  register: servicenow_builtin_found
+  until: servicenow_builtin_found is not failed
+  retries: 3
+  delay: 5
+
+- name: Stop if a built-in role is missing
+  ansible.builtin.assert:
+    that: servicenow_builtin_found.record | map(attribute='name') | list | sort == servicenow_identity_builtin_roles | sort
+    fail_msg: >-
+      The PDI lacks the role(s)
+      {{ servicenow_identity_builtin_roles | difference(servicenow_builtin_found.record | map(attribute='name') | list) | join(', ') }}.
+    quiet: true
+
+- name: Remember the built-in roles' IDs
+  ansible.builtin.set_fact:
+    servicenow_ids: >-
+      {{ servicenow_ids | combine(dict(servicenow_builtin_found.record | map(attribute='name') | map('regex_replace', '^', 'role:')
+         | zip(servicenow_builtin_found.record | map(attribute='sys_id')))) }}
+
+- name: Give each identity its custom role and the built-in roles
   ansible.builtin.include_tasks: record.yml
-  loop: "{{ servicenow_identities }}"
+  loop: >-
+    {{ servicenow_identities | map(attribute='user_name')
+       | zip(servicenow_identities | map(attribute='role')) | list
+       + servicenow_identities | map(attribute='user_name') | product(servicenow_identity_builtin_roles) | list }}
   loop_control:
-    loop_var: servicenow_identity
-    label: "{{ servicenow_identity.user_name }} has {{ servicenow_identity.role }}"
+    loop_var: servicenow_grant
+    label: "{{ servicenow_grant[0] }} has {{ servicenow_grant[1] }}"
   vars:
     servicenow_record:
       kind: role assignment
-      label: "{{ servicenow_identity.user_name }} has {{ servicenow_identity.role }}"
+      label: "{{ servicenow_grant[0] }} has {{ servicenow_grant[1] }}"
       table: sys_user_has_role
-      query: "user={{ servicenow_ids['user:' ~ servicenow_identity.user_name] }}^role={{ servicenow_ids['role:' ~ servicenow_identity.role] }}"
+      query: "user={{ servicenow_ids['user:' ~ servicenow_grant[0]] }}^role={{ servicenow_ids['role:' ~ servicenow_grant[1]] }}"
       data:
-        user: "{{ servicenow_ids['user:' ~ servicenow_identity.user_name] }}"
-        role: "{{ servicenow_ids['role:' ~ servicenow_identity.role] }}"
+        user: "{{ servicenow_ids['user:' ~ servicenow_grant[0]] }}"
+        role: "{{ servicenow_ids['role:' ~ servicenow_grant[1]] }}"
+
+- name: Create or update the fictional on-call engineer
+  ansible.builtin.include_tasks: record.yml
+  vars:
+    servicenow_record:
+      kind: person
+      key: engineer
+      label: "{{ servicenow_engineer.user_name }}"
+      table: sys_user
+      query: "user_name={{ servicenow_engineer.user_name }}"
+      data:
+        user_name: "{{ servicenow_engineer.user_name }}"
+        first_name: "{{ servicenow_engineer.first_name }}"
+        last_name: "{{ servicenow_engineer.last_name }}"
+        email: "{{ servicenow_engineer.email }}"
+        active: "true"
+
+- name: Put the engineer in the on-call group
+  ansible.builtin.include_tasks: record.yml
+  vars:
+    servicenow_record:
+      kind: group membership
+      label: "{{ servicenow_engineer.user_name }} in {{ servicenow_assignment_group }}"
+      table: sys_user_grmember
+      query: "user={{ servicenow_ids.engineer }}^group={{ servicenow_ids.group }}"
+      data:
+        user: "{{ servicenow_ids.engineer }}"
+        group: "{{ servicenow_ids.group }}"
+
+- name: Create or update the guard business rules
+  ansible.builtin.include_tasks: record.yml
+  loop: "{{ servicenow_guards }}"
+  loop_control:
+    loop_var: servicenow_guard
+    label: "{{ servicenow_guard.name }}"
+  vars:
+    servicenow_record:
+      kind: guard
+      label: "{{ servicenow_guard.name }}"
+      table: sys_script
+      query: "collection=incident^name={{ servicenow_guard.name }}"
+      data:
+        name: "{{ servicenow_guard.name }}"
+        collection: incident
+        when: before
+        order: "{{ servicenow_guard_order }}"
+        action_insert: "true"
+        action_update: "true"
+        active: "true"
+        advanced: "true"
+        description: "{{ servicenow_guard.description }}"
+        script: "{{ lookup('ansible.builtin.template', servicenow_guard.template) | trim }}"
+
+- name: Create or update the enrichment ready notification
+  ansible.builtin.include_tasks: record.yml
+  vars:
+    servicenow_record:
+      kind: notification
+      label: "{{ servicenow_notification.name }}"
+      table: sysevent_email_action
+      query: "collection=incident^name={{ servicenow_notification.name }}"
+      data:
+        name: "{{ servicenow_notification.name }}"
+        collection: incident
+        active: "true"
+        action_insert: "false"
+        action_update: "true"
+        generation_type: engine
+        condition: >-
+          {{ servicenow_notification.states | map('regex_replace', '^', 'u_ai_enrichment_stateCHANGESTO') | join('^OR') }}
+        recipient_fields: assignment_group
+        subject: "{{ servicenow_notification.subject }}"
+        message_html: "{{ servicenow_notification.message }}"
 
 - name: Summarise the records
   ansible.builtin.set_fact:
@@ -148,7 +252,9 @@
     servicenow_summary_json: >-
       {%- set ns = namespace(lines=[]) -%}
       {%- set plural = {'field': 'Fields', 'choice': 'Choices', 'group': 'Groups', 'role': 'Roles',
-                        'identity': 'Identities', 'role assignment': 'Role assignments'} -%}
+                        'identity': 'Identities', 'role assignment': 'Role assignments', 'person': 'People',
+                        'group membership': 'Group memberships', 'guard': 'Guards',
+                        'notification': 'Notifications'} -%}
       {%- for k in plural -%}
       {%- set r = servicenow_results | selectattr('kind', 'equalto', k) | list -%}
       {%- set c = r | selectattr('action', 'equalto', 'created') | map(attribute='label') | list -%}
@@ -166,6 +272,6 @@
     loop_var: servicenow_identity
     label: "{{ servicenow_identity.user_name }}"
 
-- name: Check whether the PDI accepts access rule changes over the API
-  ansible.builtin.include_tasks: acl_probe.yml
-  when: servicenow_probe_acl | bool
+- name: Prove the identities' limits by acting as each identity
+  ansible.builtin.include_tasks: checks.yml
+  when: servicenow_checks | bool

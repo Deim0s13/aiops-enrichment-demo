@@ -32,8 +32,9 @@ servicenow_fields:
       - { value: incorrect, label: Incorrect }
       - { value: unsafe, label: Unsafe }
 
-# One custom role per identity, instead of itil, which would let them reassign and close
-# incidents (design section 6.1). The access rules that give each role its rights come with them.
+# One custom role per identity. It marks what the identity is for: the guards below apply to
+# whoever holds it. The PDI refuses access rule (ACL) changes over the API, so the roles carry no
+# rights themselves (design section 6.1).
 servicenow_roles:
   - name: acme_monitoring_integration
     description: ACME Bank monitoring integration stand-in. Creates incidents; cannot write AI enrichment fields.
@@ -51,12 +52,54 @@ servicenow_identities:
     last_name: Enrichment
     role: acme_ai_enrichment
 
+# Built-in roles every identity also holds. itil gives access to the incident table; the guards
+# narrow it.
+servicenow_identity_builtin_roles: [itil]
+
+# Guard business rules: they run inside ServiceNow before every incident insert and update, for any
+# channel including the API, and reject what an identity's row in design section 6.1 does not allow.
+servicenow_guards:
+  - name: "ACME guard: AI enrichment writer"
+    template: guard_enrichment_writer.js.j2
+    role: acme_ai_enrichment
+    description: >-
+      The AI enrichment writer cannot create incidents, and may change only work notes and the AI
+      enrichment state and revision. Managed by the aiops-enrichment-demo build (phase 04).
+  - name: "ACME guard: monitoring integration"
+    template: guard_monitoring_integration.js.j2
+    role: acme_monitoring_integration
+    description: >-
+      The monitoring integration stand-in can create incidents but cannot set or change the AI
+      enrichment fields. Managed by the aiops-enrichment-demo build (phase 04).
+servicenow_guard_order: "10"
+# What the enrichment writer may change.
+servicenow_enrichment_writer_fields: [work_notes, u_ai_enrichment_state, u_ai_enrichment_rev]
+
+# A fictional engineer in the on-call group, so the group's notifications have a recipient. A normal
+# user without a password: the notification lands in the PDI's Outbox and nobody signs in as them.
+servicenow_engineer:
+  user_name: acme.oncall
+  first_name: ACME
+  last_name: On-call engineer
+  email: oncall@acme-bank.example
+
+# The "AI enrichment ready" notification (design section 5.4), to the incident's assignment group.
+servicenow_notification:
+  name: AI enrichment ready
+  states: [complete, insufficient_evidence]
+  subject: "AI enrichment ready for ${number}: ${short_description}"
+  message: >-
+    <p>AI-generated enrichment for ${number} is ready (${u_ai_enrichment_state}).</p>
+    <p>It has not been reviewed by an engineer. Read the work note and check its evidence before acting.</p>
+    <p>${URI_REF}</p>
+
+# Prove the identities' limits on every build by acting as each identity (checks.yml). Test incidents
+# are priority 5 and unassigned, so the enrichment trigger never picks them up, and are removed after.
+servicenow_checks: true
+servicenow_check_prefix: ACME build check
+
 # Each identity's credentials go to a Secret named <prefix><user_name> in servicenow_secret_namespace.
 servicenow_identity_secret_prefix: servicenow-
 servicenow_password_length: 32
-
-# Check whether the PDI accepts access rule (ACL) changes over the API. Creates one inactive rule and
-# removes it straight away.
-servicenow_probe_acl: true
 
 servicenow_timeout: 30

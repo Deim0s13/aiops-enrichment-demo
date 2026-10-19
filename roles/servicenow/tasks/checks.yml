@@ -1,0 +1,202 @@
+---
+# Proves the guards by acting as each identity, through the API, as the integration and the
+# enrichment workflow will. The outcome is read back as the administrator rather than trusted from
+# the response, because the status code of a rejected request is ServiceNow's choice, not ours.
+# Test incidents are priority 5 and unassigned, so the enrichment trigger never picks them up, and
+# every incident with the check prefix is removed at the end, including any an earlier run left.
+
+- name: Name this run's test incidents
+  ansible.builtin.set_fact:
+    servicenow_check_run: "{{ servicenow_check_prefix }} {{ now(utc=true, fmt='%Y%m%d%H%M%S') }}"
+
+- name: Create the test incident as svc-monitoring
+  ansible.builtin.uri:
+    url: "{{ servicenow_url }}/api/now/table/incident"
+    method: POST
+    url_username: svc-monitoring
+    url_password: "{{ servicenow_credentials['svc-monitoring'] }}"
+    force_basic_auth: true
+    follow_redirects: none
+    headers:
+      Accept: application/json
+    body_format: json
+    body:
+      short_description: "{{ servicenow_check_run }}: created by svc-monitoring"
+      description: Created by the phase 04 build check and removed at the end of it.
+      impact: "3"
+      urgency: "3"
+      category: inquiry
+    timeout: "{{ servicenow_timeout }}"
+  register: servicenow_check_create
+  failed_when: false
+  no_log: true
+
+- name: Keep only the outcome of the creation
+  ansible.builtin.set_fact:
+    servicenow_check_incident: "{{ ((servicenow_check_create.json | default({})).result | default({})).sys_id | default('') }}"
+    servicenow_check_create_status: "{{ servicenow_check_create.status | default(-1) }}"
+  no_log: true
+
+- name: Try what each identity should and should not be able to do
+  ansible.builtin.uri:
+    url: "{{ servicenow_url }}/api/now/table/incident{{ ('/' ~ servicenow_check_incident) if servicenow_attempt.patch else '' }}"
+    method: "{{ 'PATCH' if servicenow_attempt.patch else 'POST' }}"
+    url_username: "{{ servicenow_attempt.as }}"
+    url_password: "{{ servicenow_credentials[servicenow_attempt.as] }}"
+    force_basic_auth: true
+    follow_redirects: none
+    headers:
+      Accept: application/json
+    body_format: json
+    body: "{{ servicenow_attempt.body }}"
+    timeout: "{{ servicenow_timeout }}"
+  loop:
+    - id: monitoring_sets_state
+      as: svc-monitoring
+      patch: false
+      body:
+        short_description: "{{ servicenow_check_run }}: svc-monitoring setting an enrichment state"
+        impact: "3"
+        urgency: "3"
+        category: inquiry
+        u_ai_enrichment_state: pending
+    - id: writer_creates
+      as: svc-ai-enrichment
+      patch: false
+      body:
+        short_description: "{{ servicenow_check_run }}: created by svc-ai-enrichment"
+        impact: "3"
+        urgency: "3"
+        category: inquiry
+    - id: writer_reassigns
+      as: svc-ai-enrichment
+      patch: true
+      body:
+        assignment_group: "{{ servicenow_ids.group }}"
+    # Pending, not complete, so the enrichment ready notification is not sent.
+    - id: writer_enriches
+      as: svc-ai-enrichment
+      patch: true
+      body:
+        work_notes: "[{{ servicenow_check_run }}] Work note written by svc-ai-enrichment."
+        u_ai_enrichment_state: pending
+  loop_control:
+    loop_var: servicenow_attempt
+    label: "{{ servicenow_attempt.id }}"
+  when: not servicenow_attempt.patch or servicenow_check_incident | length > 0
+  register: servicenow_check_calls
+  failed_when: false
+  no_log: true
+
+- name: Keep only the status and any error message of each attempt
+  ansible.builtin.set_fact:
+    servicenow_check_responses: "{{ servicenow_check_responses_json | from_json }}"
+  vars:
+    servicenow_check_responses_json: >-
+      {%- set ns = namespace(out={}) -%}
+      {%- for r in servicenow_check_calls.results -%}
+      {%- set ns.out = ns.out | combine({r.servicenow_attempt.id: {
+            'status': r.status | default(-1),
+            'error': 'not tried: there was no test incident' if r.skipped | default(false)
+                     else ((r.json | default({})).error | default({})).message | default('') | string | truncate(160)}}) -%}
+      {%- endfor -%}
+      {{ ns.out | to_json }}
+  no_log: true
+
+- name: Read back this run's test incidents as the administrator
+  servicenow.itsm.api_info:
+    instance: "{{ servicenow_instance }}"
+    resource: incident
+    sysparm_query: "short_descriptionSTARTSWITH{{ servicenow_check_run }}"
+    columns: [sys_id, short_description, assignment_group, u_ai_enrichment_state]
+    exclude_reference_link: true
+  register: servicenow_check_found
+  until: servicenow_check_found is not failed
+  retries: 3
+  delay: 5
+
+- name: Read back the test incident's work notes
+  servicenow.itsm.api_info:
+    instance: "{{ servicenow_instance }}"
+    resource: sys_journal_field
+    sysparm_query: "element_id={{ servicenow_check_incident | default('none', true) }}^element=work_notes"
+    columns: [sys_id, value]
+  register: servicenow_check_notes
+  until: servicenow_check_notes is not failed
+  retries: 3
+  delay: 5
+
+- name: Judge each check
+  ansible.builtin.set_fact:
+    servicenow_check_results: "{{ servicenow_check_results_json | from_json }}"
+  vars:
+    servicenow_found_by_text: >-
+      {{ dict(servicenow_check_found.record | map(attribute='short_description')
+         | zip(servicenow_check_found.record)) }}
+    servicenow_test_incident: >-
+      {{ servicenow_check_found.record | selectattr('sys_id', 'equalto', servicenow_check_incident) | first | default({}) }}
+    servicenow_check_results_json: >-
+      {%- set resp = servicenow_check_responses -%}
+      {%- set inc = servicenow_test_incident -%}
+      {%- set out = [
+        {'check': 'svc-monitoring can create an incident',
+         'passed': servicenow_check_create_status | int == 201 and inc | length > 0,
+         'detail': 'HTTP ' ~ servicenow_check_create_status},
+        {'check': 'svc-monitoring cannot set an enrichment field',
+         'passed': (servicenow_check_run ~ ': svc-monitoring setting an enrichment state') not in servicenow_found_by_text,
+         'detail': 'HTTP ' ~ resp.monitoring_sets_state.status ~ ' ' ~ resp.monitoring_sets_state.error},
+        {'check': 'svc-ai-enrichment cannot create an incident',
+         'passed': (servicenow_check_run ~ ': created by svc-ai-enrichment') not in servicenow_found_by_text,
+         'detail': 'HTTP ' ~ resp.writer_creates.status ~ ' ' ~ resp.writer_creates.error},
+        {'check': 'svc-ai-enrichment cannot reassign an incident',
+         'passed': inc | length > 0 and inc.assignment_group | default('') == '',
+         'detail': 'HTTP ' ~ resp.writer_reassigns.status ~ ' ' ~ resp.writer_reassigns.error},
+        {'check': 'svc-ai-enrichment can write a work note and the enrichment state',
+         'passed': inc | length > 0 and inc.u_ai_enrichment_state | default('') == 'pending'
+                   and servicenow_check_notes.record | length > 0,
+         'detail': 'HTTP ' ~ resp.writer_enriches.status ~ ' ' ~ resp.writer_enriches.error}
+      ] -%}
+      {{ out | to_json }}
+
+- name: Find every test incident, including any an earlier run left
+  servicenow.itsm.api_info:
+    instance: "{{ servicenow_instance }}"
+    resource: incident
+    sysparm_query: "short_descriptionSTARTSWITH{{ servicenow_check_prefix }}"
+    columns: [sys_id]
+  register: servicenow_check_leftovers
+  until: servicenow_check_leftovers is not failed
+  retries: 3
+  delay: 5
+
+# Test data the check itself created, so removing it is not a change to the PDI's configuration.
+- name: Remove the test incidents
+  servicenow.itsm.api:
+    instance: "{{ servicenow_instance }}"
+    resource: incident
+    action: delete
+    sys_id: "{{ servicenow_leftover }}"
+  loop: "{{ servicenow_check_leftovers.record | map(attribute='sys_id') | list }}"
+  loop_control:
+    loop_var: servicenow_leftover
+  changed_when: false
+
+- name: Report the checks
+  ansible.builtin.set_fact:
+    servicenow_report: "{{ servicenow_report + (servicenow_check_lines_json | from_json) }}"
+  vars:
+    servicenow_check_lines_json: >-
+      {%- set ns = namespace(lines=[]) -%}
+      {%- for c in servicenow_check_results -%}
+      {%- set ns.lines = ns.lines + [('Check passed: ' if c.passed else 'CHECK FAILED: ') ~ c.check
+                                     ~ ' (' ~ c.detail | trim ~ ')'] -%}
+      {%- endfor -%}
+      {{ ns.lines | to_json }}
+
+- name: Stop if a check failed
+  ansible.builtin.assert:
+    that: servicenow_check_results | rejectattr('passed') | list | length == 0
+    fail_msg: >-
+      {{ servicenow_report | select('match', 'CHECK FAILED') | join('; ') }}.
+      The guard business rules in the PDI are not enforcing the identities' limits as designed.
+    quiet: true
