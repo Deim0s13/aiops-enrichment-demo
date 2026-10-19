@@ -15,6 +15,10 @@ mock_modules:
   - containers.podman.podman_image
   - containers.podman.podman_image_info
   - containers.podman.podman_volume
+  - ansible.controller.job_launch
+  - ansible.controller.workflow_launch
+  - ansible.eda.event_stream_info
+  - ansible.eda.rulebook_activation_info
   - kubernetes.core.k8s
   - kubernetes.core.k8s_info
   - servicenow.itsm.api

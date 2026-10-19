@@ -15,6 +15,7 @@ Sections are added as each phase is implemented. Phases 01 to 03 are implemented
 | 7 | Phase 03: AAP operator installed, the platform running with Controller and Event-Driven Ansible, and its subscription attached | About 20 minutes on the first run |
 | 8 | Phase 04: ServiceNow incident fields, assignment group, custom roles and service identities, with their passwords in the cluster | About 2 minutes |
 | 9 | Phase 05, first step: the execution environment published to the cluster's registry | A few minutes the first time, depending on your upload speed |
+| 10 | Phase 05: AAP content, the trigger and the end-to-end checks | About 10 minutes on the first run |
 
 Run each command on its own line. Pasting several lines at once, or a line containing `read`, can go wrong in zsh.
 
@@ -281,6 +282,33 @@ What it does (role `ee_publish`):
 4. **Reports the address AAP will pull**, inside the cluster and pinned by digest, for example `image-registry.openshift-image-registry.svc:5000/aap/aiops-demo-ee@sha256:...`. AAP's job pods run in the `aap` namespace, so they can pull it without a pull secret.
 
 On a rerun, the image is `already in the cluster` and the recap shows `changed=0`. Rerun this step whenever you rebuild the execution environment.
+
+## 10 Phase 05: AAP content
+
+AAP syncs its project from GitHub, so **commit and push** your changes before running this phase: AAP runs what is on `main`, not what is on your laptop.
+
+```bash
+ansible-navigator run playbooks/05_aap_content.yml
+```
+
+What it does (role `aap_content`, the automation team's part). The content is declared as data and applied with `infra.aap_configuration`, the way a central automation team would keep its AAP configuration as code:
+
+1. **Organisation** ACME Bank. Project syncs are set to install no collections: everything the jobs need is in the execution environment.
+2. **Project** from this repository, with the read-only GitHub token (DD16), and the **execution environment** published in step 9, pinned by digest.
+3. **ServiceNow credential** for `svc-ai-enrichment`, through a custom credential type that hands the connection to the `servicenow.itsm` modules as environment variables, so no playbook holds a ServiceNow address or password. Its password comes from the Secret phase 04 keeps.
+4. **Three job templates and the AI incident enrichment workflow**: mark pending, then write the work note; any failure leads to the failure branch, which records enrichment as unavailable (design 5.5). In M2 the note is a fixed, labelled placeholder; the enrichment service replaces it in M2.5.
+5. **The trigger's user**, `svc-eda-enrichment`, which may launch the workflow and nothing else (design 6.1). Its password is generated once and kept in the `aap-svc-eda-enrichment` Secret.
+6. **In Event-Driven Ansible**: the same project, the supported decision environment named by the installed AAP operator, the **event stream** ServiceNow will post to, protected by a token kept in the `eda-event-stream-servicenow` Secret, and the **rulebook activation** of `rulebooks/incident_enrichment.yml`. The rulebook passes only the incident's fields to the workflow, not the whole event. The first activation pulls the decision environment, which takes a few minutes.
+7. **Proves it**, on two test incidents it raises and removes (priority 5, unassigned, so the ServiceNow trigger never picks them up):
+   - an event with the wrong token is refused
+   - an event with the token launches the workflow, which writes the note and sets the state to `complete`
+   - a failing step leads to the failure branch, which sets the state to `unavailable`
+   - running the workflow again for the same incident adds no second note
+   - the trigger's user cannot launch a job template directly
+
+   Outcomes are read back from ServiceNow, not trusted from AAP. A failed check stops the play.
+
+The ServiceNow business rule that posts new qualifying incidents to the event stream is added next (M2.3).
 
 ## Finish your session
 

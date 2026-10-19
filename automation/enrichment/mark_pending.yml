@@ -1,0 +1,13 @@
+---
+# Workflow step 1: mark the incident pending, so the business rule, whose condition requires an
+# empty enrichment state, cannot fire for it again (design 5.1). Vars from the rulebook: incident_sys_id.
+- name: "AI enrichment | Mark the incident pending"
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Mark the incident pending
+      ansible.builtin.include_role:
+        name: demo.aiops.itsm_worknote
+      vars:
+        itsm_worknote_incident_sys_id: "{{ incident_sys_id }}"
+        itsm_worknote_action: pending

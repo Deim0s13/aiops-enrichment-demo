@@ -1,0 +1,7 @@
+---
+# Writes the enrichment's outcome to one incident as the svc-ai-enrichment identity (design 5.4).
+# The ServiceNow connection comes from the job's credential, as SN_HOST, SN_USERNAME and
+# SN_PASSWORD, so no task here names a host or a password.
+itsm_worknote_revision: 1
+itsm_worknote_state: complete
+itsm_worknote_text: ""

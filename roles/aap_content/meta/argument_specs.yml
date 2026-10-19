@@ -1,0 +1,31 @@
+---
+argument_specs:
+  main:
+    short_description: Declare the demo's AAP content and prove it works
+    description:
+      - "Controller: organisation, project, execution environment, ServiceNow credential, inventory, the three
+        enrichment job templates and the AI incident enrichment workflow with its failure branch."
+      - "EDA: the AAP user the trigger runs as, a project, a decision environment, the event stream ServiceNow
+        posts to, and the rulebook activation."
+      - Reads the cluster and source secrets from secrets_values, and the AAP admin, ServiceNow identity and
+        generated secrets from the cluster.
+    options:
+      aap_content_namespace:
+        type: str
+        required: true
+        description: The AAP namespace, which also holds the published execution environment and the generated Secrets.
+      aap_content_organisation:
+        type: str
+        required: true
+        description: The AAP organisation that owns the content.
+      aap_content_repository:
+        type: dict
+        required: true
+        description: The repository AAP syncs as its project, with url, owner, name and branch.
+      aap_content_ee_stream:
+        type: str
+        required: true
+        description: Name of the image stream that holds the published execution environment (phase 05, first step).
+      aap_content_checks:
+        type: bool
+        description: Prove the trigger, workflow, failure branch, idempotency and the trigger user's limits.

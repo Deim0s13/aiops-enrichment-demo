@@ -1,0 +1,28 @@
+---
+# Workflow step 2. Milestone M2: writes a fixed, clearly labelled note, so the trigger, workflow
+# and write-back are proved before the enrichment service is connected (M2.5).
+# Vars from the rulebook: incident_sys_id, incident_number, event_id.
+# enrichment_simulate_failure: true makes this step fail, to exercise the failure branch.
+- name: "AI enrichment | Write the work note"
+  hosts: localhost
+  gather_facts: false
+  vars:
+    enrichment_simulate_failure: false
+  tasks:
+    - name: Fail on request, to exercise the workflow's failure branch
+      ansible.builtin.fail:
+        msg: Failing on request (enrichment_simulate_failure), to exercise the failure branch.
+      when: enrichment_simulate_failure | bool
+
+    - name: Write the work note
+      ansible.builtin.include_role:
+        name: demo.aiops.itsm_worknote
+      vars:
+        itsm_worknote_incident_sys_id: "{{ incident_sys_id }}"
+        itsm_worknote_action: note
+        itsm_worknote_revision: 1
+        itsm_worknote_state: complete
+        itsm_worknote_text: |-
+          [AI-generated enrichment | revision 1 | not reviewed by an engineer]
+          Summary: placeholder. The enrichment service is not connected yet (milestone M2). This note proves the trigger, the workflow and the write-back.
+          References: workflow job {{ awx_workflow_job_id | default('n/a') }} | event {{ event_id | default('n/a') }}

@@ -1,0 +1,46 @@
+---
+# Phase 05: the demo's content in AAP, declared as data and applied with infra.aap_configuration.
+# Names that the rulebook and the business rule rely on are kept here, in one place.
+
+aap_content_instance_name: aap
+aap_content_validate_certs: true
+
+aap_content_project_name: aiops-enrichment-demo
+aap_content_ee_name: ACME AIOps execution environment
+aap_content_de_name: ACME AIOps decision environment
+aap_content_inventory_name: ACME automation host
+aap_content_workflow_name: AI incident enrichment
+aap_content_templates:
+  pending: "AI enrichment | Mark pending"
+  note: "AI enrichment | Write work note"
+  unavailable: "AI enrichment | Record unavailable"
+
+# ServiceNow: the enrichment writer's credentials come from the Secret phase 04 keeps them in.
+aap_content_servicenow_credential_type: ServiceNow ITSM
+aap_content_servicenow_credential: "ServiceNow | svc-ai-enrichment"
+aap_content_servicenow_secret: servicenow-svc-ai-enrichment
+aap_content_github_credential: GitHub | aiops-enrichment-demo (read-only)
+
+# The AAP user EDA launches the workflow as, and may launch nothing else as (design 6.1).
+aap_content_eda_user: svc-eda-enrichment
+aap_content_eda_user_secret: aap-svc-eda-enrichment
+aap_content_eda_aap_credential: "AAP | svc-eda-enrichment"
+
+# The event stream ServiceNow posts to, and its token.
+aap_content_event_stream_name: ServiceNow incidents
+aap_content_event_stream_secret: eda-event-stream-servicenow
+aap_content_event_stream_header: Authorization
+aap_content_event_stream_credential: "Event stream | ServiceNow incidents"
+aap_content_rulebook: incident_enrichment.yml
+aap_content_rulebook_source: servicenow
+aap_content_activation_name: AI incident enrichment trigger
+
+aap_content_secret_length: 40
+aap_content_ready_retries: 60
+aap_content_ready_delay: 10
+
+# Prove the trigger, workflow, write-back and failure branch on every build (checks.yml).
+aap_content_checks: true
+aap_content_check_prefix: ACME build check
+aap_content_check_retries: 30
+aap_content_check_delay: 10

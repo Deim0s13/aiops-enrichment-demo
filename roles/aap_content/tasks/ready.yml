@@ -1,0 +1,56 @@
+---
+# The activation pulls its decision environment the first time, which takes a few minutes.
+
+- name: Wait for the rulebook activation to run
+  ansible.eda.rulebook_activation_info:
+    name: "{{ aap_content_activation_name }}"
+    aap_hostname: "{{ aap_content_url }}"
+    aap_username: admin
+    aap_password: "{{ aap_content_admin_password }}"
+    aap_validate_certs: "{{ aap_content_validate_certs }}"
+  register: aap_content_activation
+  until: >-
+    aap_content_activation is not failed
+    and (aap_content_activation.activations | default([]) | map(attribute='status') | first | default('')) == 'running'
+  retries: "{{ aap_content_ready_retries }}"
+  delay: "{{ aap_content_ready_delay }}"
+
+- name: Read the event stream's address
+  ansible.eda.event_stream_info:
+    name: "{{ aap_content_event_stream_name }}"
+    aap_hostname: "{{ aap_content_url }}"
+    aap_username: admin
+    aap_password: "{{ aap_content_admin_password }}"
+    aap_validate_certs: "{{ aap_content_validate_certs }}"
+  register: aap_content_stream_info
+  until: aap_content_stream_info is not failed
+  retries: 3
+  delay: 5
+
+- name: Keep the event stream's address
+  ansible.builtin.set_fact:
+    aap_content_stream_url: "{{ aap_content_stream_info.event_streams[0].url }}"
+
+- name: Store the event stream's address beside its token
+  kubernetes.core.k8s:
+    state: patched
+    api_version: v1
+    kind: Secret
+    name: "{{ aap_content_event_stream_secret }}"
+    namespace: "{{ aap_content_namespace }}"
+    definition:
+      data:
+        url: "{{ aap_content_stream_url | b64encode }}"
+  no_log: true
+
+- name: Report the content
+  ansible.builtin.set_fact:
+    aap_content_report:
+      - "Platform: {{ aap_content_url }}; organisation {{ aap_content_organisation }}"
+      - "Execution environment: {{ aap_content_ee_image }}"
+      - "Decision environment: {{ aap_content_de_image }}"
+      - "Workflow: {{ aap_content_workflow_name }} ({{ aap_content_templates.values() | join(', ') }}); launched only by {{ aap_content_eda_user }}"
+      - "Trigger: activation {{ aap_content_activation_name }} running; event stream {{ aap_content_stream_url }}"
+      - >-
+        Generated secrets: {{ aap_content_eda_user_secret }} {{ 'created' if aap_content_eda_password_new else 'reused' }},
+        {{ aap_content_event_stream_secret }} {{ 'created' if aap_content_stream_token_new else 'reused' }}

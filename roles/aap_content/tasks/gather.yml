@@ -1,0 +1,116 @@
+---
+# Reads from the cluster: the platform's address and admin password, the published execution
+# environment and the operator's decision environment image, and the identities' credentials.
+# Generated secrets are kept in Secrets and reused, so a rerun changes nothing.
+
+- name: Read the platform's route and admin password, and the published execution environment
+  kubernetes.core.k8s_info:
+    api_version: "{{ item.api_version }}"
+    kind: "{{ item.kind }}"
+    namespace: "{{ aap_content_namespace }}"
+    name: "{{ item.name }}"
+  loop:
+    - { api_version: route.openshift.io/v1, kind: Route, name: "{{ aap_content_instance_name }}" }
+    - { api_version: v1, kind: Secret, name: "{{ aap_content_instance_name }}-admin-password" }
+    - { api_version: image.openshift.io/v1, kind: ImageStream, name: "{{ aap_content_ee_stream }}" }
+    - { api_version: v1, kind: Secret, name: "{{ aap_content_servicenow_secret }}" }
+    - { api_version: v1, kind: Secret, name: "{{ aap_content_eda_user_secret }}" }
+    - { api_version: v1, kind: Secret, name: "{{ aap_content_event_stream_secret }}" }
+  loop_control:
+    label: "{{ item.kind }} {{ item.name }}"
+  register: aap_content_read
+  until: aap_content_read is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Read the AAP operator, which names the decision environment image for this release
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    namespace: "{{ aap_content_namespace }}"
+  register: aap_content_csvs
+  until: aap_content_csvs is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Keep only the fields needed
+  ansible.builtin.set_fact:
+    aap_content_found: >-
+      {{ dict(['route', 'admin', 'stream', 'servicenow', 'eda_user', 'event_stream']
+         | zip(aap_content_read.results | map(attribute='resources') | map('first') | map('default', {}, true))) }}
+    aap_content_de_images: >-
+      {{ aap_content_csvs.resources | map(attribute='spec.relatedImages', default=[]) | flatten
+         | map(attribute='image') | select('search', '/de-supported') | unique | list }}
+  no_log: true
+
+- name: Stop if something phase 05 relies on is missing
+  ansible.builtin.assert:
+    that:
+      - aap_content_found.route | length > 0
+      - aap_content_found.admin | length > 0
+      - aap_content_found.stream | length > 0
+      - aap_content_found.servicenow | length > 0
+      - aap_content_de_images | length > 0
+    fail_msg: >-
+      Missing:
+      {{ ([] + (['the AAP route (run phase 03)'] if not aap_content_found.route else [])
+         + (['the AAP admin password Secret (run phase 03)'] if not aap_content_found.admin else [])
+         + (['the published execution environment (run: ansible-playbook playbooks/05_execution_environment.yml)'] if not aap_content_found.stream else [])
+         + (['the svc-ai-enrichment Secret (run phase 04)'] if not aap_content_found.servicenow else [])
+         + (['a de-supported decision environment image in the AAP operator'] if not aap_content_de_images else [])) | join('; ') }}.
+    quiet: true
+
+- name: Work out the addresses and the identities' credentials
+  ansible.builtin.set_fact:
+    aap_content_url: "https://{{ aap_content_found.route.spec.host }}"
+    aap_content_admin_password: "{{ aap_content_found.admin.data.password | b64decode }}"
+    aap_content_ee_image: >-
+      {{ (aap_content_found.stream.status.tags | default([]) | selectattr('tag', 'equalto', 'latest') | first | default({}))['items']
+         | default([{}]) | map(attribute='dockerImageReference', default='') | first }}
+    aap_content_de_image: "{{ aap_content_de_images | first }}"
+    aap_content_servicenow: >-
+      {{ dict(aap_content_found.servicenow.data.keys() | zip(aap_content_found.servicenow.data.values() | map('b64decode'))) }}
+    # Reuse the generated secrets if the cluster has them; otherwise make new ones.
+    aap_content_eda_password_new: "{{ aap_content_found.eda_user | length == 0 }}"
+    aap_content_eda_password: >-
+      {{ (aap_content_found.eda_user.data.password | b64decode) if aap_content_found.eda_user
+         else lookup('ansible.builtin.password', '/dev/null', length=aap_content_secret_length, chars=['ascii_letters', 'digits']) }}
+    aap_content_stream_token_new: "{{ aap_content_found.event_stream | length == 0 }}"
+    aap_content_stream_token: >-
+      {{ (aap_content_found.event_stream.data.token | b64decode) if aap_content_found.event_stream
+         else lookup('ansible.builtin.password', '/dev/null', length=aap_content_secret_length, chars=['ascii_letters', 'digits']) }}
+  no_log: true
+
+- name: Store newly generated secrets in the cluster
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ item.name }}"
+        namespace: "{{ aap_content_namespace }}"
+        labels:
+          app.kubernetes.io/part-of: aiops-enrichment-demo
+          app.kubernetes.io/component: "{{ item.component }}"
+      data: "{{ dict(item.data.keys() | zip(item.data.values() | map('b64encode'))) }}"
+  loop:
+    - name: "{{ aap_content_eda_user_secret }}"
+      component: aap-identity
+      new: "{{ aap_content_eda_password_new }}"
+      data:
+        username: "{{ aap_content_eda_user }}"
+        password: "{{ aap_content_eda_password }}"
+    - name: "{{ aap_content_event_stream_secret }}"
+      component: event-stream-token
+      new: "{{ aap_content_stream_token_new }}"
+      data:
+        header: "{{ aap_content_event_stream_header }}"
+        token: "{{ aap_content_stream_token }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.new | bool
+  no_log: true

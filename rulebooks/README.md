@@ -5,4 +5,4 @@ AAP looks for rulebooks in this directory when the repository is added as an EDA
 | Rulebook (planned) | Purpose | Design reference |
 |---|---|---|
 | `integration_alerts.yml` | Receives Alertmanager alerts and launches the integration stand-in | Section 2.1, step 1 |
-| `incident_enrichment.yml` | Receives qualifying ServiceNow incidents, validates the fields and launches the enrichment workflow | Section 5.1 |
+| `incident_enrichment.yml` (written) | Receives qualifying ServiceNow incidents through the event stream, checks the incident fields and launches the enrichment workflow with only those fields | Section 5.1 |

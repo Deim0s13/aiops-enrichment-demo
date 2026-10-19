@@ -39,6 +39,9 @@ demo_repository:
   name: aiops-enrichment-demo
   branch: main
 
+# The AAP organisation that owns the demo's content (phase 05). The rulebook names it too.
+demo_aap_organisation: ACME Bank
+
 # The execution environment AAP runs the demo's automation in: the image built on the laptop,
 # published to the cluster's internal registry by playbooks/05_execution_environment.yml (DD17).
 demo_execution_environment:

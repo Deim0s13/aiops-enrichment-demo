@@ -1,0 +1,29 @@
+---
+argument_specs:
+  main:
+    short_description: Write the AI enrichment outcome to a ServiceNow incident
+    description:
+      - "pending: sets the enrichment state to pending, the workflow's first action (design 5.1)."
+      - "note: writes the AI-labelled work note, the revision and the state, once per revision, so a retried
+        workflow cannot add a duplicate (design 5.4)."
+      - "unavailable: writes the AI enrichment unavailable note and state (design 5.5)."
+    options:
+      itsm_worknote_incident_sys_id:
+        type: str
+        required: true
+        description: System ID of the incident, as passed by the rulebook.
+      itsm_worknote_action:
+        type: str
+        required: true
+        choices: [pending, note, unavailable]
+        description: What to write.
+      itsm_worknote_text:
+        type: str
+        description: The work note, for note and unavailable.
+      itsm_worknote_state:
+        type: str
+        choices: [complete, insufficient_evidence]
+        description: The enrichment state that goes with a note.
+      itsm_worknote_revision:
+        type: int
+        description: The note's revision. A note is written only if the incident has no note for this revision yet.

@@ -9,7 +9,7 @@ Reusable roles for the demo's AAP content. Playbooks in `automation/` call these
 | `diag_changes` | Rollout history and recent change requests | Section 5.2 |
 | `diag_logs` | Error-filtered log excerpt with line and byte limits | Section 5.2 |
 | `evidence` | Common evidence format and output size limits | Section 5.2 |
-| `itsm_worknote` | Idempotent, AI-labelled work note and enrichment fields | Section 5.4 |
+| `itsm_worknote` (written) | Marks an incident pending, writes the AI-labelled work note once per revision, or records enrichment as unavailable, as the svc-ai-enrichment identity from the job's credential | Sections 5.4 and 5.5 |
 | `remediate_heapdump_restart` | Catalogued level 2 job: capture a heap dump and restart | Section 2.1 |
 
 Every diagnostic role is read-only and returns evidence items in the format defined in section 5.2 of the implementation design.

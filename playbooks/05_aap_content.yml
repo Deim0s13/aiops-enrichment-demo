@@ -1,9 +1,42 @@
 ---
-- name: "Phase 05 | AAP content: projects, credentials, templates, workflow, catalogue and rulebook activations"
+# Phase 05: the demo's content in AAP (design sections 5 and 6.1), declared as data and applied with
+# infra.aap_configuration, then proved end to end.
+#   ansible-navigator run playbooks/05_aap_content.yml
+#
+# Run phases 03 and 04 and publish the execution environment first:
+#   ansible-playbook playbooks/05_execution_environment.yml
+# Safe to rerun.
+
+- name: "Phase 05 | AAP content: project, credentials, workflow, trigger user, event stream and rulebook activation"
   hosts: localhost
   gather_facts: false
   tags: [aap_content]
+
+  # See playbooks/01_platform.yml for why the modules are listed one by one.
+  module_defaults:
+    kubernetes.core.k8s: &cluster_auth
+      host: "{{ secrets_values.cluster_api_url }}"
+      api_key: "{{ secrets_values.cluster_api_token }}"
+      validate_certs: "{{ demo_cluster_validate_certs }}"
+      ca_cert: "{{ secrets_cluster_ca_file | default(omit) }}"
+    kubernetes.core.k8s_info: *cluster_auth
+
   tasks:
-    - name: Report that phase 05 is not implemented yet
+    - name: Resolve the cluster, ServiceNow and source secrets
+      ansible.builtin.include_role:
+        name: secrets
+      vars:
+        secrets_groups: [cluster, servicenow, source]
+
+    - name: Declare and prove the AAP content
+      ansible.builtin.include_role:
+        name: aap_content
+      vars:
+        aap_content_namespace: "{{ demo_namespaces.aap }}"
+        aap_content_organisation: "{{ demo_aap_organisation }}"
+        aap_content_repository: "{{ demo_repository }}"
+        aap_content_ee_stream: "{{ demo_execution_environment.name }}"
+
+    - name: Report what phase 05 found and changed
       ansible.builtin.debug:
-        msg: "Phase 05 (aap_content) is a stub. See docs/implementation-design.md sections 5 and 6.1."
+        msg: "{{ aap_content_report }}"

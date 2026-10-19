@@ -1,0 +1,232 @@
+---
+# Proves the trigger end to end, the failure branch, idempotency and the trigger user's limits, on
+# test incidents that the ServiceNow trigger never picks up (priority 5, unassigned), removed at the
+# end. Outcomes are read from ServiceNow, not trusted from AAP's responses.
+
+- name: Prepare the checks
+  ansible.builtin.set_fact:
+    aap_content_check_run: "{{ aap_content_check_prefix }} {{ now(utc=true, fmt='%Y%m%d%H%M%S') }}"
+    aap_content_sn_url: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}"
+
+- name: Raise two test incidents as the ServiceNow administrator
+  ansible.builtin.uri:
+    url: "{{ aap_content_sn_url }}/api/now/table/incident?sysparm_fields=sys_id,number"
+    method: POST
+    url_username: "{{ secrets_values.servicenow_admin_username }}"
+    url_password: "{{ secrets_values.servicenow_admin_password }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+    body_format: json
+    body:
+      short_description: "{{ aap_content_check_run }}: {{ item }}"
+      description: Created by the phase 05 build check and removed at the end of it.
+      impact: "3"
+      urgency: "3"
+      category: inquiry
+    status_code: [201]
+  loop: [trigger, failure branch]
+  register: aap_content_check_incidents
+  no_log: true
+
+- name: Keep only the test incidents' IDs
+  ansible.builtin.set_fact:
+    aap_content_check_inc: >-
+      {{ dict(['trigger', 'failure'] | zip(aap_content_check_incidents.results | map(attribute='json.result'))) }}
+  no_log: true
+
+- name: Post an event with the wrong token, which the event stream must refuse
+  ansible.builtin.uri:
+    url: "{{ aap_content_stream_url }}"
+    method: POST
+    headers:
+      "{{ aap_content_event_stream_header }}": not-the-token
+    body_format: json
+    body:
+      event_id: "{{ aap_content_check_run }} wrong token"
+      incident: "{{ aap_content_check_inc.trigger }}"
+    status_code: [200, 201, 202, 401, 403]
+    validate_certs: "{{ aap_content_validate_certs }}"
+  register: aap_content_check_wrong_token
+
+- name: Post the trigger incident to the event stream, as ServiceNow will
+  ansible.builtin.uri:
+    url: "{{ aap_content_stream_url }}"
+    method: POST
+    headers:
+      "{{ aap_content_event_stream_header }}": "{{ aap_content_stream_token }}"
+    body_format: json
+    body:
+      event_id: "{{ aap_content_check_run }} trigger"
+      incident:
+        sys_id: "{{ aap_content_check_inc.trigger.sys_id }}"
+        number: "{{ aap_content_check_inc.trigger.number }}"
+        short_description: "{{ aap_content_check_run }}: trigger"
+    status_code: [200, 201, 202, 401, 403]
+    validate_certs: "{{ aap_content_validate_certs }}"
+  register: aap_content_check_event
+  no_log: true
+
+- name: Keep only the event stream's answer
+  ansible.builtin.set_fact:
+    aap_content_check_event_status: "{{ aap_content_check_event.status | default(-1) }}"
+
+- name: Run the workflow for the second incident with a failing step, as the administrator
+  ansible.controller.workflow_launch:
+    workflow_template: "{{ aap_content_workflow_name }}"
+    organization: "{{ aap_content_organisation }}"
+    extra_vars:
+      incident_sys_id: "{{ aap_content_check_inc.failure.sys_id }}"
+      incident_number: "{{ aap_content_check_inc.failure.number }}"
+      event_id: "{{ aap_content_check_run }} failure branch"
+      enrichment_simulate_failure: true
+    wait: true
+    timeout: 600
+    controller_host: "{{ aap_content_url }}"
+    controller_username: admin
+    controller_password: "{{ aap_content_admin_password }}"
+    validate_certs: "{{ aap_content_validate_certs }}"
+  register: aap_content_check_failure_run
+  failed_when: false
+  changed_when: false
+
+- name: Wait for the trigger incident's enrichment to complete
+  servicenow.itsm.api_info:
+    instance: &admin
+      host: "{{ aap_content_sn_url }}"
+      username: "{{ secrets_values.servicenow_admin_username }}"
+      password: "{{ secrets_values.servicenow_admin_password }}"
+    resource: incident
+    sysparm_query: "sys_id={{ aap_content_check_inc.trigger.sys_id }}"
+    columns: [sys_id, u_ai_enrichment_state, u_ai_enrichment_rev]
+  register: aap_content_check_trigger_inc
+  until: >-
+    aap_content_check_trigger_inc is not failed
+    and (aap_content_check_trigger_inc.record | map(attribute='u_ai_enrichment_state') | first | default('')) in ['complete', 'unavailable']
+  retries: "{{ aap_content_check_retries }}"
+  delay: "{{ aap_content_check_delay }}"
+  failed_when: false
+
+- name: Run the workflow again for the trigger incident, as a retry would
+  ansible.controller.workflow_launch:
+    workflow_template: "{{ aap_content_workflow_name }}"
+    organization: "{{ aap_content_organisation }}"
+    extra_vars:
+      incident_sys_id: "{{ aap_content_check_inc.trigger.sys_id }}"
+      incident_number: "{{ aap_content_check_inc.trigger.number }}"
+      event_id: "{{ aap_content_check_run }} retry"
+    wait: true
+    timeout: 600
+    controller_host: "{{ aap_content_url }}"
+    controller_username: admin
+    controller_password: "{{ aap_content_admin_password }}"
+    validate_certs: "{{ aap_content_validate_certs }}"
+  register: aap_content_check_retry_run
+  failed_when: false
+  changed_when: false
+
+- name: Try to launch a job template as the trigger's user, which it must not be able to do
+  ansible.controller.job_launch:
+    job_template: "{{ aap_content_templates.unavailable }}"
+    organization: "{{ aap_content_organisation }}"
+    extra_vars:
+      incident_sys_id: "{{ aap_content_check_inc.failure.sys_id }}"
+    controller_host: "{{ aap_content_url }}"
+    controller_username: "{{ aap_content_eda_user }}"
+    controller_password: "{{ aap_content_eda_password }}"
+    validate_certs: "{{ aap_content_validate_certs }}"
+  register: aap_content_check_eda_limit
+  failed_when: false
+  changed_when: false
+  no_log: true
+
+- name: Keep only whether that launch was refused
+  ansible.builtin.set_fact:
+    aap_content_check_eda_refused: "{{ aap_content_check_eda_limit.failed | default(false) and aap_content_check_eda_limit.id is not defined }}"
+
+- name: Read both test incidents and the trigger incident's work notes
+  servicenow.itsm.api_info:
+    instance: *admin
+    resource: "{{ item.resource }}"
+    sysparm_query: "{{ item.query }}"
+    columns: "{{ item.columns }}"
+  loop:
+    - resource: incident
+      query: "short_descriptionSTARTSWITH{{ aap_content_check_run }}"
+      columns: [sys_id, u_ai_enrichment_state, u_ai_enrichment_rev]
+    - resource: sys_journal_field
+      query: "element_id={{ aap_content_check_inc.trigger.sys_id }}^element=work_notes^valueLIKEAI-generated enrichment"
+      columns: [sys_id]
+  loop_control:
+    label: "{{ item.resource }}"
+  register: aap_content_check_read
+  until: aap_content_check_read is not failed
+  retries: 3
+  delay: 5
+
+- name: Judge each check
+  ansible.builtin.set_fact:
+    aap_content_check_results:
+      - check: the event stream refuses an event with the wrong token
+        passed: "{{ aap_content_check_wrong_token.status | default(-1) in [401, 403] }}"
+        detail: "HTTP {{ aap_content_check_wrong_token.status | default(-1) }}"
+      - check: an event with the token launches the workflow, which writes the work note and completes
+        passed: "{{ aap_content_check_event_status | int in [200, 201, 202] and aap_content_check_state.trigger == 'complete' }}"
+        detail: "event HTTP {{ aap_content_check_event_status }}, state {{ aap_content_check_state.trigger or 'empty' }}"
+      - check: a failed step leads to the failure branch, which records enrichment as unavailable
+        passed: "{{ aap_content_check_state.failure == 'unavailable' }}"
+        detail: "workflow {{ aap_content_check_failure_run.status | default('not run') }}, state {{ aap_content_check_state.failure or 'empty' }}"
+      - check: a retried workflow adds no second note and leaves the state complete
+        passed: >-
+          {{ aap_content_check_read.results[1].record | length == 1 and aap_content_check_state.trigger == 'complete'
+             and aap_content_check_retry_run.status | default('') == 'successful' }}
+        detail: "{{ aap_content_check_read.results[1].record | length }} note(s), workflow {{ aap_content_check_retry_run.status | default('not run') }}"
+      - check: the trigger's user cannot launch anything but the workflow
+        passed: "{{ aap_content_check_eda_refused }}"
+        detail: "direct job template launch {{ 'refused' if aap_content_check_eda_refused else 'allowed' }}"
+  vars:
+    aap_content_check_state:
+      trigger: >-
+        {{ aap_content_check_read.results[0].record | selectattr('sys_id', 'equalto', aap_content_check_inc.trigger.sys_id)
+           | map(attribute='u_ai_enrichment_state') | first | default('') }}
+      failure: >-
+        {{ aap_content_check_read.results[0].record | selectattr('sys_id', 'equalto', aap_content_check_inc.failure.sys_id)
+           | map(attribute='u_ai_enrichment_state') | first | default('') }}
+
+- name: Find every test incident, including any an earlier run left
+  servicenow.itsm.api_info:
+    instance: *admin
+    resource: incident
+    sysparm_query: "short_descriptionSTARTSWITH{{ aap_content_check_prefix }}"
+    columns: [sys_id]
+  register: aap_content_check_leftovers
+  until: aap_content_check_leftovers is not failed
+  retries: 3
+  delay: 5
+
+# Test data the check itself created, so removing it is not a change to the configuration.
+- name: Remove the test incidents
+  servicenow.itsm.api:
+    instance: *admin
+    resource: incident
+    action: delete
+    sys_id: "{{ item }}"
+  loop: "{{ aap_content_check_leftovers.record | map(attribute='sys_id') | list }}"
+  changed_when: false
+
+- name: Report the checks
+  ansible.builtin.set_fact:
+    aap_content_report: "{{ aap_content_report + (aap_content_check_lines | from_json) }}"
+  vars:
+    aap_content_check_lines: >-
+      {%- set ns = namespace(lines=[]) -%}
+      {%- for c in aap_content_check_results -%}
+      {%- set ns.lines = ns.lines + [('Check passed: ' if c.passed | bool else 'CHECK FAILED: ') ~ c.check ~ ' (' ~ c.detail | trim ~ ')'] -%}
+      {%- endfor -%}
+      {{ ns.lines | to_json }}
+
+- name: Stop if a check failed
+  ansible.builtin.assert:
+    that: aap_content_check_results | map(attribute='passed') | map('bool') | reject | list | length == 0
+    fail_msg: "{{ aap_content_report | select('match', 'CHECK FAILED') | join('; ') }}"
+    quiet: true

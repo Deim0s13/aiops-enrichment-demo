@@ -1,0 +1,17 @@
+---
+# The workflow's failure branch (design 5.5): any failed step leads here. The incident stays with its
+# assigned team; the note says enrichment is unavailable. Vars from the rulebook: incident_sys_id.
+- name: "AI enrichment | Record that enrichment is unavailable"
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Record that enrichment is unavailable
+      ansible.builtin.include_role:
+        name: demo.aiops.itsm_worknote
+      vars:
+        itsm_worknote_incident_sys_id: "{{ incident_sys_id }}"
+        itsm_worknote_action: unavailable
+        itsm_worknote_text: |-
+          [AI enrichment unavailable | not reviewed by an engineer]
+          The enrichment workflow could not complete, so no AI enrichment was added. The incident stays with its assigned team.
+          References: workflow job {{ awx_workflow_job_id | default('n/a') }} | event {{ event_id | default('n/a') }}

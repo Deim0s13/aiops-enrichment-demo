@@ -1,0 +1,46 @@
+---
+# Gathers what the content needs from the cluster, declares it, applies it with
+# infra.aap_configuration, then proves it (checks.yml).
+
+- name: Gather what the content needs from the cluster
+  ansible.builtin.include_tasks: gather.yml
+
+- name: Declare the content
+  ansible.builtin.include_tasks: declare.yml
+
+- name: Apply the content with infra.aap_configuration
+  ansible.builtin.include_role:
+    name: infra.aap_configuration.dispatch
+  vars:
+    aap_hostname: "{{ aap_content_url }}"
+    aap_username: admin
+    aap_password: "{{ aap_content_admin_password }}"
+    aap_validate_certs: "{{ aap_content_validate_certs }}"
+    aap_organizations: "{{ aap_content_cfg_aap_organizations }}"
+    controller_settings: "{{ aap_content_cfg_controller_settings }}"
+    controller_credential_types: "{{ aap_content_cfg_controller_credential_types }}"
+    controller_execution_environments: "{{ aap_content_cfg_controller_execution_environments }}"
+    controller_projects: "{{ aap_content_cfg_controller_projects }}"
+    controller_inventories: "{{ aap_content_cfg_controller_inventories }}"
+    controller_hosts: "{{ aap_content_cfg_controller_hosts }}"
+    controller_templates: "{{ aap_content_cfg_controller_templates }}"
+    controller_workflows: "{{ aap_content_cfg_controller_workflows }}"
+    controller_roles: "{{ aap_content_cfg_controller_roles }}"
+    aap_user_accounts: "{{ aap_content_cfg_aap_user_accounts }}"
+    controller_credentials: "{{ aap_content_cfg_controller_credentials }}"
+    eda_credentials: "{{ aap_content_cfg_eda_credentials }}"
+    eda_projects: "{{ aap_content_cfg_eda_projects }}"
+    eda_decision_environments: "{{ aap_content_cfg_eda_decision_environments }}"
+    eda_event_streams: "{{ aap_content_cfg_eda_event_streams }}"
+    eda_rulebook_activations: "{{ aap_content_cfg_eda_rulebook_activations }}"
+    # Hide the arguments of the roles that handle secrets, even when a task fails.
+    gateway_users_secure_logging: true
+    controller_configuration_credentials_secure_logging: true
+    eda_configuration_credentials_secure_logging: true
+
+- name: Wait for the project to sync and the rulebook activation to run
+  ansible.builtin.include_tasks: ready.yml
+
+- name: Prove the trigger, the workflow, the write-back and the failure branch
+  ansible.builtin.include_tasks: checks.yml
+  when: aap_content_checks | bool

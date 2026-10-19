@@ -1,0 +1,38 @@
+---
+# Receives qualifying incidents from the ServiceNow business rule through an EDA event stream, and
+# launches the enrichment workflow with only the fields it needs (design 5.1). The event stream
+# replaces this webhook source when the activation is created, and checks the token first.
+- name: Enrich qualifying ServiceNow incidents
+  hosts: all
+  sources:
+    - name: servicenow
+      ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+  rules:
+    - name: Launch the enrichment workflow for a well-formed incident event
+      condition: >-
+        event.payload.incident.sys_id is match("^[0-9a-f]{32}$")
+        and event.payload.incident.number is match("^INC[0-9]{7,}$")
+      action:
+        run_workflow_template:
+          name: AI incident enrichment
+          organization: ACME Bank
+          # Without this, the whole event would reach the workflow as ansible_eda. Only the fields
+          # below are passed.
+          include_events: false
+          job_args:
+            extra_vars:
+              incident_sys_id: "{{ event.payload.incident.sys_id }}"
+              incident_number: "{{ event.payload.incident.number }}"
+              short_description: "{{ event.payload.incident.short_description | default('') | truncate(160) }}"
+              cmdb_ci: "{{ event.payload.incident.cmdb_ci | default('') }}"
+              priority: "{{ event.payload.incident.priority | default('') }}"
+              opened_at: "{{ event.payload.incident.opened_at | default('') }}"
+              event_id: "{{ event.payload.event_id | default('') }}"
+
+    - name: Log and drop an event without the incident fields
+      condition: event.payload.incident.sys_id is not defined or event.payload.incident.number is not defined
+      action:
+        debug:
+          msg: "Dropped an event without incident.sys_id and incident.number."

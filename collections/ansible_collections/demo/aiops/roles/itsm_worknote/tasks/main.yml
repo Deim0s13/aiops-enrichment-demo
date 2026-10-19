@@ -1,0 +1,77 @@
+---
+- name: Check the incident ID before using it
+  ansible.builtin.assert:
+    that: itsm_worknote_incident_sys_id is match('^[0-9a-f]{32}$')
+    fail_msg: "{{ itsm_worknote_incident_sys_id | string | truncate(40) }} is not a ServiceNow system ID."
+    quiet: true
+
+- name: Read the incident
+  servicenow.itsm.api_info:
+    resource: incident
+    sysparm_query: "sys_id={{ itsm_worknote_incident_sys_id }}"
+    columns: [sys_id, number, u_ai_enrichment_state, u_ai_enrichment_rev]
+  register: itsm_worknote_found
+  until: itsm_worknote_found is not failed
+  retries: 3
+  delay: 5
+
+- name: Stop if there is no such incident
+  ansible.builtin.assert:
+    that: itsm_worknote_found.record | length == 1
+    fail_msg: "There is no incident with system ID {{ itsm_worknote_incident_sys_id }}, or this identity cannot read it."
+    quiet: true
+
+- name: Note what the incident holds now
+  ansible.builtin.set_fact:
+    itsm_worknote_incident: "{{ itsm_worknote_found.record[0] }}"
+    itsm_worknote_written_rev: "{{ itsm_worknote_found.record[0].u_ai_enrichment_rev | default('', true) | int }}"
+
+- name: Mark the incident pending
+  servicenow.itsm.api:
+    resource: incident
+    action: patch
+    sys_id: "{{ itsm_worknote_incident_sys_id }}"
+    data:
+      u_ai_enrichment_state: pending
+  when:
+    - itsm_worknote_action == 'pending'
+    # An incident already enriched stays as it is: a retried workflow must not send it back to pending.
+    - itsm_worknote_incident.u_ai_enrichment_state not in ['pending', 'complete', 'insufficient_evidence']
+
+# Idempotency: a retried workflow finds the revision already written and adds nothing.
+- name: Write the work note, the revision and the state
+  servicenow.itsm.api:
+    resource: incident
+    action: patch
+    sys_id: "{{ itsm_worknote_incident_sys_id }}"
+    data:
+      work_notes: "{{ itsm_worknote_text }}"
+      u_ai_enrichment_rev: "{{ itsm_worknote_revision | string }}"
+      u_ai_enrichment_state: "{{ itsm_worknote_state }}"
+  when:
+    - itsm_worknote_action == 'note'
+    - itsm_worknote_written_rev | int < itsm_worknote_revision | int
+
+- name: Record that enrichment is unavailable
+  servicenow.itsm.api:
+    resource: incident
+    action: patch
+    sys_id: "{{ itsm_worknote_incident_sys_id }}"
+    data:
+      work_notes: "{{ itsm_worknote_text }}"
+      u_ai_enrichment_state: unavailable
+  when:
+    - itsm_worknote_action == 'unavailable'
+    - itsm_worknote_incident.u_ai_enrichment_state != 'unavailable'
+
+- name: Report
+  ansible.builtin.debug:
+    msg: >-
+      {{ itsm_worknote_incident.number }}:
+      {{ {'pending': 'marked pending' if itsm_worknote_incident.u_ai_enrichment_state not in ['pending', 'complete', 'insufficient_evidence']
+                     else 'already ' ~ itsm_worknote_incident.u_ai_enrichment_state ~ '; left as it is',
+          'note': ('work note revision ' ~ itsm_worknote_revision ~ ' written, state ' ~ itsm_worknote_state)
+                  if itsm_worknote_written_rev | int < itsm_worknote_revision | int
+                  else ('work note revision ' ~ itsm_worknote_revision ~ ' already written; nothing added'),
+          'unavailable': 'marked unavailable' if itsm_worknote_incident.u_ai_enrichment_state != 'unavailable'
+                         else 'already marked unavailable'}[itsm_worknote_action] }}

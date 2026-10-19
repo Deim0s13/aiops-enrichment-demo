@@ -1,0 +1,212 @@
+---
+# The content, as data for infra.aap_configuration. Each aap_content_cfg_ variable is passed to the
+# dispatch role under the name it expects, without the prefix (main.yml). Facts holding credentials are set under no_log.
+
+- name: Declare the organisation and the controller content
+  ansible.builtin.set_fact:
+    aap_content_cfg_aap_organizations:
+      - name: "{{ aap_content_organisation }}"
+        description: Fictional bank for the AI-assisted incident enrichment demo.
+
+    # Project syncs install no content: everything the jobs need is in the execution environment,
+    # which is built, reviewed and published once (DD17).
+    aap_content_cfg_controller_settings:
+      - name: AWX_COLLECTIONS_ENABLED
+        value: false
+      - name: AWX_ROLES_ENABLED
+        value: false
+
+    # The servicenow.itsm modules read their connection from these variables, so no playbook or
+    # job template holds a ServiceNow address or password.
+    aap_content_cfg_controller_credential_types:
+      - name: "{{ aap_content_servicenow_credential_type }}"
+        description: A ServiceNow identity, passed to the servicenow.itsm modules as SN_HOST, SN_USERNAME and SN_PASSWORD.
+        kind: cloud
+        inputs:
+          fields:
+            - { id: instance_url, type: string, label: Instance URL }
+            - { id: username, type: string, label: Username }
+            - { id: password, type: string, label: Password, secret: true }
+          required: [instance_url, username, password]
+        injectors:
+          env:
+            SN_HOST: !unsafe "{{ instance_url }}"
+            SN_USERNAME: !unsafe "{{ username }}"
+            SN_PASSWORD: !unsafe "{{ password }}"
+
+    aap_content_cfg_controller_execution_environments:
+      - name: "{{ aap_content_ee_name }}"
+        description: Built on the operator's laptop and published to the cluster registry, pinned by digest (DD17).
+        organization: "{{ aap_content_organisation }}"
+        image: "{{ aap_content_ee_image }}"
+        pull: missing
+
+    aap_content_cfg_controller_projects:
+      - name: "{{ aap_content_project_name }}"
+        description: The demo repository, read with a read-only token (DD16).
+        organization: "{{ aap_content_organisation }}"
+        scm_type: git
+        scm_url: "{{ aap_content_repository.url }}"
+        scm_branch: "{{ aap_content_repository.branch }}"
+        credential: "{{ aap_content_github_credential }}"
+        default_environment: "{{ aap_content_ee_name }}"
+        update_project: true
+        wait: true
+
+    aap_content_cfg_controller_inventories:
+      - name: "{{ aap_content_inventory_name }}"
+        description: The automation runs in the job's own container and calls APIs from there.
+        organization: "{{ aap_content_organisation }}"
+
+    aap_content_cfg_controller_hosts:
+      - name: localhost
+        inventory: "{{ aap_content_inventory_name }}"
+        variables:
+          ansible_connection: local
+
+    aap_content_cfg_controller_templates:
+      - name: "{{ aap_content_templates.pending }}"
+        description: "Workflow step 1: marks the incident pending, so the trigger cannot fire for it again."
+        playbook: automation/enrichment/mark_pending.yml
+        organization: "{{ aap_content_organisation }}"
+        project: "{{ aap_content_project_name }}"
+        inventory: "{{ aap_content_inventory_name }}"
+        execution_environment: "{{ aap_content_ee_name }}"
+        credentials: ["{{ aap_content_servicenow_credential }}"]
+        ask_variables_on_launch: true
+      - name: "{{ aap_content_templates.note }}"
+        description: "Workflow step 2: writes the AI-labelled work note, once per revision."
+        playbook: automation/enrichment/write_note.yml
+        organization: "{{ aap_content_organisation }}"
+        project: "{{ aap_content_project_name }}"
+        inventory: "{{ aap_content_inventory_name }}"
+        execution_environment: "{{ aap_content_ee_name }}"
+        credentials: ["{{ aap_content_servicenow_credential }}"]
+        ask_variables_on_launch: true
+      - name: "{{ aap_content_templates.unavailable }}"
+        description: "Failure branch: records that enrichment is unavailable; the incident stays with its team."
+        playbook: automation/enrichment/record_unavailable.yml
+        organization: "{{ aap_content_organisation }}"
+        project: "{{ aap_content_project_name }}"
+        inventory: "{{ aap_content_inventory_name }}"
+        execution_environment: "{{ aap_content_ee_name }}"
+        credentials: ["{{ aap_content_servicenow_credential }}"]
+        ask_variables_on_launch: true
+
+    # Any failed step leads to the failure branch (design 5.5).
+    aap_content_cfg_controller_workflows:
+      - name: "{{ aap_content_workflow_name }}"
+        description: Enriches one incident. Launched by the trigger with the incident's fields only.
+        organization: "{{ aap_content_organisation }}"
+        ask_variables_on_launch: true
+        allow_simultaneous: true
+        simplified_workflow_nodes:
+          - identifier: pending
+            unified_job_template: "{{ aap_content_templates.pending }}"
+            success_nodes: [note]
+            failure_nodes: [unavailable]
+          - identifier: note
+            unified_job_template: "{{ aap_content_templates.note }}"
+            failure_nodes: [unavailable]
+          - identifier: unavailable
+            unified_job_template: "{{ aap_content_templates.unavailable }}"
+
+    # The trigger's user may launch this workflow and nothing else (design 6.1).
+    aap_content_cfg_controller_roles:
+      - user: "{{ aap_content_eda_user }}"
+        workflow: "{{ aap_content_workflow_name }}"
+        role: execute
+
+- name: Declare the content's credentials and the trigger's user
+  ansible.builtin.set_fact:
+    aap_content_cfg_aap_user_accounts:
+      - username: "{{ aap_content_eda_user }}"
+        password: "{{ aap_content_eda_password }}"
+        first_name: EDA
+        last_name: Enrichment trigger
+        email: "{{ aap_content_eda_user }}@acme-bank.example"
+        is_superuser: false
+        organizations: ["{{ aap_content_organisation }}"]
+        # Set the password only when it was just generated, so a rerun changes nothing.
+        update_secrets: "{{ aap_content_eda_password_new }}"
+
+    aap_content_cfg_controller_credentials:
+      - name: "{{ aap_content_github_credential }}"
+        description: Fine-grained GitHub token, this repository only, contents read-only (DD16).
+        organization: "{{ aap_content_organisation }}"
+        credential_type: Source Control
+        inputs:
+          username: "{{ aap_content_repository.owner }}"
+          password: "{{ secrets_values.github_token }}"
+      - name: "{{ aap_content_servicenow_credential }}"
+        description: The ITSM writer identity. Guard rules in ServiceNow limit it to work notes and enrichment fields.
+        organization: "{{ aap_content_organisation }}"
+        credential_type: "{{ aap_content_servicenow_credential_type }}"
+        inputs:
+          instance_url: "{{ aap_content_servicenow.instance_url }}"
+          username: "{{ aap_content_servicenow.username }}"
+          password: "{{ aap_content_servicenow.password }}"
+
+    aap_content_cfg_eda_credentials:
+      - name: "{{ aap_content_eda_aap_credential }}"
+        description: The trigger launches the enrichment workflow as this AAP user, which can launch nothing else.
+        organization: "{{ aap_content_organisation }}"
+        credential_type: Red Hat Ansible Automation Platform
+        inputs:
+          host: "{{ aap_content_url }}/api/controller/"
+          username: "{{ aap_content_eda_user }}"
+          password: "{{ aap_content_eda_password }}"
+          verify_ssl: "{{ aap_content_validate_certs }}"
+      - name: "{{ aap_content_github_credential }}"
+        description: Fine-grained GitHub token, this repository only, contents read-only (DD16).
+        organization: "{{ aap_content_organisation }}"
+        credential_type: Source Control
+        inputs:
+          username: "{{ aap_content_repository.owner }}"
+          password: "{{ secrets_values.github_token }}"
+      - name: "{{ aap_content_event_stream_credential }}"
+        description: The token ServiceNow sends in a header with every event.
+        organization: "{{ aap_content_organisation }}"
+        credential_type: Token Event Stream
+        inputs:
+          auth_type: token
+          token: "{{ aap_content_stream_token }}"
+          http_header_key: "{{ aap_content_event_stream_header }}"
+  no_log: true
+
+- name: Declare the trigger
+  ansible.builtin.set_fact:
+    aap_content_cfg_eda_projects:
+      - name: "{{ aap_content_project_name }}"
+        description: The demo repository, read with a read-only token (DD16).
+        organization: "{{ aap_content_organisation }}"
+        url: "{{ aap_content_repository.url }}"
+        scm_branch: "{{ aap_content_repository.branch }}"
+        credential: "{{ aap_content_github_credential }}"
+        sync: true
+
+    aap_content_cfg_eda_decision_environments:
+      - name: "{{ aap_content_de_name }}"
+        description: The supported decision environment named by the installed AAP operator, pinned by digest.
+        organization: "{{ aap_content_organisation }}"
+        image_url: "{{ aap_content_de_image }}"
+
+    aap_content_cfg_eda_event_streams:
+      - name: "{{ aap_content_event_stream_name }}"
+        organization: "{{ aap_content_organisation }}"
+        credential_name: "{{ aap_content_event_stream_credential }}"
+        forward_events: true
+
+    aap_content_cfg_eda_rulebook_activations:
+      - name: "{{ aap_content_activation_name }}"
+        description: Launches the enrichment workflow for each qualifying incident ServiceNow posts.
+        organization: "{{ aap_content_organisation }}"
+        project: "{{ aap_content_project_name }}"
+        rulebook: "{{ aap_content_rulebook }}"
+        decision_environment: "{{ aap_content_de_name }}"
+        eda_credentials: ["{{ aap_content_eda_aap_credential }}"]
+        event_streams:
+          - source_name: "{{ aap_content_rulebook_source }}"
+            event_stream: "{{ aap_content_event_stream_name }}"
+        restart_policy: on-failure
+        enabled: true
