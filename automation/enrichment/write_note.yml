@@ -20,13 +20,15 @@
       ansible.builtin.include_role:
         name: demo.aiops.enrichment_call
       vars:
+        # Every field as a string: the rulebook can pass a number, such as priority 3, which the
+        # service's contract rejects.
         enrichment_call_incident:
-          sys_id: "{{ incident_sys_id }}"
-          number: "{{ incident_number }}"
-          short_description: "{{ short_description | default('') | truncate(160) }}"
-          cmdb_ci: "{{ cmdb_ci | default('') }}"
-          priority: "{{ priority | default('') }}"
-          opened_at: "{{ opened_at | default('') }}"
+          sys_id: "{{ incident_sys_id | string }}"
+          number: "{{ incident_number | string }}"
+          short_description: "{{ short_description | default('') | string | truncate(160) }}"
+          cmdb_ci: "{{ cmdb_ci | default('') | string }}"
+          priority: "{{ priority | default('') | string }}"
+          opened_at: "{{ opened_at | default('') | string }}"
         enrichment_call_references: "workflow job {{ awx_workflow_job_id | default('n/a') }} | event {{ event_id | default('n/a') }}"
 
     - name: Write the work note
