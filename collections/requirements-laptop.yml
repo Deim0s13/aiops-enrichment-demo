@@ -4,3 +4,7 @@
 collections:
   - name: containers.podman
     version: ">=1.16.0"
+  # For the secrets role in laptop-side playbooks that read Vault (05_execution_environment.yml).
+  # Same version as the execution environment; needs the hvac Python package (laptop-setup step 1).
+  - name: community.hashi_vault
+    version: "==7.1.0"

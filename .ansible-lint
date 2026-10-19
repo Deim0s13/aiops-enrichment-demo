@@ -12,6 +12,8 @@ mock_modules:
   - community.hashi_vault.vault_kv2_get
   - community.hashi_vault.vault_login
   - containers.podman.podman_container
+  - containers.podman.podman_image
+  - containers.podman.podman_image_info
   - containers.podman.podman_volume
   - kubernetes.core.k8s
   - kubernetes.core.k8s_info

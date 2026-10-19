@@ -14,6 +14,7 @@ Sections are added as each phase is implemented. Phases 01 to 03 are implemented
 | 6 | Phase 02: OpenShift AI checked, Connectivity Link installed, PostgreSQL deployed, Models-as-a-Service and MLflow enabled, the model served and published, the enrichment service given governed access, and the access checks passed | About 15 minutes, plus up to 30 for the first model start |
 | 7 | Phase 03: AAP operator installed, the platform running with Controller and Event-Driven Ansible, and its subscription attached | About 20 minutes on the first run |
 | 8 | Phase 04: ServiceNow incident fields, assignment group, custom roles and service identities, with their passwords in the cluster | About 2 minutes |
+| 9 | Phase 05, first step: the execution environment published to the cluster's registry | A few minutes the first time, depending on your upload speed |
 
 Run each command on its own line. Pasting several lines at once, or a line containing `read`, can go wrong in zsh.
 
@@ -263,6 +264,23 @@ Each record is found first, created if missing and changed only where it differs
 ```
 
 On a rerun, every record line reads `none created; none updated`, each identity's `stored password works`, the checks pass again and the play recap shows `changed=0`.
+
+## 9 Phase 05, first step: publish the execution environment
+
+AAP runs the demo's automation in the execution environment you built on your laptop (DD17). This step pushes it to the cluster's internal registry. It runs with `ansible-playbook`, not `ansible-navigator`, because it uses your laptop's Podman, the same way as `00_secrets.yml`. It reads the cluster secrets from Vault itself, so your laptop needs the Vault collection and its Python library (laptop-setup step 1; on an older setup, run `pip install hvac` and `ansible-galaxy collection install -r collections/requirements-laptop.yml` once):
+
+```bash
+ansible-playbook playbooks/05_execution_environment.yml
+```
+
+What it does (role `ee_publish`):
+
+1. **Finds the image** `localhost/aiops-demo-ee:latest` on your laptop, and stops if you have not built it.
+2. **Gives the registry a route**, if it has none, so the laptop can reach it. OpenShift's registry is internal by default.
+3. **Pushes the image** to `aap/aiops-demo-ee`, unless the cluster already has this build of it. The push uses your cluster token through a private auth file that is removed straight after, so the token never appears on a command line. The first push uploads the whole image, which takes a few minutes; later pushes only send changed layers.
+4. **Reports the address AAP will pull**, inside the cluster and pinned by digest, for example `image-registry.openshift-image-registry.svc:5000/aap/aiops-demo-ee@sha256:...`. AAP's job pods run in the `aap` namespace, so they can pull it without a pull secret.
+
+On a rerun, the image is `already in the cluster` and the recap shows `changed=0`. Rerun this step whenever you rebuild the execution environment.
 
 ## Finish your session
 

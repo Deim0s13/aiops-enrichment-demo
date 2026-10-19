@@ -40,7 +40,7 @@ podman login registry.connect.redhat.com
 brew install python@3.14
 python3.14 -m venv ~/.venvs/aiops-demo
 source ~/.venvs/aiops-demo/bin/activate
-pip install ansible-core ansible-navigator ansible-builder pre-commit
+pip install ansible-core ansible-navigator ansible-builder pre-commit hvac
 
 cd ~/Projects/aiops-enrichment-demo
 ansible-galaxy collection install -r collections/requirements-laptop.yml

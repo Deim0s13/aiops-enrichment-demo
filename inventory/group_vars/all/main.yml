@@ -39,6 +39,12 @@ demo_repository:
   name: aiops-enrichment-demo
   branch: main
 
+# The execution environment AAP runs the demo's automation in: the image built on the laptop,
+# published to the cluster's internal registry by playbooks/05_execution_environment.yml (DD17).
+demo_execution_environment:
+  local_image: localhost/aiops-demo-ee:latest
+  name: aiops-demo-ee
+
 # ServiceNow (phase 04). The trigger matches incidents in this group and category (design section 5.1).
 demo_servicenow:
   assignment_group: ACME Payments On-call

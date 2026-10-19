@@ -1,6 +1,7 @@
 ---
 # Full build of a fresh demo environment. Run one phase with --tags <phase>.
-# playbooks/00_secrets.yml is not included: it runs once on the laptop with --ee false.
+# playbooks/00_secrets.yml and playbooks/05_execution_environment.yml are not included: they run on
+# the laptop with ansible-playbook, outside the execution environment. Run the second before AAP content.
 
 - name: Preflight
   ansible.builtin.import_playbook: playbooks/00_preflight.yml

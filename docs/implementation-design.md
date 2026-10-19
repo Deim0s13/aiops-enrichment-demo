@@ -315,6 +315,7 @@ The no-scripting rule applies to deployment and configuration. The enrichment se
 | 02 | `02_openshift_ai.yml` | PostgreSQL; the AI platform: Red Hat Connectivity Link, Models-as-a-Service and MLflow; the model as an `LLMInferenceService`; and the enrichment service onboarded with its policy, subscription and API key, checked through the gateway (DD14, DD15) |
 | 03 | `03_aap.yml` | AAP operator (namespace-scoped, `stable-2.7`), the platform with automation controller and Event-Driven Ansible, and the subscription manifest from the operator's Vault |
 | 04 | `04_servicenow.yml` | PDI incident fields, assignment group, custom roles with field-level access rules, service identities, notification and, from M2 part 2, the business rule |
+| 05 | `05_execution_environment.yml` | Run on the laptop with `ansible-playbook`: publishes the laptop-built execution environment to the cluster's internal registry, pinned by digest (DD17) |
 | 05 | `05_aap_content.yml` | Projects, credentials, job templates, workflow, catalogue and rulebook activations, declared with `infra.aap_configuration`; writes the EDA event stream address and token back to ServiceNow |
 | 06 | `06_workload.yml` | Sample service, alert rules and Alertmanager routing |
 | 07 | `07_knowledge.yml` | Knowledge index and ingestion of the approved corpus |

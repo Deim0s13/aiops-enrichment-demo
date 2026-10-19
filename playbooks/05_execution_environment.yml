@@ -1,0 +1,35 @@
+---
+# Phase 05, first step: publish the execution environment built on the laptop to the cluster's
+# internal registry, where AAP pulls it from (DD17). Runs on the laptop, outside the execution
+# environment, because it pushes from the laptop's Podman:
+#   ansible-playbook playbooks/05_execution_environment.yml
+#
+# Not part of site.yml, which runs inside the execution environment. Safe to rerun: an unchanged
+# image is not pushed again. Rerun it after rebuilding the execution environment.
+
+- name: "Phase 05 | Execution environment: publish to the cluster's registry"
+  hosts: localhost
+  gather_facts: false
+  tags: [execution_environment]
+  vars:
+    # On the laptop, Vault is at 127.0.0.1; host.containers.internal only resolves inside a container.
+    demo_vault_addr: "{{ lookup('ansible.builtin.env', 'AIOPS_VAULT_ADDR', default='http://127.0.0.1:8200') }}"
+
+  tasks:
+    - name: Resolve the cluster secrets
+      ansible.builtin.include_role:
+        name: secrets
+      vars:
+        secrets_groups: [cluster]
+
+    - name: Publish the execution environment
+      ansible.builtin.include_role:
+        name: ee_publish
+      vars:
+        ee_publish_local_image: "{{ demo_execution_environment.local_image }}"
+        ee_publish_namespace: "{{ demo_namespaces.aap }}"
+        ee_publish_name: "{{ demo_execution_environment.name }}"
+
+    - name: Report what was found and changed
+      ansible.builtin.debug:
+        msg: "{{ ee_publish_report }}"

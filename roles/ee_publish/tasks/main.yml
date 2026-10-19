@@ -1,0 +1,186 @@
+---
+# Every call to the cluster API carries the token, so each is no_log and its result reduced to the
+# fields needed before anything is reported.
+
+- name: Find the execution environment built on this laptop
+  containers.podman.podman_image_info:
+    name: "{{ ee_publish_local_image }}"
+  register: ee_publish_local
+
+- name: Stop if it has not been built
+  ansible.builtin.assert:
+    that: ee_publish_local.images | length > 0
+    fail_msg: >-
+      There is no image {{ ee_publish_local_image }} on this laptop. Build it as in step 4 of docs/laptop-setup.md.
+    quiet: true
+
+- name: Prepare the cluster connection
+  ansible.builtin.set_fact:
+    ee_publish_local_id: "{{ ee_publish_local.images[0].Id }}"
+    ee_publish_api: "{{ secrets_values.cluster_api_url | regex_replace('/$', '') }}"
+    ee_publish_stream_path: >-
+      /apis/image.openshift.io/v1/namespaces/{{ ee_publish_namespace }}/imagestreams/{{ ee_publish_name }}
+    ee_publish_report: []
+
+- name: Read the image registry's settings
+  ansible.builtin.uri:
+    url: "{{ ee_publish_api }}/apis/imageregistry.operator.openshift.io/v1/configs/cluster"
+    headers:
+      Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+    validate_certs: "{{ demo_cluster_validate_certs }}"
+    ca_path: "{{ secrets_cluster_ca_file | default(omit) }}"
+    timeout: 20
+  register: ee_publish_registry
+  until: ee_publish_registry is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Keep only whether the registry has a route
+  ansible.builtin.set_fact:
+    ee_publish_route_enabled: "{{ ee_publish_registry.json.spec.defaultRoute | default(false) | bool }}"
+  no_log: true
+
+- name: Give the registry a route, so the laptop can push to it
+  ansible.builtin.uri:
+    url: "{{ ee_publish_api }}/apis/imageregistry.operator.openshift.io/v1/configs/cluster"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+      Content-Type: application/merge-patch+json
+    body_format: json
+    body:
+      spec:
+        defaultRoute: true
+    validate_certs: "{{ demo_cluster_validate_certs }}"
+    ca_path: "{{ secrets_cluster_ca_file | default(omit) }}"
+    timeout: 20
+  when: not ee_publish_route_enabled
+  changed_when: true
+  no_log: true
+
+- name: Wait for the registry's route
+  ansible.builtin.uri:
+    url: "{{ ee_publish_api }}/apis/route.openshift.io/v1/namespaces/openshift-image-registry/routes/default-route"
+    headers:
+      Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+    validate_certs: "{{ demo_cluster_validate_certs }}"
+    ca_path: "{{ secrets_cluster_ca_file | default(omit) }}"
+    status_code: [200, 404]
+    timeout: 20
+  register: ee_publish_route
+  until: ee_publish_route.status | default(-1) == 200
+  retries: "{{ ee_publish_route_retries }}"
+  delay: "{{ ee_publish_route_delay }}"
+  no_log: true
+
+- name: Read the image stream
+  ansible.builtin.uri:
+    url: "{{ ee_publish_api }}{{ ee_publish_stream_path }}"
+    headers:
+      Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+    validate_certs: "{{ demo_cluster_validate_certs }}"
+    ca_path: "{{ secrets_cluster_ca_file | default(omit) }}"
+    status_code: [200, 404]
+    timeout: 20
+  register: ee_publish_stream
+  until: ee_publish_stream is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Keep only the route and the image last pushed
+  ansible.builtin.set_fact:
+    ee_publish_route_host: "{{ ee_publish_route.json.spec.host }}"
+    ee_publish_pushed_id: >-
+      {{ ((ee_publish_stream.json | default({})).metadata | default({})).annotations
+         | default({}) | dict2items | selectattr('key', 'equalto', ee_publish_annotation)
+         | map(attribute='value') | first | default('') }}
+  no_log: true
+
+- name: Push the image, because the cluster does not have this build of it
+  when: ee_publish_pushed_id != ee_publish_local_id
+  block:
+    # podman's own login and --creds options put the token on the command line, where other
+    # processes can see it. A private, short-lived auth file does not.
+    - name: Create a private auth file for the push
+      ansible.builtin.tempfile:
+        suffix: .auth.json
+      register: ee_publish_authfile
+      changed_when: false
+
+    - name: Write the cluster token into the auth file
+      ansible.builtin.copy:
+        dest: "{{ ee_publish_authfile.path }}"
+        mode: "0600"
+        content: >-
+          {{ {'auths': {ee_publish_route_host: {'auth': ('aiops-demo:' ~ secrets_values.cluster_api_token) | b64encode}}} | to_json }}
+      changed_when: false
+      no_log: true
+
+    - name: Push the image to the cluster's registry
+      containers.podman.podman_image:
+        name: "{{ ee_publish_local_image }}"
+        pull: false
+        push: true
+        auth_file: "{{ ee_publish_authfile.path }}"
+        validate_certs: "{{ ee_publish_validate_certs }}"
+        push_args:
+          dest: "{{ ee_publish_route_host }}/{{ ee_publish_namespace }}/{{ ee_publish_name }}:{{ ee_publish_tag }}"
+
+    - name: Record which local image was pushed
+      ansible.builtin.uri:
+        url: "{{ ee_publish_api }}{{ ee_publish_stream_path }}"
+        method: PATCH
+        headers:
+          Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+          Content-Type: application/merge-patch+json
+        body_format: json
+        body:
+          metadata:
+            annotations: "{{ {ee_publish_annotation: ee_publish_local_id} }}"
+        validate_certs: "{{ demo_cluster_validate_certs }}"
+        ca_path: "{{ secrets_cluster_ca_file | default(omit) }}"
+        timeout: 20
+      changed_when: false
+      no_log: true
+
+  always:
+    - name: Remove the auth file
+      ansible.builtin.file:
+        path: "{{ ee_publish_authfile.path }}"
+        state: absent
+      when: ee_publish_authfile.path is defined
+      changed_when: false
+
+- name: Read the image's address inside the cluster
+  ansible.builtin.uri:
+    url: "{{ ee_publish_api }}{{ ee_publish_stream_path }}"
+    headers:
+      Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+    validate_certs: "{{ demo_cluster_validate_certs }}"
+    ca_path: "{{ secrets_cluster_ca_file | default(omit) }}"
+    timeout: 20
+  register: ee_publish_stream_after
+  until: >-
+    ee_publish_stream_after is not failed
+    and (ee_publish_stream_after.json.status.tags | default([]) | selectattr('tag', 'equalto', ee_publish_tag) | list | length > 0)
+  retries: 6
+  delay: 5
+  no_log: true
+
+# AAP pulls by digest, so a later push cannot change what a job runs without phase 05 knowing.
+# ['items'], not .items, which Jinja reads as the dictionary's items() method.
+- name: Keep only the image's address, pinned by digest
+  ansible.builtin.set_fact:
+    ee_publish_image: >-
+      {{ (ee_publish_stream_after.json.status.tags | selectattr('tag', 'equalto', ee_publish_tag) | first)['items'][0].dockerImageReference }}
+  no_log: true
+
+- name: Report
+  ansible.builtin.set_fact:
+    ee_publish_report:
+      - "Registry route: {{ 'created' if not ee_publish_route_enabled else 'already there' }} ({{ ee_publish_route_host }})"
+      - >-
+        Execution environment: {{ 'pushed' if ee_publish_pushed_id != ee_publish_local_id else 'already in the cluster' }},
+        local image {{ ee_publish_local_id[:12] }}; AAP pulls {{ ee_publish_image }}

@@ -1,0 +1,10 @@
+---
+# Publishes the execution environment built on the laptop to the cluster's internal registry (DD17).
+# The local image, the namespace and the image name are inputs (meta/argument_specs.yml).
+ee_publish_tag: latest
+ee_publish_validate_certs: true
+# The registry's route is created by the image registry operator once it is enabled.
+ee_publish_route_retries: 30
+ee_publish_route_delay: 10
+# Records which local image was last pushed, so an unchanged image is not pushed again.
+ee_publish_annotation: aiops-demo/source-image-id

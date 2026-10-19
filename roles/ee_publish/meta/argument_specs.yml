@@ -1,0 +1,37 @@
+---
+argument_specs:
+  main:
+    short_description: Publish the laptop-built execution environment to the cluster's registry
+    description:
+      - Runs on the laptop, outside the execution environment, because it pushes an image from the laptop's Podman.
+      - Enables the internal registry's route if needed, pushes the image only when the local image has changed, and
+        reports the image's address inside the cluster, pinned by digest, for AAP to pull.
+      - Reads the cluster API URL and token from secrets_values (group cluster).
+    options:
+      ee_publish_local_image:
+        type: str
+        required: true
+        description: The image built on the laptop, for example localhost/aiops-demo-ee:latest.
+      ee_publish_namespace:
+        type: str
+        required: true
+        description: Namespace whose image stream receives the image. AAP's job pods run there, so they can pull it.
+      ee_publish_name:
+        type: str
+        required: true
+        description: Name of the image stream.
+      ee_publish_tag:
+        type: str
+        description: Tag to push.
+      ee_publish_validate_certs:
+        type: bool
+        description: Verify the registry route's certificate when pushing.
+      ee_publish_route_retries:
+        type: int
+        description: How many times to check for the registry's route.
+      ee_publish_route_delay:
+        type: int
+        description: Seconds between those checks.
+      ee_publish_annotation:
+        type: str
+        description: Image stream annotation that records the local image ID last pushed.
