@@ -1,0 +1,29 @@
+---
+argument_specs:
+  main:
+    short_description: Check the demo against its M2 acceptance criteria
+    description:
+      - "V1 a qualifying incident gets its note within the target; V2 its own update does not retrigger it;
+        V3 a retried workflow adds no second note; V4 an engineer's edit during enrichment survives;
+        V5 with the enrichment service stopped, the incident gets the unavailable note and stays with its team."
+      - V5 scales the enrichment service to zero for a minute or two and always restores it. Do not run it mid-demo.
+    options:
+      verify_assignment_group:
+        type: str
+        required: true
+        description: The on-call group the trigger matches.
+      verify_category:
+        type: str
+        required: true
+        description: The category the trigger matches.
+      verify_aap_namespace:
+        type: str
+        required: true
+        description: The AAP namespace, which holds the svc-monitoring and AAP admin Secrets.
+      verify_enrichment_namespace:
+        type: str
+        required: true
+        description: The enrichment service's namespace.
+      verify_cleanup:
+        type: bool
+        description: Delete this run's incidents and their emails at the end, instead of keeping them.

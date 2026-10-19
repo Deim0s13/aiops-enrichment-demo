@@ -1,0 +1,49 @@
+---
+- name: Read the svc-monitoring credentials, the AAP admin password and the AAP route
+  kubernetes.core.k8s_info:
+    api_version: "{{ item.api_version }}"
+    kind: "{{ item.kind }}"
+    namespace: "{{ verify_aap_namespace }}"
+    name: "{{ item.name }}"
+  loop:
+    - { api_version: v1, kind: Secret, name: "{{ verify_monitoring_secret }}" }
+    - { api_version: v1, kind: Secret, name: "{{ verify_aap_instance_name }}-admin-password" }
+    - { api_version: route.openshift.io/v1, kind: Route, name: "{{ verify_aap_instance_name }}" }
+  loop_control:
+    label: "{{ item.kind }} {{ item.name }}"
+  register: verify_read
+  until: verify_read is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Keep only what the checks need
+  ansible.builtin.set_fact:
+    verify_sn: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}"
+    verify_admin:
+      host: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}"
+      username: "{{ secrets_values.servicenow_admin_username }}"
+      password: "{{ secrets_values.servicenow_admin_password }}"
+    verify_monitoring_password: "{{ verify_read.results[0].resources[0].data.password | b64decode }}"
+    verify_aap_password: "{{ verify_read.results[1].resources[0].data.password | b64decode }}"
+    verify_aap_url: "https://{{ verify_read.results[2].resources[0].spec.host }}"
+    verify_run: "{{ verify_prefix }} {{ now(utc=true, fmt='%Y%m%d%H%M%S') }}"
+    verify_started: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+    verify_incidents: {}
+    verify_results: []
+  no_log: true
+
+- name: Find the on-call group
+  servicenow.itsm.api_info:
+    instance: "{{ verify_admin }}"
+    resource: sys_user_group
+    sysparm_query: "name={{ verify_assignment_group }}"
+    columns: [sys_id]
+  register: verify_group
+  until: verify_group is not failed and verify_group.record | length == 1
+  retries: 3
+  delay: 5
+
+- name: Remember the group
+  ansible.builtin.set_fact:
+    verify_group_id: "{{ verify_group.record[0].sys_id }}"

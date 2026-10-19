@@ -2,7 +2,7 @@
 
 This guide builds the demo on a demo environment, one phase at a time. Follow it for every new environment. It assumes [laptop-setup.md](laptop-setup.md) is complete: Vault holds your entitlements and ServiceNow credentials, the execution environment is built, and preflight passes with the cluster checks skipped.
 
-Sections are added as each phase is implemented. Phases 01 to 04 and 07 are implemented, and phase 06 is in progress (M2). Phases 05 (knowledge) and 08 (workload) are not implemented yet.
+Sections are added as each phase is implemented. Phases 01 to 04, 06 and 07 are implemented (M2 complete). Phases 05 (knowledge) and 08 (workload) are not implemented yet.
 
 | Step | What you end up with | Time |
 |---|---|---|
@@ -329,6 +329,34 @@ What it does (role `aap_content`, the automation team's part). The content is de
    Outcomes are read back from ServiceNow, not trusted from AAP. A failed check stops the play.
 9. **Connects ServiceNow to the event stream** (role `servicenow`, entry point `trigger`): an Outbound REST Message named *ACME AI enrichment event stream* holds the address and token, which change with every environment, and an asynchronous business rule, *ACME trigger: AI enrichment*, posts each new incident in the on-call group, category Software, priority 2 or 3 and with no enrichment state yet. You can see each call under System Logs > Outbound HTTP Requests.
 10. **Proves it hands-off.** As `svc-monitoring`, the identity the integration stand-in will use, it raises a qualifying incident and the same incident at priority 4. Nothing else is touched: the first must be enriched and its "AI enrichment ready" email queued in the Outbox, and the second must be left alone. Both are removed afterwards, with their emails.
+
+## 12 Verify, and reset between demos
+
+Check the demo against its M2 acceptance criteria at any time after a build:
+
+```bash
+ansible-navigator run verify.yml
+```
+
+It raises incidents as `svc-monitoring`, as the integration will, and reads the outcome back from ServiceNow:
+
+| Check | Passes when |
+|---|---|
+| V1 | A qualifying incident gets its AI note within 60 seconds of opening; the report shows the time |
+| V2 | The enrichment's own update does not retrigger the workflow: after a further 30 seconds there is still one note and one workflow run |
+| V3 | Running the workflow again for the same incident adds no second note |
+| V4 | An engineer's comment and priority change made during enrichment are kept |
+| V5 | With the enrichment service stopped, the incident gets the "AI enrichment unavailable" note and stays with its team |
+
+V5 stops the enrichment service for a minute or two and always starts it again, so do not run `verify.yml` in the middle of a demo. Its incidents are kept so you can show their notes in ServiceNow; add `-e verify_cleanup=true` to delete them instead.
+
+Before a demo, close the incidents earlier runs left open:
+
+```bash
+ansible-navigator run reset.yml
+```
+
+It resolves and closes every open incident `svc-monitoring` raised in the on-call group, with a close note saying the reset closed it, and deletes anything the build checks left behind. Nothing else in the PDI is touched.
 
 ## Finish your session
 

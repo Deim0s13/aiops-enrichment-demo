@@ -117,10 +117,12 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 | M2.3 | Phase 07 (part): project, credentials, EDA activation and the enrichment workflow with its failure branch. Built and proved with a hand-crafted event first; the ServiceNow business rule that pushes to the event stream, and the write-back of its address and token, come last, so each link is tested alone before they are joined. Phase 07 done (2026-10-20): all five checks pass, from a real event through the event stream to the work note, the failure branch, a retry that adds nothing and the trigger user's limits. The business rule and the REST Message that carries the event stream's address and token done (2026-10-20): an incident raised as svc-monitoring is enriched with no other action, its "AI enrichment ready" email is queued, and an incident outside the rule is left alone | |
 | M2.4 | Role `itsm_worknote`: idempotent, AI-labelled work note and enrichment fields. Written (2026-10-19), with a placeholder note until M2.5 | |
 | M2.5 | Phase 06 (part): enrichment service skeleton returning a fixed, schema-valid response, built in-cluster, with network policies. Done (2026-10-20): TLS from the service CA, its own API token, checks from inside the cluster; the workflow's note step asks it and validates its answer, and every phase 07 check passes through it, hands-off included. Phases renumbered by dependency: 05 knowledge, 06 enrichment service, 07 AAP content and the trigger, 08 workload | |
-| M2.6 | Start `verify.yml` with the idempotency, recursion and concurrent update checks | |
-| M2.7 | Start `reset.yml`: close demo incidents and clear enrichment fields | |
+| M2.6 | Start `verify.yml` with the idempotency, recursion and concurrent update checks. Written (2026-10-20): V1 time to note, V2 no retrigger, V3 retry, V4 concurrent update, V5 service stopped. All five pass (2026-10-20); the first note arrived 17 seconds after the incident opened | |
+| M2.7 | Start `reset.yml`: close demo incidents and clear enrichment fields. Done (2026-10-20): resolves and closes the demo's own incidents with a close note, rather than clearing their fields, so their history stays; deletes build-check leftovers | |
 
 **Exit criteria:** a manually raised incident gets exactly one work note within a minute. Rerunning the workflow adds no duplicate. The update does not retrigger the workflow. Stopping the enrichment service produces an "enrichment unavailable" note, and the incident stays with its team.
+
+**Status: complete (2026-10-20).** Every exit criterion is met and checked by `verify.yml`, with incidents raised as `svc-monitoring` rather than by hand: one note, 17 seconds after the incident opened; no duplicate on a retry; no retrigger from the enrichment's own update; an engineer's concurrent edit kept; and an "AI enrichment unavailable" note, with the incident left with its team, when the enrichment service is stopped.
 
 **Estimate:** 2 days.
 

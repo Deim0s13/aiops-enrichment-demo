@@ -1,0 +1,52 @@
+---
+- name: Report the results
+  ansible.builtin.set_fact:
+    verify_report: "{{ verify_lines | from_json }}"
+  vars:
+    verify_lines: >-
+      {%- set ns = namespace(lines=[]) -%}
+      {%- for r in verify_results -%}
+      {%- set ns.lines = ns.lines + [r.id ~ (' passed: ' if r.passed | bool else ' FAILED: ') ~ r.check ~ ' (' ~ r.detail ~ ')'] -%}
+      {%- endfor -%}
+      {%- set ns.lines = ns.lines + [('Incidents deleted: ' if verify_cleanup | bool else 'Incidents kept for review (reset.yml closes them): ')
+            ~ verify_incidents.values() | map(attribute='number') | join(', ')] -%}
+      {{ ns.lines | to_json }}
+
+- name: Delete this run's incidents and their emails
+  when: verify_cleanup | bool
+  block:
+    - name: Find the emails ServiceNow queued for them
+      servicenow.itsm.api_info:
+        instance: "{{ verify_admin }}"
+        resource: sys_email
+        sysparm_query: "instanceIN{{ verify_incidents.values() | map(attribute='sys_id') | join(',') }}"
+        columns: [sys_id]
+      register: verify_emails
+
+    - name: Delete the emails
+      servicenow.itsm.api:
+        instance: "{{ verify_admin }}"
+        resource: sys_email
+        action: delete
+        sys_id: "{{ item }}"
+      loop: "{{ verify_emails.record | map(attribute='sys_id') | list }}"
+      changed_when: false
+
+    - name: Delete the incidents
+      servicenow.itsm.api:
+        instance: "{{ verify_admin }}"
+        resource: incident
+        action: delete
+        sys_id: "{{ item }}"
+      loop: "{{ verify_incidents.values() | map(attribute='sys_id') | list }}"
+      changed_when: false
+
+- name: Show the results
+  ansible.builtin.debug:
+    msg: "{{ verify_report }}"
+
+- name: Stop if a check failed
+  ansible.builtin.assert:
+    that: verify_results | map(attribute='passed') | map('bool') | reject | list | length == 0
+    fail_msg: "{{ verify_report | select('search', ' FAILED: ') | join('; ') }}"
+    quiet: true

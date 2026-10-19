@@ -1,0 +1,22 @@
+---
+# Waits until an incident's enrichment state is final. Input: verify_wait_key.
+- name: "Wait for the enrichment outcome: {{ verify_wait_key }}"
+  servicenow.itsm.api_info:
+    instance: "{{ verify_admin }}"
+    resource: incident
+    sysparm_query: "sys_id={{ verify_incidents[verify_wait_key].sys_id }}"
+    columns: [sys_id, u_ai_enrichment_state, priority, assignment_group, sys_updated_on]
+    exclude_reference_link: true
+  register: verify_waited
+  until: >-
+    verify_waited is not failed
+    and (verify_waited.record | map(attribute='u_ai_enrichment_state') | first | default('')) in ['complete', 'insufficient_evidence', 'unavailable']
+  retries: "{{ verify_wait_retries }}"
+  delay: "{{ verify_wait_delay }}"
+  failed_when: false
+
+- name: "Remember the outcome: {{ verify_wait_key }}"
+  ansible.builtin.set_fact:
+    verify_incidents: >-
+      {{ verify_incidents | combine({verify_wait_key: verify_incidents[verify_wait_key]
+         | combine(verify_waited.record | default([{}]) | first | default({}))}) }}

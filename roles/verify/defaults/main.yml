@@ -1,0 +1,16 @@
+---
+# verify.yml: the M2 acceptance checks (design section 9), run any time after a build. Incidents are
+# raised as svc-monitoring, as the integration stand-in will raise them, and read back as the
+# ServiceNow administrator.
+verify_prefix: ACME verify
+# Keep the incidents to show their notes in ServiceNow; reset.yml closes them. True deletes them.
+verify_cleanup: false
+verify_note_target_seconds: 60
+# After an incident completes, how long to watch for a second note or workflow run.
+verify_quiet_seconds: 30
+verify_wait_retries: 30
+verify_wait_delay: 5
+verify_workflow_name: AI incident enrichment
+verify_enrichment_deployment: enrichment
+verify_monitoring_secret: servicenow-svc-monitoring
+verify_aap_instance_name: aap

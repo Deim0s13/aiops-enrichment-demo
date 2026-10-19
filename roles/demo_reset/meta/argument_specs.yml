@@ -1,0 +1,13 @@
+---
+argument_specs:
+  main:
+    short_description: Close the demo's incidents and remove build-check leftovers
+    description:
+      - Resolves and closes every open incident svc-monitoring raised in the on-call group, with a close note.
+      - Deletes incidents the build checks left behind, and the emails ServiceNow queued for them.
+      - Touches nothing else in the PDI.
+    options:
+      demo_reset_assignment_group:
+        type: str
+        required: true
+        description: The on-call group whose demo incidents are closed.

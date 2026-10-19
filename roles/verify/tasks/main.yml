@@ -1,0 +1,15 @@
+---
+- name: Prepare the connections
+  ansible.builtin.include_tasks: setup.yml
+
+- name: "V1 to V3: a qualifying incident, its timing, no retrigger and a safe retry"
+  ansible.builtin.include_tasks: lifecycle.yml
+
+- name: "V4: an engineer's edit during enrichment"
+  ansible.builtin.include_tasks: concurrent.yml
+
+- name: "V5: the enrichment service unavailable"
+  ansible.builtin.include_tasks: unavailable.yml
+
+- name: Report and judge
+  ansible.builtin.include_tasks: report.yml

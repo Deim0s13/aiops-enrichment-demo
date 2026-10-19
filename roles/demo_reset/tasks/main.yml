@@ -1,0 +1,118 @@
+---
+- name: Prepare the ServiceNow connection
+  ansible.builtin.set_fact:
+    demo_reset_admin:
+      host: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}"
+      username: "{{ secrets_values.servicenow_admin_username }}"
+      password: "{{ secrets_values.servicenow_admin_password }}"
+  no_log: true
+
+- name: Find the group, the identity and the resolution codes
+  servicenow.itsm.api_info:
+    instance: "{{ demo_reset_admin }}"
+    resource: "{{ item.resource }}"
+    sysparm_query: "{{ item.query }}"
+    columns: "{{ item.columns }}"
+  loop:
+    - { resource: sys_user_group, query: "name={{ demo_reset_assignment_group }}", columns: [sys_id] }
+    - { resource: sys_user, query: "user_name={{ demo_reset_identity }}", columns: [sys_id] }
+    - { resource: sys_choice, query: "name=incident^element=close_code^inactive=false^language=en", columns: [value] }
+  loop_control:
+    label: "{{ item.resource }}"
+  register: demo_reset_lookups
+  until: demo_reset_lookups is not failed
+  retries: 3
+  delay: 5
+
+- name: Stop if phase 04 has not run against this PDI
+  ansible.builtin.assert:
+    that:
+      - demo_reset_lookups.results[0].record | length == 1
+      - demo_reset_lookups.results[1].record | length == 1
+    fail_msg: "The group {{ demo_reset_assignment_group }} or the identity {{ demo_reset_identity }} is missing. Run playbooks/04_servicenow.yml."
+    quiet: true
+
+- name: Choose the resolution code
+  ansible.builtin.set_fact:
+    demo_reset_close_code: >-
+      {{ (demo_reset_close_codes | select('in', demo_reset_lookups.results[2].record | map(attribute='value') | list) | list
+          + demo_reset_lookups.results[2].record | map(attribute='value') | list) | first | default('') }}
+
+- name: Find the demo's open incidents
+  servicenow.itsm.api_info:
+    instance: "{{ demo_reset_admin }}"
+    resource: incident
+    sysparm_query: >-
+      assignment_group={{ demo_reset_lookups.results[0].record[0].sys_id
+      }}^opened_by={{ demo_reset_lookups.results[1].record[0].sys_id }}^active=true
+    columns: [sys_id, number]
+  register: demo_reset_open
+  until: demo_reset_open is not failed
+  retries: 3
+  delay: 5
+
+- name: Resolve them, with the close note
+  servicenow.itsm.api:
+    instance: "{{ demo_reset_admin }}"
+    resource: incident
+    action: patch
+    sys_id: "{{ item.sys_id }}"
+    data:
+      state: "6"
+      close_code: "{{ demo_reset_close_code }}"
+      close_notes: "{{ demo_reset_close_notes }}"
+  loop: "{{ demo_reset_open.record }}"
+  loop_control:
+    label: "{{ item.number }}"
+
+- name: Close them
+  servicenow.itsm.api:
+    instance: "{{ demo_reset_admin }}"
+    resource: incident
+    action: patch
+    sys_id: "{{ item.sys_id }}"
+    data:
+      state: "7"
+  loop: "{{ demo_reset_open.record }}"
+  loop_control:
+    label: "{{ item.number }}"
+
+- name: Find what the build checks left behind
+  servicenow.itsm.api_info:
+    instance: "{{ demo_reset_admin }}"
+    resource: incident
+    sysparm_query: "short_descriptionSTARTSWITH{{ demo_reset_check_prefix }}"
+    columns: [sys_id, number]
+  register: demo_reset_leftovers
+  until: demo_reset_leftovers is not failed
+  retries: 3
+  delay: 5
+
+- name: Find the emails queued for those
+  servicenow.itsm.api_info:
+    instance: "{{ demo_reset_admin }}"
+    resource: sys_email
+    sysparm_query: "instanceIN{{ demo_reset_leftovers.record | map(attribute='sys_id') | join(',') }}"
+    columns: [sys_id]
+  register: demo_reset_emails
+  when: demo_reset_leftovers.record | length > 0
+
+- name: Delete the build-check emails and incidents
+  servicenow.itsm.api:
+    instance: "{{ demo_reset_admin }}"
+    resource: "{{ item.0 }}"
+    action: delete
+    sys_id: "{{ item.1 }}"
+  loop: >-
+    {{ ['sys_email'] | product(demo_reset_emails.record | default([]) | map(attribute='sys_id')) | list
+       + ['incident'] | product(demo_reset_leftovers.record | map(attribute='sys_id')) | list }}
+  loop_control:
+    label: "{{ item.0 }} {{ item.1 }}"
+
+- name: Report
+  ansible.builtin.debug:
+    msg:
+      - >-
+        Closed {{ demo_reset_open.record | length }} demo incident(s){{ (': ' ~ demo_reset_open.record | map(attribute='number') | join(', '))
+        if demo_reset_open.record else '' }}; resolution code {{ demo_reset_close_code or 'none offered' }}
+      - "Deleted {{ demo_reset_leftovers.record | length }} build-check incident(s) and {{ demo_reset_emails.record | default([]) | length }} email(s)"

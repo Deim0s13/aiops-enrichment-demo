@@ -1,0 +1,51 @@
+---
+- name: Raise the incident for V4
+  ansible.builtin.include_tasks: raise.yml
+  vars:
+    verify_raise: { key: concurrent, label: "V4, engineer edits during enrichment" }
+
+# Straight after the incident is raised, while the workflow is starting: a comment and a higher
+# urgency, which makes the priority 2. Enrichment writes only its own fields, so both must survive.
+- name: Edit the incident as an engineer would, during enrichment
+  servicenow.itsm.api:
+    instance: "{{ verify_admin }}"
+    resource: incident
+    action: patch
+    sys_id: "{{ verify_incidents.concurrent.sys_id }}"
+    data:
+      comments: "{{ verify_run }}: engineer comment written during enrichment."
+      urgency: "1"
+  changed_when: false
+
+- name: Wait for its enrichment
+  ansible.builtin.include_tasks: wait.yml
+  vars:
+    verify_wait_key: concurrent
+
+- name: Read its comments
+  servicenow.itsm.api_info:
+    instance: "{{ verify_admin }}"
+    resource: sys_journal_field
+    sysparm_query: "element_id={{ verify_incidents.concurrent.sys_id }}^element=comments^valueLIKEengineer comment"
+    columns: [sys_id]
+  register: verify_comments
+  until: verify_comments is not failed
+  retries: 3
+  delay: 5
+
+- name: Read its notes
+  ansible.builtin.include_tasks: notes.yml
+  vars:
+    verify_notes_key: concurrent
+
+- name: Record V4
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{'id': 'V4', 'check': "an engineer's edit during enrichment is preserved",
+         'passed': verify_incidents.concurrent.u_ai_enrichment_state | default('') == 'complete'
+                   and verify_incidents.concurrent.priority | default('') | string == '2'
+                   and verify_comments.record | length == 1
+                   and verify_notes | selectattr('value', 'search', 'AI-generated enrichment') | list | length == 1,
+         'detail': verify_incidents.concurrent.number ~ ', priority ' ~ verify_incidents.concurrent.priority | default('?')
+                   ~ ', comment ' ~ ('kept' if verify_comments.record | length == 1 else 'missing')
+                   ~ ', state ' ~ (verify_incidents.concurrent.u_ai_enrichment_state | default('') or 'empty')}] }}

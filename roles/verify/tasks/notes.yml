@@ -1,0 +1,16 @@
+---
+# Reads an incident's work notes. Input: verify_notes_key. Sets verify_notes (newest first).
+- name: "Read the work notes: {{ verify_notes_key }}"
+  servicenow.itsm.api_info:
+    instance: "{{ verify_admin }}"
+    resource: sys_journal_field
+    sysparm_query: "element_id={{ verify_incidents[verify_notes_key].sys_id }}^element=work_notes^ORDERBYDESCsys_created_on"
+    columns: [sys_id, value, sys_created_on]
+  register: verify_notes_read
+  until: verify_notes_read is not failed
+  retries: 3
+  delay: 5
+
+- name: "Keep the notes: {{ verify_notes_key }}"
+  ansible.builtin.set_fact:
+    verify_notes: "{{ verify_notes_read.record }}"

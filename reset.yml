@@ -1,10 +1,24 @@
 ---
+# Back to a clean demo between runs:
+#   ansible-navigator run reset.yml
+# Resolves and closes the demo's own incidents (raised by svc-monitoring in the on-call group), with a
+# close note, and deletes anything the build checks left behind. Touches nothing else in the PDI.
+# From M3 it will also restart the sample service and clear its heap dumps.
+
 - name: Reset the demo to a clean state between runs
   hosts: localhost
   gather_facts: false
+  tags: [reset]
+
   tasks:
-    - name: Report that reset is not implemented yet
-      ansible.builtin.debug:
-        msg: >-
-          Reset is a stub. It will close demo incidents, clear enrichment fields,
-          restart the sample service and clear heap dumps.
+    - name: Resolve the ServiceNow secrets
+      ansible.builtin.include_role:
+        name: secrets
+      vars:
+        secrets_groups: [servicenow]
+
+    - name: Close the demo's incidents
+      ansible.builtin.include_role:
+        name: demo_reset
+      vars:
+        demo_reset_assignment_group: "{{ demo_servicenow.assignment_group }}"

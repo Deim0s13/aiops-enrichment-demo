@@ -1,0 +1,26 @@
+---
+# Raises one qualifying incident as svc-monitoring. Input: verify_raise with key and label.
+- name: "Raise a qualifying incident as svc-monitoring: {{ verify_raise.label }}"
+  ansible.builtin.uri:
+    url: "{{ verify_sn }}/api/now/table/incident?sysparm_fields=sys_id,number,sys_created_on"
+    method: POST
+    url_username: svc-monitoring
+    url_password: "{{ verify_monitoring_password }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+    body_format: json
+    body:
+      short_description: "{{ verify_run }}: {{ verify_raise.label }}"
+      description: Raised by verify.yml. reset.yml closes it.
+      impact: "2"
+      urgency: "2"
+      category: "{{ verify_category }}"
+      assignment_group: "{{ verify_group_id }}"
+    status_code: [201]
+  register: verify_raised
+  no_log: true
+
+- name: "Remember the incident: {{ verify_raise.label }}"
+  ansible.builtin.set_fact:
+    verify_incidents: "{{ verify_incidents | combine({verify_raise.key: verify_raised.json.result}) }}"

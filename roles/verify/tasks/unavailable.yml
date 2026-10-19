@@ -1,0 +1,80 @@
+---
+# Stops the enrichment service, raises an incident, and always starts the service again.
+- name: "V5 with the enrichment service stopped"
+  block:
+    - name: Stop the enrichment service
+      kubernetes.core.k8s:
+        state: patched
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ verify_enrichment_namespace }}"
+        name: "{{ verify_enrichment_deployment }}"
+        definition:
+          spec:
+            replicas: 0
+      changed_when: false
+
+    - name: Wait until no enrichment pod is running
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ verify_enrichment_namespace }}"
+        label_selectors: ["app={{ verify_enrichment_deployment }}"]
+      register: verify_pods
+      until: verify_pods is not failed and verify_pods.resources | length == 0
+      retries: 24
+      delay: 5
+      no_log: true
+
+    - name: Raise the incident for V5
+      ansible.builtin.include_tasks: raise.yml
+      vars:
+        verify_raise: { key: unavailable, label: "V5, enrichment service stopped" }
+
+    - name: Wait for its outcome
+      ansible.builtin.include_tasks: wait.yml
+      vars:
+        verify_wait_key: unavailable
+
+    - name: Read its notes
+      ansible.builtin.include_tasks: notes.yml
+      vars:
+        verify_notes_key: unavailable
+
+    - name: Record V5
+      ansible.builtin.set_fact:
+        verify_results: >-
+          {{ verify_results + [{'id': 'V5', 'check': 'with the service stopped, the incident gets the unavailable note and stays with its team',
+             'passed': verify_incidents.unavailable.u_ai_enrichment_state | default('') == 'unavailable'
+                       and verify_notes | selectattr('value', 'search', 'AI enrichment unavailable') | list | length == 1
+                       and verify_incidents.unavailable.assignment_group | default('') == verify_group_id,
+             'detail': verify_incidents.unavailable.number ~ ', state '
+                       ~ (verify_incidents.unavailable.u_ai_enrichment_state | default('') or 'empty') ~ ', '
+                       ~ ('still with ' ~ verify_assignment_group if verify_incidents.unavailable.assignment_group | default('') == verify_group_id
+                          else 'reassigned')}] }}
+
+  always:
+    - name: Start the enrichment service again
+      kubernetes.core.k8s:
+        state: patched
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ verify_enrichment_namespace }}"
+        name: "{{ verify_enrichment_deployment }}"
+        definition:
+          spec:
+            replicas: 1
+      changed_when: false
+
+    - name: Wait for the enrichment service to be ready again
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ verify_enrichment_namespace }}"
+        name: "{{ verify_enrichment_deployment }}"
+      register: verify_restored
+      until: >-
+        verify_restored is not failed
+        and (verify_restored.resources | map(attribute='status') | first | default({})).availableReplicas | default(0) >= 1
+      retries: 30
+      delay: 5
+      no_log: true

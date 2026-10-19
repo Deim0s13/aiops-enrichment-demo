@@ -1,0 +1,107 @@
+---
+- name: Raise the incident for V1 to V3
+  ansible.builtin.include_tasks: raise.yml
+  vars:
+    verify_raise: { key: lifecycle, label: "V1 to V3, qualifying incident" }
+
+- name: Wait for its enrichment
+  ansible.builtin.include_tasks: wait.yml
+  vars:
+    verify_wait_key: lifecycle
+
+- name: Read its notes
+  ansible.builtin.include_tasks: notes.yml
+  vars:
+    verify_notes_key: lifecycle
+
+- name: "V1: time from opening to the AI note"
+  ansible.builtin.set_fact:
+    verify_lifecycle_ai_notes: "{{ verify_notes | selectattr('value', 'search', 'AI-generated enrichment') | list }}"
+    verify_lifecycle_seconds: >-
+      {{ ((verify_notes | selectattr('value', 'search', 'AI-generated enrichment') | map(attribute='sys_created_on') | last
+           | default(verify_incidents.lifecycle.sys_created_on)) | to_datetime
+          - verify_incidents.lifecycle.sys_created_on | to_datetime).total_seconds() | int }}
+
+- name: Record V1
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{'id': 'V1', 'check': 'a qualifying incident gets its AI note within ' ~ verify_note_target_seconds ~ ' seconds',
+         'passed': verify_incidents.lifecycle.u_ai_enrichment_state | default('') == 'complete'
+                   and verify_lifecycle_ai_notes | length >= 1
+                   and verify_lifecycle_seconds | int <= verify_note_target_seconds,
+         'detail': verify_incidents.lifecycle.number ~ ', state ' ~ (verify_incidents.lifecycle.u_ai_enrichment_state | default('') or 'empty')
+                   ~ ', note after ' ~ verify_lifecycle_seconds ~ ' s'}] }}
+
+- name: "V2: watch for a second note or workflow run"
+  ansible.builtin.wait_for:
+    timeout: "{{ verify_quiet_seconds }}"
+
+- name: Read the notes again
+  ansible.builtin.include_tasks: notes.yml
+  vars:
+    verify_notes_key: lifecycle
+
+- name: Find the workflow runs since this check started
+  ansible.builtin.uri:
+    url: >-
+      {{ verify_aap_url }}/api/controller/v2/workflow_jobs/?name={{ verify_workflow_name | urlencode
+      }}&created__gt={{ verify_started }}&page_size=200
+    url_username: admin
+    url_password: "{{ verify_aap_password }}"
+    force_basic_auth: true
+  register: verify_runs
+  until: verify_runs is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Record V2
+  ansible.builtin.set_fact:
+    verify_lifecycle_runs: >-
+      {{ verify_runs.json.results | selectattr('extra_vars', 'search', verify_incidents.lifecycle.sys_id) | list | length }}
+    verify_lifecycle_notes_after: "{{ verify_notes | selectattr('value', 'search', 'AI-generated enrichment') | list | length }}"
+
+- name: Record V2 result
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{'id': 'V2', 'check': 'the enrichment update does not retrigger the workflow',
+         'passed': verify_lifecycle_runs | int == 1 and verify_lifecycle_notes_after | int == 1,
+         'detail': verify_lifecycle_runs ~ ' workflow run(s) and ' ~ verify_lifecycle_notes_after ~ ' AI note(s) after '
+                   ~ verify_quiet_seconds ~ ' s more'}] }}
+
+- name: "V3: run the workflow again for the same incident, as a retry would"
+  ansible.controller.workflow_launch:
+    workflow_template: "{{ verify_workflow_name }}"
+    extra_vars:
+      incident_sys_id: "{{ verify_incidents.lifecycle.sys_id }}"
+      incident_number: "{{ verify_incidents.lifecycle.number }}"
+      event_id: "{{ verify_run }} retry"
+    wait: true
+    timeout: 600
+    controller_host: "{{ verify_aap_url }}"
+    controller_username: admin
+    controller_password: "{{ verify_aap_password }}"
+  register: verify_retry
+  failed_when: false
+  changed_when: false
+
+- name: Read the state after the retry
+  ansible.builtin.include_tasks: wait.yml
+  vars:
+    verify_wait_key: lifecycle
+
+- name: Read the notes after the retry
+  ansible.builtin.include_tasks: notes.yml
+  vars:
+    verify_notes_key: lifecycle
+
+- name: Record V3
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{'id': 'V3', 'check': 'a retried workflow adds no second note',
+         'passed': verify_retry.status | default('') == 'successful'
+                   and verify_notes | selectattr('value', 'search', 'AI-generated enrichment') | list | length == 1
+                   and verify_incidents.lifecycle.u_ai_enrichment_state | default('') == 'complete',
+         'detail': 'workflow ' ~ verify_retry.status | default('not run') ~ ', '
+                   ~ verify_notes | selectattr('value', 'search', 'AI-generated enrichment') | list | length ~ ' AI note(s), state '
+                   ~ (verify_incidents.lifecycle.u_ai_enrichment_state | default('') or 'empty')}] }}
