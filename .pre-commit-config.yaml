@@ -34,7 +34,7 @@ repos:
       - id: no-debug-secrets-values
         name: Block debug tasks that print secrets_values
         language: pygrep
-        entry: '^([ \t]*)(?:-[ \t]+)?(?:ansible\.builtin\.)?debug:[^\n]*(?:\n\1[ \t]+[^\n]*)*?secrets_values'
+        entry: '^([ \t]*)(?:-[ \t]+)?(?:ansible\.builtin\.)?debug:[^\n]*(?:\n\1[ \t][^\n]*)*?secrets_values'
         args: [--multiline]
         types: [yaml]
         exclude: ^\.pre-commit-config\.yaml$
