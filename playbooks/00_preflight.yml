@@ -18,7 +18,7 @@
     preflight_registry_url: https://registry.redhat.io
     preflight_sso_discovery_url: https://sso.redhat.com/auth/realms/redhat-external/.well-known/openid-configuration
     preflight_groups: >-
-      {{ ['entitlements', 'servicenow'] + (['cluster'] if preflight_include_cluster | bool else []) }}
+      {{ ['entitlements', 'servicenow', 'source'] + (['cluster'] if preflight_include_cluster | bool else []) }}
 
   tasks:
     - name: Resolve the required secrets
@@ -52,6 +52,8 @@
                and secrets_values.aap_manifest_b64 is match('^[A-Za-z0-9+/=\s]+$')
                and secrets_values.aap_manifest_b64 is match('^UEsDB') }}
           hub_token_ok: "{{ secrets_values.automation_hub_token | length > 20 }}"
+          # Prefix only: GitHub does not fix the length or alphabet, and the API check below is the real test.
+          github_token_ok: "{{ secrets_values.github_token is match('github_pat_') }}"
           servicenow_url_ok: "{{ secrets_values.servicenow_instance_url is match('^https://[a-z0-9-]+\\.service-now\\.com/?$') }}"
           cluster_url_ok: >-
             {{ (not preflight_include_cluster | bool)
@@ -77,6 +79,7 @@
           - preflight_secret_checks.pull_secret_ok
           - preflight_secret_checks.manifest_ok
           - preflight_secret_checks.hub_token_ok
+          - preflight_secret_checks.github_token_ok
           - preflight_secret_checks.servicenow_url_ok
           - preflight_secret_checks.cluster_url_ok
           - preflight_secret_checks.cluster_ca_ok
@@ -85,6 +88,7 @@
           {{ ([] + (['pull_secret is not a pull secret JSON containing registry.redhat.io'] if not preflight_secret_checks.pull_secret_ok else [])
              + (['aap_manifest_b64 is not a base64-encoded zip file'] if not preflight_secret_checks.manifest_ok else [])
              + (['automation_hub_token looks too short to be an offline token'] if not preflight_secret_checks.hub_token_ok else [])
+             + (['github_token is not a fine-grained token (github_pat_...)'] if not preflight_secret_checks.github_token_ok else [])
              + (['servicenow instance_url should look like https://devNNNNNN.service-now.com'] if not preflight_secret_checks.servicenow_url_ok else [])
              + (['cluster api_url should look like https://api.<cluster domain>:6443'] if not preflight_secret_checks.cluster_url_ok else [])
              + (['cluster api_ca_cert is not a PEM certificate bundle'] if not preflight_secret_checks.cluster_ca_ok else [])) | join('; ') }}.
@@ -221,6 +225,60 @@
               ServiceNow did not accept the administrator credentials in aiops-demo/servicenow.
               PDI passwords are reset when an instance is reclaimed or upgraded; check the current one at developer.servicenow.com.
             success_msg: ServiceNow is awake and the administrator credentials work.
+
+    - name: Check that the GitHub token can read the repository
+      block:
+        - name: Read the repository's details with the token
+          ansible.builtin.uri:
+            url: "https://api.github.com/repos/{{ demo_repository.owner }}/{{ demo_repository.name }}"
+            headers:
+              Accept: application/vnd.github+json
+              Authorization: "Bearer {{ secrets_values.github_token }}"
+            status_code: [200, 401, 403, 404]
+            timeout: 20
+          register: preflight_github
+          failed_when: false
+          no_log: true
+
+        # The repository's "permissions" show what the token's owner may do, not what the token
+        # may do, so the only reliable test is to try a write. This one cannot change anything: the
+        # branch points at a commit that does not exist, so a token with write access gets 422.
+        - name: Try to create a branch with the token, which a read-only token is refused
+          ansible.builtin.uri:
+            url: "https://api.github.com/repos/{{ demo_repository.owner }}/{{ demo_repository.name }}/git/refs"
+            method: POST
+            headers:
+              Accept: application/vnd.github+json
+              Authorization: "Bearer {{ secrets_values.github_token }}"
+            body_format: json
+            body:
+              ref: refs/heads/aiops-preflight-write-check
+              sha: "0000000000000000000000000000000000000000"
+            status_code: [201, 403, 404, 422]
+            timeout: 20
+          register: preflight_github_write
+          when: preflight_github.status | default(-1) == 200
+          failed_when: false
+          no_log: true
+
+        - name: Keep only the outcome
+          ansible.builtin.set_fact:
+            preflight_github_status: "{{ preflight_github.status | default(-1) }}"
+            preflight_github_write_status: "{{ preflight_github_write.status | default(-1) }}"
+          no_log: true
+
+        - name: Check that the token reads the repository and cannot change it
+          ansible.builtin.assert:
+            that:
+              - preflight_github_status | int == 200
+              - preflight_github_write_status | int == 403
+            fail_msg: >-
+              {{ ('GitHub did not accept github_token for ' ~ demo_repository.owner ~ '/' ~ demo_repository.name
+                  ~ ' (HTTP ' ~ preflight_github_status ~ '). It may have expired, or not include this repository.')
+                 if preflight_github_status | int != 200 else
+                 ('github_token can write to the repository (a test write got HTTP ' ~ preflight_github_write_status
+                  ~ ', not 403). AAP needs read access only: set Contents to Read-only on the token.') }}
+            success_msg: "The GitHub token can read {{ demo_repository.owner }}/{{ demo_repository.name }}, and a test write was refused."
 
     - name: Check the demo environment
       when: preflight_include_cluster | bool

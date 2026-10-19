@@ -71,7 +71,7 @@ The Vault UI is at http://127.0.0.1:8200/ui if you prefer it to the commands bel
 
 ## 3 Load your secrets
 
-Secrets are entered through the `vault` CLI inside the container, reading values from standard input, so they never appear on a command line or in your shell history. Set the root token for this session only:
+Secrets are entered through the `vault` CLI inside the container, reading values from standard input, so they never appear on a command line or in your shell history. Paste each command exactly as written. A command that starts with `read -rs` then waits silently for one secret: paste it there and press Enter. The secret never goes into the command itself, and `-` in `key=-` stays, because it tells Vault to read the value from that input. Set the root token for this session only:
 
 ```bash
 read -rs VAULT_TOKEN && export VAULT_TOKEN            # paste the root token, then Enter
@@ -95,13 +95,27 @@ v kv put -mount=aiops-demo servicenow instance_url=https://devNNNNNN.service-now
 read -rs T && printf %s "$T" | v kv patch -mount=aiops-demo servicenow admin_password=- ; unset T
 ```
 
+**Source.** AAP syncs this repository as its project, and the repository is private, so AAP needs a token that can read it and nothing else (DD16). In GitHub, open Settings > Developer settings > Personal access tokens > Fine-grained tokens > Generate new token, and set:
+
+- Token name `aiops-demo-aap`, with an expiry that covers your demo period (90 days, say)
+- Resource owner: your account; Repository access: Only select repositories, `aiops-enrichment-demo`
+- Repository permissions: Contents, Read-only. GitHub adds Metadata, Read-only, by itself. Nothing else
+
+Copy the token (it starts `github_pat_`), then store it:
+
+```bash
+read -rs T && printf %s "$T" | v kv put -mount=aiops-demo source github_token=- ; unset T
+```
+
+Preflight checks that the token can read the repository, and tries a harmless write (a branch pointing at a commit that does not exist) to confirm it is refused. GitHub reports what your account may do on the repository, not what the token may do, so trying is the only reliable test. When it expires, create a new one and store it the same way.
+
 **Cluster.** Skip this for now. The cluster secrets change with every demo environment, so they are loaded as part of each build: see step 3 of [build-guide.md](build-guide.md).
 
 Check what is stored without showing values, then drop the root token from your session:
 
 ```bash
 keys() { v kv get -mount=aiops-demo -format=json "$1" | python3 -c 'import sys,json; print(sorted(json.load(sys.stdin)["data"]["data"]))'; }
-keys entitlements; keys servicenow
+keys entitlements; keys servicenow; keys source
 unset VAULT_TOKEN
 ```
 
@@ -182,6 +196,8 @@ source ~/.config/aiops-demo/approle.env
 ```
 
 Then load the cluster secrets and rerun preflight, as described in [build-guide.md](build-guide.md).
+
+Issuing new secret IDs also creates the AppRole and read policy for any secret group added since Vault was set up, such as `source`, so a new group needs no other step once its secret is stored.
 
 ## Without Vault
 

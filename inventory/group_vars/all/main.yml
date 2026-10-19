@@ -31,6 +31,14 @@ demo_namespaces:
   data: aiops-data
   aap: aap
 
+# The repository AAP syncs as its project (phase 05, DD16). Private, so AAP reads it with a
+# fine-grained, read-only token from Vault (source/github_token).
+demo_repository:
+  url: https://github.com/Deim0s13/aiops-enrichment-demo.git
+  owner: Deim0s13
+  name: aiops-enrichment-demo
+  branch: main
+
 # ServiceNow (phase 04). The trigger matches incidents in this group and category (design section 5.1).
 demo_servicenow:
   assignment_group: ACME Payments On-call
@@ -117,3 +125,4 @@ demo_required_secrets:
   servicenow_instance_url: { path: servicenow, key: instance_url }
   servicenow_admin_username: { path: servicenow, key: admin_username }
   servicenow_admin_password: { path: servicenow, key: admin_password }
+  github_token: { path: source, key: github_token }

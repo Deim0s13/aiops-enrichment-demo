@@ -19,7 +19,7 @@ The recommended backend is HashiCorp Vault Community Edition, run as a container
 
 - Vault runs with file storage on a persistent Podman volume, not in dev mode. Its API is published on `127.0.0.1:8200` only. TLS is disabled on that listener because traffic never leaves the laptop.
 - The first run writes the unseal key and root token to `~/.config/aiops-demo/vault-init.json` (mode 0600). Move both into your password manager and delete the file. Use the root token only to set Vault up and load secrets.
-- The build reads each secret group (`entitlements`, `cluster`, `servicenow`) with its own AppRole, bound to a policy that can read that group and nothing else. A phase that needs only ServiceNow credentials therefore cannot read the pull secret, even by mistake. Tokens last one hour and carry no default policy. The credentials for all three AppRoles are written to `~/.config/aiops-demo/approle.env` (mode 0600) and supplied to the build through the `AIOPS_VAULT_APPROLES` environment variable. Secret IDs expire after 7 days and are rotated with each new demo environment; rotating revokes all earlier secret IDs, so only one per group is valid at a time.
+- The build reads each secret group (`entitlements`, `cluster`, `servicenow`, `source`) with its own AppRole, bound to a policy that can read that group and nothing else. A phase that needs only ServiceNow credentials therefore cannot read the pull secret, even by mistake. Tokens last one hour and carry no default policy. The credentials for all four AppRoles are written to `~/.config/aiops-demo/approle.env` (mode 0600) and supplied to the build through the `AIOPS_VAULT_APPROLES` environment variable. Secret IDs expire after 7 days and are rotated with each new demo environment; rotating revokes all earlier secret IDs, so only one per group is valid at a time.
 - The build revokes each Vault token as soon as it has read that group.
 - Enter secret values through the Vault CLI from standard input, as shown in [docs/laptop-setup.md](docs/laptop-setup.md), so they never appear on a command line, in shell history or in a file.
 - The demo cluster cannot reach your laptop, so Vault is used only during the build. The running demo never depends on it.
@@ -31,6 +31,7 @@ Secrets are read from a KV version 2 engine mounted at `aiops-demo`:
 | `aiops-demo/entitlements` | `pull_secret`, `aap_manifest_b64`, `automation_hub_token`, `registry_username`, `registry_password` |
 | `aiops-demo/cluster` | `api_url`, `api_token`, and optionally `api_ca_cert` (the cluster's CA bundle, which is not a secret but changes with each environment) |
 | `aiops-demo/servicenow` | `instance_url`, `admin_username`, `admin_password` |
+| `aiops-demo/source` | `github_token`: a fine-grained GitHub token, limited to this repository with Contents read-only, which AAP uses to sync the repository as its project (phase 05). Preflight checks that it can read the repository, and that a harmless test write is refused |
 
 ## Without Vault
 
