@@ -1,0 +1,20 @@
+---
+# Phase 06: the enrichment service, built in the cluster from this repository (DD08) and deployed
+# behind TLS from OpenShift's service CA, with its own API token, reachable only from AAP's jobs.
+enrichment_service_name: enrichment
+enrichment_service_context_dir: services/enrichment
+enrichment_service_port: 8443
+enrichment_service_token_secret: enrichment-api-token
+enrichment_service_tls_secret: enrichment-tls
+enrichment_service_git_secret: enrichment-git-source
+enrichment_service_token_length: 40
+enrichment_service_resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 256Mi }
+enrichment_service_build_retries: 60
+enrichment_service_build_delay: 10
+enrichment_service_ready_retries: 30
+enrichment_service_ready_delay: 10
+# The image the in-cluster checks run in: the same base as the service, so it is already on the node.
+enrichment_service_check_image: registry.access.redhat.com/ubi9/python-312:9.8-1791998425
+enrichment_service_checks: true

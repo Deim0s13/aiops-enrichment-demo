@@ -1,0 +1,127 @@
+---
+- name: Deploy the service, its TLS-serving address and its network policies
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      # OpenShift's service CA issues the certificate for the service's own name into this Secret.
+      - apiVersion: v1
+        kind: Service
+        metadata:
+          name: "{{ enrichment_service_name }}"
+          namespace: "{{ enrichment_service_namespace }}"
+          labels: { app: "{{ enrichment_service_name }}", app.kubernetes.io/part-of: aiops-enrichment-demo }
+          annotations:
+            service.beta.openshift.io/serving-cert-secret-name: "{{ enrichment_service_tls_secret }}"
+        spec:
+          selector: { app: "{{ enrichment_service_name }}" }
+          ports:
+            - name: https
+              port: 443
+              targetPort: "{{ enrichment_service_port }}"
+
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: "{{ enrichment_service_name }}"
+          namespace: "{{ enrichment_service_namespace }}"
+          labels: { app: "{{ enrichment_service_name }}", app.kubernetes.io/part-of: aiops-enrichment-demo }
+        spec:
+          replicas: 1
+          selector:
+            matchLabels: { app: "{{ enrichment_service_name }}" }
+          template:
+            metadata:
+              labels: { app: "{{ enrichment_service_name }}" }
+            spec:
+              serviceAccountName: "{{ enrichment_service_service_account }}"
+              # The service needs no access to the cluster API.
+              automountServiceAccountToken: false
+              containers:
+                - name: "{{ enrichment_service_name }}"
+                  image: "{{ enrichment_service_image }}"
+                  ports:
+                    - name: https
+                      containerPort: "{{ enrichment_service_port }}"
+                  env:
+                    - name: ENRICHMENT_API_TOKEN
+                      valueFrom: { secretKeyRef: { name: "{{ enrichment_service_token_secret }}", key: token } }
+                    - name: MAAS_CONSUMER
+                      value: "{{ enrichment_service_service_account }}"
+                    - name: MAAS_MODEL
+                      valueFrom: { secretKeyRef: { name: "{{ enrichment_service_maas_secret }}", key: model } }
+                    - name: MAAS_URL
+                      valueFrom: { secretKeyRef: { name: "{{ enrichment_service_maas_secret }}", key: url } }
+                    - name: MAAS_API_KEY
+                      valueFrom: { secretKeyRef: { name: "{{ enrichment_service_maas_secret }}", key: api-key } }
+                  volumeMounts:
+                    - name: tls
+                      mountPath: /etc/tls
+                      readOnly: true
+                  readinessProbe: &probe
+                    httpGet: { path: /healthz, port: "{{ enrichment_service_port }}", scheme: HTTPS }
+                    periodSeconds: 10
+                  livenessProbe: *probe
+                  resources: "{{ enrichment_service_resources }}"
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    runAsNonRoot: true
+                    capabilities: { drop: [ALL] }
+                    seccompProfile: { type: RuntimeDefault }
+              volumes:
+                - name: tls
+                  secret: { secretName: "{{ enrichment_service_tls_secret }}" }
+
+      # Nothing reaches the namespace unless a policy allows it, and only AAP's jobs may reach the service.
+      - apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: default-deny-ingress
+          namespace: "{{ enrichment_service_namespace }}"
+          labels: { app.kubernetes.io/part-of: aiops-enrichment-demo }
+        spec:
+          podSelector: {}
+          policyTypes: [Ingress]
+      - apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-aap-to-enrichment
+          namespace: "{{ enrichment_service_namespace }}"
+          labels: { app.kubernetes.io/part-of: aiops-enrichment-demo }
+        spec:
+          podSelector:
+            matchLabels: { app: "{{ enrichment_service_name }}" }
+          policyTypes: [Ingress]
+          ingress:
+            - from:
+                - namespaceSelector:
+                    matchLabels: { kubernetes.io/metadata.name: "{{ enrichment_service_caller_namespace }}" }
+              ports:
+                - protocol: TCP
+                  port: "{{ enrichment_service_port }}"
+
+- name: Wait for the service to be ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ enrichment_service_namespace }}"
+    name: "{{ enrichment_service_name }}"
+  register: enrichment_service_deployment
+  until: >-
+    enrichment_service_deployment is not failed
+    and (enrichment_service_deployment.resources | map(attribute='status') | first | default({})).availableReplicas | default(0) >= 1
+    and (enrichment_service_deployment.resources | map(attribute='status') | first | default({})).updatedReplicas | default(0) >= 1
+  retries: "{{ enrichment_service_ready_retries }}"
+  delay: "{{ enrichment_service_ready_delay }}"
+  no_log: true
+
+- name: Report the service
+  ansible.builtin.set_fact:
+    enrichment_service_report:
+      - >-
+        Image: {{ 'built from commit ' ~ enrichment_service_commit[:12] if enrichment_service_built else
+                  'already built for commit ' ~ enrichment_service_commit[:12] }}; {{ enrichment_service_image }}
+      - "Service: {{ enrichment_service_url }}, TLS from the service CA; callers only from {{ enrichment_service_caller_namespace }}"
+      - >-
+        API token: {{ 'generated' if enrichment_service_token_new else 'reused' }}, in
+        {{ enrichment_service_namespace }}/{{ enrichment_service_token_secret }} and
+        {{ enrichment_service_caller_namespace }}/{{ enrichment_service_token_secret }}

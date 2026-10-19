@@ -35,7 +35,7 @@
     body_format: json
     body:
       short_description: "{{ servicenow_trigger_run }}: {{ item.label }}"
-      description: Raised by the phase 05 build check and removed at the end of it.
+      description: Raised by the phase 07 build check and removed at the end of it.
       impact: "2"
       urgency: "{{ item.urgency }}"
       category: "{{ servicenow_trigger_category }}"

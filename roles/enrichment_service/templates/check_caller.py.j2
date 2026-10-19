@@ -1,0 +1,38 @@
+# Runs in a Job in the caller's namespace: health, a call without the token, and a call with it.
+import json
+import os
+import ssl
+import urllib.error
+import urllib.request
+
+url = os.environ["URL"]
+context = ssl.create_default_context(cafile="/etc/ca/service-ca.crt")
+incident = {"incident": {"sys_id": "0" * 32, "number": "INC0000000", "short_description": "Phase 06 build check"}}
+
+
+def call(path, body=None, token=None):
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(url + path, data=data, headers=headers, method="POST" if data else "GET")
+    try:
+        with urllib.request.urlopen(request, context=context, timeout=15) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, {}
+    except Exception as error:  # noqa: BLE001 - reported, not raised
+        return -1, {"error": str(error)[:200]}
+
+
+health = call("/healthz")
+no_token = call("/v1/enrich", incident)
+with_token = call("/v1/enrich", incident, os.environ["TOKEN"])
+print(json.dumps({
+    "health": health[0],
+    "no_token": no_token[0],
+    "with_token": with_token[0],
+    "status": with_token[1].get("status"),
+    "keys": sorted(with_token[1].keys()),
+    "error": health[1].get("error") or with_token[1].get("error"),
+}))

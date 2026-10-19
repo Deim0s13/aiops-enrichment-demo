@@ -33,6 +33,24 @@
             SN_HOST: !unsafe "{{ instance_url }}"
             SN_USERNAME: !unsafe "{{ username }}"
             SN_PASSWORD: !unsafe "{{ password }}"
+      # The CA bundle is written to a file for the job, so the call to the service is checked against
+      # OpenShift's service CA rather than trusted blindly.
+      - name: "{{ aap_content_enrichment_credential_type }}"
+        description: The enrichment service's address, token and CA bundle, passed to jobs as ENRICHMENT_URL, ENRICHMENT_TOKEN and ENRICHMENT_CA_FILE.
+        kind: cloud
+        inputs:
+          fields:
+            - { id: url, type: string, label: Service URL }
+            - { id: token, type: string, label: API token, secret: true }
+            - { id: ca_bundle, type: string, label: CA bundle, multiline: true }
+          required: [url, token, ca_bundle]
+        injectors:
+          file:
+            template: !unsafe "{{ ca_bundle }}"
+          env:
+            ENRICHMENT_URL: !unsafe "{{ url }}"
+            ENRICHMENT_TOKEN: !unsafe "{{ token }}"
+            ENRICHMENT_CA_FILE: !unsafe "{{ tower.filename }}"
 
     aap_content_cfg_controller_execution_environments:
       - name: "{{ aap_content_ee_name }}"
@@ -75,13 +93,13 @@
         credentials: ["{{ aap_content_servicenow_credential }}"]
         ask_variables_on_launch: true
       - name: "{{ aap_content_templates.note }}"
-        description: "Workflow step 2: writes the AI-labelled work note, once per revision."
+        description: "Workflow step 2: asks the enrichment service, checks its answer and writes the AI-labelled work note, once per revision."
         playbook: automation/enrichment/write_note.yml
         organization: "{{ aap_content_organisation }}"
         project: "{{ aap_content_project_name }}"
         inventory: "{{ aap_content_inventory_name }}"
         execution_environment: "{{ aap_content_ee_name }}"
-        credentials: ["{{ aap_content_servicenow_credential }}"]
+        credentials: ["{{ aap_content_servicenow_credential }}", "{{ aap_content_enrichment_credential }}"]
         ask_variables_on_launch: true
       - name: "{{ aap_content_templates.unavailable }}"
         description: "Failure branch: records that enrichment is unavailable; the incident stays with its team."
@@ -138,6 +156,14 @@
         inputs:
           username: "{{ aap_content_repository.owner }}"
           password: "{{ secrets_values.github_token }}"
+      - name: "{{ aap_content_enrichment_credential }}"
+        description: The enrichment service's address, its API token and the service CA bundle (phase 06).
+        organization: "{{ aap_content_organisation }}"
+        credential_type: "{{ aap_content_enrichment_credential_type }}"
+        inputs:
+          url: "{{ aap_content_enrichment.url }}"
+          token: "{{ aap_content_enrichment.token }}"
+          ca_bundle: "{{ aap_content_service_ca }}"
       - name: "{{ aap_content_servicenow_credential }}"
         description: The ITSM writer identity. Guard rules in ServiceNow limit it to work notes and enrichment fields.
         organization: "{{ aap_content_organisation }}"

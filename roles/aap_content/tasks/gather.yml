@@ -16,6 +16,8 @@
     - { api_version: v1, kind: Secret, name: "{{ aap_content_servicenow_secret }}" }
     - { api_version: v1, kind: Secret, name: "{{ aap_content_eda_user_secret }}" }
     - { api_version: v1, kind: Secret, name: "{{ aap_content_event_stream_secret }}" }
+    - { api_version: v1, kind: Secret, name: "{{ aap_content_enrichment_secret }}" }
+    - { api_version: v1, kind: ConfigMap, name: "{{ aap_content_service_ca_configmap }}" }
   loop_control:
     label: "{{ item.kind }} {{ item.name }}"
   register: aap_content_read
@@ -27,23 +29,27 @@
 - name: Keep only the fields needed
   ansible.builtin.set_fact:
     aap_content_found: >-
-      {{ dict(['route', 'admin', 'stream', 'servicenow', 'eda_user', 'event_stream']
+      {{ dict(['route', 'admin', 'stream', 'servicenow', 'eda_user', 'event_stream', 'enrichment', 'service_ca']
          | zip(aap_content_read.results | map(attribute='resources') | map('first') | map('default', {}, true))) }}
   no_log: true
 
-- name: Stop if something phase 05 relies on is missing
+- name: Stop if something phase 07 relies on is missing
   ansible.builtin.assert:
     that:
       - aap_content_found.route | length > 0
       - aap_content_found.admin | length > 0
       - aap_content_found.stream | length > 0
       - aap_content_found.servicenow | length > 0
+      - aap_content_found.enrichment | length > 0
+      - aap_content_found.service_ca | length > 0
     fail_msg: >-
       Missing:
       {{ ([] + (['the AAP route (run phase 03)'] if not aap_content_found.route else [])
          + (['the AAP admin password Secret (run phase 03)'] if not aap_content_found.admin else [])
-         + (['the published execution environment (run: ansible-playbook playbooks/05_execution_environment.yml)'] if not aap_content_found.stream else [])
-         + (['the svc-ai-enrichment Secret (run phase 04)'] if not aap_content_found.servicenow else [])) | join('; ') }}.
+         + (['the published execution environment (run: ansible-playbook playbooks/07_execution_environment.yml)'] if not aap_content_found.stream else [])
+         + (['the svc-ai-enrichment Secret (run phase 04)'] if not aap_content_found.servicenow else [])
+         + (['the enrichment service token (run phase 06)'] if not aap_content_found.enrichment else [])
+         + (['the service CA bundle ConfigMap'] if not aap_content_found.service_ca else [])) | join('; ') }}.
     quiet: true
 
 - name: Work out the addresses and the identities' credentials
@@ -53,6 +59,9 @@
     aap_content_ee_image: >-
       {{ (aap_content_found.stream.status.tags | default([]) | selectattr('tag', 'equalto', 'latest') | first | default({}))['items']
          | default([{}]) | map(attribute='dockerImageReference', default='') | first }}
+    aap_content_enrichment: >-
+      {{ dict(aap_content_found.enrichment.data.keys() | zip(aap_content_found.enrichment.data.values() | map('b64decode'))) }}
+    aap_content_service_ca: "{{ aap_content_found.service_ca.data['service-ca.crt'] }}"
     aap_content_servicenow: >-
       {{ dict(aap_content_found.servicenow.data.keys() | zip(aap_content_found.servicenow.data.values() | map('b64decode'))) }}
     # Reuse the generated secrets if the cluster has them; otherwise make new ones.

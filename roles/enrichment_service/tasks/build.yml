@@ -1,0 +1,145 @@
+---
+# Builds only when the service's own directory has changed since the last successful build, so a
+# change elsewhere in the repository does not rebuild it, and a rerun changes nothing.
+
+- name: Declare the image stream and the build
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      - apiVersion: image.openshift.io/v1
+        kind: ImageStream
+        metadata:
+          name: "{{ enrichment_service_name }}"
+          namespace: "{{ enrichment_service_namespace }}"
+          labels: { app.kubernetes.io/part-of: aiops-enrichment-demo }
+      - apiVersion: build.openshift.io/v1
+        kind: BuildConfig
+        metadata:
+          name: "{{ enrichment_service_name }}"
+          namespace: "{{ enrichment_service_namespace }}"
+          labels: { app.kubernetes.io/part-of: aiops-enrichment-demo }
+        spec:
+          source:
+            type: Git
+            git:
+              uri: "{{ enrichment_service_repository.url }}"
+              ref: "{{ enrichment_service_repository.branch }}"
+            contextDir: "{{ enrichment_service_context_dir }}"
+            sourceSecret:
+              name: "{{ enrichment_service_git_secret }}"
+          strategy:
+            type: Docker
+            dockerStrategy:
+              dockerfilePath: Containerfile
+          output:
+            to:
+              kind: ImageStreamTag
+              name: "{{ enrichment_service_name }}:latest"
+          # Builds are started by this phase, for a known commit, not by changes to the build itself.
+          triggers: []
+
+- name: Find the latest commit that changed the service
+  ansible.builtin.uri:
+    url: >-
+      https://api.github.com/repos/{{ enrichment_service_repository.owner }}/{{ enrichment_service_repository.name
+      }}/commits?path={{ enrichment_service_context_dir }}&sha={{ enrichment_service_repository.branch }}&per_page=1
+    headers:
+      Accept: application/vnd.github+json
+      Authorization: "Bearer {{ secrets_values.github_token }}"
+    timeout: 20
+  register: enrichment_service_commits
+  until: enrichment_service_commits is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Find the earlier builds
+  kubernetes.core.k8s_info:
+    api_version: build.openshift.io/v1
+    kind: Build
+    namespace: "{{ enrichment_service_namespace }}"
+    label_selectors: ["buildconfig={{ enrichment_service_name }}"]
+  register: enrichment_service_builds
+  until: enrichment_service_builds is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Keep only the commit and any successful build of it
+  ansible.builtin.set_fact:
+    enrichment_service_commit: "{{ enrichment_service_commits.json[0].sha }}"
+    enrichment_service_done: >-
+      {{ enrichment_service_builds.resources | selectattr('status.phase', 'equalto', 'Complete')
+         | selectattr('spec.revision.git.commit', 'defined')
+         | selectattr('spec.revision.git.commit', 'equalto', enrichment_service_commits.json[0].sha)
+         | map(attribute='status') | list }}
+  no_log: true
+
+- name: Build the image for that commit
+  when: enrichment_service_done | length == 0
+  block:
+    - name: Start the build
+      ansible.builtin.uri:
+        url: >-
+          {{ enrichment_service_api }}/apis/build.openshift.io/v1/namespaces/{{ enrichment_service_namespace
+          }}/buildconfigs/{{ enrichment_service_name }}/instantiate
+        method: POST
+        headers:
+          Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+        body_format: json
+        body:
+          kind: BuildRequest
+          apiVersion: build.openshift.io/v1
+          metadata:
+            name: "{{ enrichment_service_name }}"
+          revision:
+            type: Git
+            git:
+              commit: "{{ enrichment_service_commit }}"
+        status_code: [200, 201]
+        validate_certs: "{{ demo_cluster_validate_certs }}"
+        ca_path: "{{ secrets_cluster_ca_file | default(omit) }}"
+        timeout: 30
+      register: enrichment_service_started
+      changed_when: true
+      no_log: true
+
+    - name: Keep only the build's name
+      ansible.builtin.set_fact:
+        enrichment_service_build_name: "{{ enrichment_service_started.json.metadata.name }}"
+
+    # The first build pulls the base image and installs the Python packages: a few minutes.
+    - name: Wait for the build to finish
+      kubernetes.core.k8s_info:
+        api_version: build.openshift.io/v1
+        kind: Build
+        namespace: "{{ enrichment_service_namespace }}"
+        name: "{{ enrichment_service_build_name }}"
+      register: enrichment_service_build
+      until: >-
+        enrichment_service_build is not failed
+        and (enrichment_service_build.resources | map(attribute='status.phase') | first | default('')) in ['Complete', 'Failed', 'Error', 'Cancelled']
+      retries: "{{ enrichment_service_build_retries }}"
+      delay: "{{ enrichment_service_build_delay }}"
+      no_log: true
+
+    - name: Keep only the build's outcome
+      ansible.builtin.set_fact:
+        enrichment_service_done: "{{ enrichment_service_build.resources | map(attribute='status') | list }}"
+      no_log: true
+
+    - name: Stop if the build failed
+      ansible.builtin.assert:
+        that: enrichment_service_done[0].phase == 'Complete'
+        fail_msg: >-
+          The build {{ enrichment_service_build_name }} ended {{ enrichment_service_done[0].phase }}
+          ({{ enrichment_service_done[0].message | default('no message') }}).
+          See its log with: oc logs build/{{ enrichment_service_build_name }} -n {{ enrichment_service_namespace }}
+        quiet: true
+
+- name: Pin the image by the build's digest
+  ansible.builtin.set_fact:
+    enrichment_service_image: >-
+      image-registry.openshift-image-registry.svc:5000/{{ enrichment_service_namespace }}/{{ enrichment_service_name
+      }}@{{ enrichment_service_done[0].output.to.imageDigest }}
+    enrichment_service_built: "{{ enrichment_service_build_name is defined }}"

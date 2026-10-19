@@ -1,0 +1,46 @@
+---
+# Phase 06: the enrichment service (design sections 5.3 and 6.2), built in the cluster from this
+# repository (DD08), deployed behind TLS from the service CA with its own API token, and reachable only
+# from AAP's jobs. Milestone M2 deploys the skeleton, which returns a fixed, schema-valid response.
+#   ansible-navigator run playbooks/06_enrichment.yml
+#
+# Run phases 02 and 03 first: phase 02 creates the namespace, service account and MaaS key, and phase
+# 03 the AAP namespace the service admits. AAP builds from GitHub, so push changes to the service first.
+# Safe to rerun: the image is rebuilt only when services/enrichment has changed.
+
+- name: "Phase 06 | Enrichment service: build, deployment, TLS, token and network policies"
+  hosts: localhost
+  gather_facts: false
+  tags: [enrichment]
+
+  # See playbooks/01_platform.yml for why the modules are listed one by one.
+  module_defaults:
+    kubernetes.core.k8s: &cluster_auth
+      host: "{{ secrets_values.cluster_api_url }}"
+      api_key: "{{ secrets_values.cluster_api_token }}"
+      validate_certs: "{{ demo_cluster_validate_certs }}"
+      ca_cert: "{{ secrets_cluster_ca_file | default(omit) }}"
+    kubernetes.core.k8s_info: *cluster_auth
+    kubernetes.core.k8s_log: *cluster_auth
+
+  tasks:
+    - name: Resolve the cluster and source secrets
+      ansible.builtin.include_role:
+        name: secrets
+      vars:
+        secrets_groups: [cluster, source]
+
+    - name: Build, deploy and check the enrichment service
+      ansible.builtin.include_role:
+        name: enrichment_service
+      vars:
+        enrichment_service_namespace: "{{ demo_namespaces.enrichment }}"
+        enrichment_service_service_account: "{{ demo_maas_consumer.service_account }}"
+        enrichment_service_maas_secret: maas-api-key
+        enrichment_service_caller_namespace: "{{ demo_namespaces.aap }}"
+        enrichment_service_refused_namespace: "{{ demo_namespaces.data }}"
+        enrichment_service_repository: "{{ demo_repository }}"
+
+    - name: Report what phase 06 found and changed
+      ansible.builtin.debug:
+        msg: "{{ enrichment_service_report }}"

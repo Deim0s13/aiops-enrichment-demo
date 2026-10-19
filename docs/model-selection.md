@@ -126,4 +126,4 @@ What follows from it:
 
 - The chosen model goes into `demo_model`, and DD04 and OI04 record the decision with a link to the report.
 - The prompt and schema become the enrichment service's prompt v1 (M3).
-- The cases become the start of the `verify.yml` checks and the style for the corpus (phase 07).
+- The cases become the start of the `verify.yml` checks and the style for the corpus (phase 05).

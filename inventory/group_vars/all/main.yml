@@ -31,7 +31,7 @@ demo_namespaces:
   data: aiops-data
   aap: aap
 
-# The repository AAP syncs as its project (phase 05, DD16). Private, so AAP reads it with a
+# The repository AAP syncs as its project (phase 07, DD16). Private, so AAP reads it with a
 # fine-grained, read-only token from Vault (source/github_token).
 demo_repository:
   url: https://github.com/Deim0s13/aiops-enrichment-demo.git
@@ -39,14 +39,14 @@ demo_repository:
   name: aiops-enrichment-demo
   branch: main
 
-# The AAP organisation that owns the demo's content (phase 05). The rulebook names it too.
+# The AAP organisation that owns the demo's content (phase 07). The rulebook names it too.
 demo_aap_organisation: ACME Bank
 # Decision environment for the rulebook activation: Red Hat's supported image for AAP 2.7, pinned by tag
 # (DD12). The AAP 2.7 operator sets up none. Empty: reuse one already defined in EDA.
 demo_aap_decision_environment: registry.redhat.io/ansible-automation-platform-27/de-supported-rhel9:1.3.2-1790933984
 
 # The execution environment AAP runs the demo's automation in: the image built on the laptop,
-# published to the cluster's internal registry by playbooks/05_execution_environment.yml (DD17).
+# published to the cluster's internal registry by playbooks/07_execution_environment.yml (DD17).
 demo_execution_environment:
   # Built for linux/amd64, the cluster's architecture (laptop-setup step 4); :latest is the laptop's own.
   local_image: localhost/aiops-demo-ee:amd64
@@ -63,7 +63,7 @@ demo_images:
   postgresql: registry.redhat.io/rhel9/postgresql-16:1791897894
 
 # Shared PostgreSQL (DD06). Each database gets its own user and generated password.
-# The knowledge index database is added in phase 06.
+# The knowledge index database is added in phase 08.
 demo_postgres_databases:
   - maas
   - mlflow

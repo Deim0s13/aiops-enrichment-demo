@@ -11,7 +11,7 @@
 
 The demonstration is delivered in seven milestones. Each one ends with something that runs end to end and can be shown, so progress is visible from the second milestone onwards and a problem in one area is found before the next is built on it.
 
-Milestones and build phases are different things. A build phase (`playbooks/00` to `08`) is a step in deployment order, and it is what `site.yml` runs. A milestone is a delivery increment, and most milestones add to several phases at once. Milestone 2, for example, adds a first version of phases 04, 07 and 08 together, so that an incident gets a work note before any of those phases is complete. Section 3 maps one to the other.
+Milestones and build phases are different things. A build phase (`playbooks/00` to `08`) is a step in deployment order, and it is what `site.yml` runs. A milestone is a delivery increment, and most milestones add to several phases at once. Milestone 2, for example, adds a first version of phases 04, 06 and 07 together, so that an incident gets a work note before any of those phases is complete. Section 3 maps one to the other.
 
 Three rules apply to every milestone:
 
@@ -100,8 +100,8 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 - Looping a later task over a Kubernetes task's registered results prints the cluster token at `-vv`, because each item carries the module invocation. Such results are reduced to the fields needed first.
 - ServiceNow (M2.1, 2026-10-16 to 19): the PDI refuses access rule (ACL) changes over the API, even from the administrator, so the identities' limits are guard business rules. The first guards looked right but enforced nothing: they called a role check that exists only in the browser, the script failed, and ServiceNow let each write through. The build check, acting as each identity, caught it on the first run. Controls are proved by trying to break them, not by reading their configuration.
 - The GitHub token for AAP (DD16): GitHub's repository details report what the token's owner may do, not the token, so preflight proves read-only access by trying a harmless write and expecting it to be refused, the same approach as the ServiceNow checks.
-- Phase 05's first run (2026-10-19): every job failed with `Exec format error`, because the execution environment built on an Apple silicon laptop is arm64 and the cluster node is x86_64. The laptop now builds a second, linux/amd64 image for the cluster, and the publish step checks the architecture before pushing. Phase 05's checks caught it on test incidents, before any real incident depended on it.
-- AAP 2.7 details found by phase 05: the operator sets up no decision environment, so the kit pins Red Hat's supported one; and Ansible does not template the keys of a literal mapping, so a header named by a variable must be built as an expression.
+- Phase 07's first run (2026-10-19): every job failed with `Exec format error`, because the execution environment built on an Apple silicon laptop is arm64 and the cluster node is x86_64. The laptop now builds a second, linux/amd64 image for the cluster, and the publish step checks the architecture before pushing. Phase 07's checks caught it on test incidents, before any real incident depended on it.
+- AAP 2.7 details found by phase 07: the operator sets up no decision environment, so the kit pins Red Hat's supported one; and Ansible does not template the keys of a literal mapping, so a header named by a variable must be built as an expression.
 - The second clean build from empty (2026-10-19) needed no fixes, up to and including phase 04. The next build is timed phase by phase (M1.10).
 
 ### M2 Thin end to end
@@ -111,11 +111,11 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 | ID | Task | Closes |
 |---|---|---|
 | M2.1 | Phase 04 (part): custom incident fields, assignment group, custom roles, service identities narrowed by guard business rules, and the "enrichment ready" notification. Phases renumbered so ServiceNow comes before AAP content, which needs the identities and writes the EDA event stream address back. Fields, group, roles and identities done (2026-10-16). The PDI refuses ACL changes over the API, so the identities hold `itil` narrowed by guard business rules (design section 6.1), proved on every build by checks that act as each identity. Guards, checks, notification and a fictional on-call engineer done (2026-10-19); all five checks pass. The business rule moves to M2.3, with the event stream it calls | |
-| M2.1a | Execution environment pushed to the cluster's internal registry by a laptop-side playbook, and a read-only GitHub token in Vault for AAP's project (DD16, DD17). Decided 2026-10-19; token stored and checked by preflight; `05_execution_environment.yml` written | |
+| M2.1a | Execution environment pushed to the cluster's internal registry by a laptop-side playbook, and a read-only GitHub token in Vault for AAP's project (DD16, DD17). Decided 2026-10-19; token stored and checked by preflight; `07_execution_environment.yml` written | |
 | M2.2 | Rulebook `incident_enrichment.yml`: receive, validate and pass only the defined fields. Written (2026-10-19) | |
-| M2.3 | Phase 05 (part): project, credentials, EDA activation and the enrichment workflow with its failure branch. Built and proved with a hand-crafted event first; the ServiceNow business rule that pushes to the event stream, and the write-back of its address and token, come last, so each link is tested alone before they are joined. Phase 05 done (2026-10-20): all five checks pass, from a real event through the event stream to the work note, the failure branch, a retry that adds nothing and the trigger user's limits. The business rule and the REST Message that carries the event stream's address and token done (2026-10-20): an incident raised as svc-monitoring is enriched with no other action, its "AI enrichment ready" email is queued, and an incident outside the rule is left alone | |
+| M2.3 | Phase 07 (part): project, credentials, EDA activation and the enrichment workflow with its failure branch. Built and proved with a hand-crafted event first; the ServiceNow business rule that pushes to the event stream, and the write-back of its address and token, come last, so each link is tested alone before they are joined. Phase 07 done (2026-10-20): all five checks pass, from a real event through the event stream to the work note, the failure branch, a retry that adds nothing and the trigger user's limits. The business rule and the REST Message that carries the event stream's address and token done (2026-10-20): an incident raised as svc-monitoring is enriched with no other action, its "AI enrichment ready" email is queued, and an incident outside the rule is left alone | |
 | M2.4 | Role `itsm_worknote`: idempotent, AI-labelled work note and enrichment fields. Written (2026-10-19), with a placeholder note until M2.5 | |
-| M2.5 | Phase 08 (part): enrichment service skeleton returning a fixed, schema-valid response, built in-cluster, with network policies | |
+| M2.5 | Phase 06 (part): enrichment service skeleton returning a fixed, schema-valid response, built in-cluster, with network policies. Written (2026-10-20): TLS from the service CA, its own API token, checks from inside the cluster; the workflow's note step now asks it and validates its answer. Phases renumbered by dependency: 05 knowledge, 06 enrichment service, 07 AAP content and the trigger, 08 workload | |
 | M2.6 | Start `verify.yml` with the idempotency, recursion and concurrent update checks | |
 | M2.7 | Start `reset.yml`: close demo incidents and clear enrichment fields | |
 
@@ -130,10 +130,10 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 | ID | Task | Closes |
 |---|---|---|
 | M3.1 | Sample service `payments-notify` with a heap growth endpoint, sized to fail predictably | |
-| M3.2 | Phase 06: deployment, alert rules for heap usage and restarts, and Alertmanager routing | |
+| M3.2 | Phase 08: deployment, alert rules for heap usage and restarts, and Alertmanager routing | |
 | M3.3 | Integration stand-in: rulebook `integration_alerts.yml`, its playbook in `automation/integration/` and its own ServiceNow identity | |
 | M3.4 | Roles `evidence`, `diag_pod_status`, `diag_metrics`, `diag_changes` and `diag_logs`, with runtime and output limits | |
-| M3.5 | Phase 05 (part): diagnostic job templates in the workflow, run as the read-only `aiops-diagnostics` service account | |
+| M3.5 | Phase 07 (part): diagnostic job templates in the workflow, run as the read-only `aiops-diagnostics` service account | |
 | M3.6 | Extend `reset.yml` to restart the sample service and clear heap dumps | |
 
 **Exit criteria:** triggering the fault raises an incident within two minutes, and the workflow passes evidence in the common format to the enrichment service. A diagnostic that times out or returns too much output is handled without failing the workflow.
@@ -148,7 +148,7 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 |---|---|---|
 | M4.1 | Write the corpus: current runbooks and resolutions, near-miss runbooks, a superseded runbook, a restricted document, and a deliberate gap | |
 | M4.2 | Confirm pgvector is available in the chosen PostgreSQL image | OI05 |
-| M4.3 | Phase 07: knowledge index and ingestion job, storing labels with each passage | |
+| M4.3 | Phase 05: knowledge index and ingestion job, storing labels with each passage | |
 | M4.4 | Enrichment service: sanitisation, filtered retrieval, the prompt, the gateway call, schema and citation validation, the insufficient-evidence path and provenance | |
 | M4.5 | Tracing of every model call, with the trace ID written into the work note | |
 | M4.6 | Extend `verify.yml` with the wrong-version, access filtering, prompt injection, sensitive data, and latency and cost checks | |

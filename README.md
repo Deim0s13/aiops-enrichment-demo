@@ -4,7 +4,7 @@ A reproducible demonstration of AI-assisted incident enrichment using Red Hat An
 
 The whole environment is built and configured with Ansible playbooks, so it can be rebuilt from an empty cluster whenever a demo environment expires.
 
-> **Status:** milestone M2 (thin end to end) under way. Vault on the laptop, the secrets role, preflight and build phases 01 (platform), 02 (OpenShift AI, Models-as-a-Service and the model) and 03 (AAP and its subscription) are implemented. Phase 04 (ServiceNow) is in progress. Phases 05 onwards are stubs.
+> **Status:** milestone M2 (thin end to end) under way. Vault on the laptop, the secrets role, preflight and build phases 01 (platform), 02 (OpenShift AI, Models-as-a-Service and the model) and 03 (AAP and its subscription) are implemented. Phases 04 (ServiceNow) and 07 (AAP content and the trigger) are implemented for M2, and phase 06 (the enrichment service) is in progress. Phases 05 and 08 are stubs.
 
 ## What the demo shows
 
@@ -86,7 +86,7 @@ ansible-playbook playbooks/00_secrets.yml          # starts and configures Vault
 source ~/.config/aiops-demo/approle.env
 ansible-navigator run playbooks/00_preflight.yml -e preflight_include_cluster=false
 
-# For each new demo environment: see docs/build-guide.md (phases 01 to 03 are implemented, 04 in part; 05 onwards are not yet)
+# For each new demo environment: see docs/build-guide.md (phases 01 to 04 and 07 are implemented; 06 is in progress; 05 and 08 are not yet)
 ansible-navigator run site.yml                     # full build
 ansible-navigator run site.yml --tags platform     # or one phase at a time
 ansible-navigator run verify.yml                   # check the acceptance criteria

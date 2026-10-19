@@ -1,12 +1,12 @@
 ---
-# Phase 05 entry point: the trigger (design 5.1). An Outbound REST Message holds the event stream's
+# Phase 07 entry point: the trigger (design 5.1). An Outbound REST Message holds the event stream's
 # address and token, which change with every environment, and an asynchronous business rule posts
 # each new qualifying incident through it. Then proves it hands-off (trigger_checks.yml).
 
 - name: Connect to the ServiceNow PDI
   ansible.builtin.include_tasks: connect.yml
 
-- name: Read the event stream's address, header and token, kept by phase 05
+- name: Read the event stream's address, header and token, kept by phase 07
   kubernetes.core.k8s_info:
     kind: Secret
     namespace: "{{ servicenow_secret_namespace }}"
@@ -24,10 +24,10 @@
          | zip((servicenow_trigger_read.resources | first | default({'data': {}})).data.values() | map('b64decode'))) }}
   no_log: true
 
-- name: Stop if phase 05 has not stored the event stream's details
+- name: Stop if phase 07 has not stored the event stream's details
   ansible.builtin.assert:
     that: servicenow_stream.url | default('') | length > 0 and servicenow_stream.token | default('') | length > 0
-    fail_msg: "The {{ servicenow_trigger_secret }} Secret has no url or token yet. Run playbooks/05_aap_content.yml."
+    fail_msg: "The {{ servicenow_trigger_secret }} Secret has no url or token yet. Run playbooks/07_aap_content.yml."
     quiet: true
 
 - name: Find the on-call group
@@ -64,7 +64,7 @@
         name: "{{ servicenow_trigger_rest_message }}"
         description: >-
           Posts qualifying incidents to the AAP event stream for AI enrichment. Address and token are
-          set by the aiops-enrichment-demo build (phase 05) for each environment.
+          set by the aiops-enrichment-demo build (phase 07) for each environment.
         rest_endpoint: "{{ servicenow_stream.url }}"
         authentication_type: no_authentication
 
@@ -124,7 +124,7 @@
         description: >-
           Posts each new incident that qualifies for AI enrichment (design 5.1) to the AAP event stream.
           Runs after the incident is saved, so a failed call never affects it. Managed by the
-          aiops-enrichment-demo build (phase 05).
+          aiops-enrichment-demo build (phase 07).
         script: "{{ lookup('ansible.builtin.template', 'trigger.js.j2') | trim }}"
 
 - name: Summarise the trigger records

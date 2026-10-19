@@ -147,7 +147,7 @@ That image runs on your laptop, so on Apple silicon it is built for arm64. AAP r
 ansible-builder build -f execution-environment/execution-environment.yml -t localhost/aiops-demo-ee:amd64 --build-arg ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN --extra-build-cli-args='--platform linux/amd64'
 ```
 
-`playbooks/05_execution_environment.yml` publishes this one, and checks its architecture before pushing. On an Intel Mac, both builds give amd64 images.
+`playbooks/07_execution_environment.yml` publishes this one, and checks its architecture before pushing. On an Intel Mac, both builds give amd64 images.
 
 Then remove the token from your session and the intermediate build images, which can record build argument values in their history:
 

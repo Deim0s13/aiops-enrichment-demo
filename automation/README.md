@@ -1,6 +1,6 @@
 # AAP content
 
-Playbooks in this directory are run by Ansible Automation Platform as job templates inside the demo. Phase 05 declares the job templates, workflow and credentials that point at them. This repository is the AAP project they are synced from.
+Playbooks in this directory are run by Ansible Automation Platform as job templates inside the demo. Phase 07 declares the job templates, workflow and credentials that point at them. This repository is the AAP project they are synced from.
 
 | Directory | Contents | Runs as |
 |---|---|---|

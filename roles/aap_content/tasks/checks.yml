@@ -20,7 +20,7 @@
     body_format: json
     body:
       short_description: "{{ aap_content_check_run }}: {{ item }}"
-      description: Created by the phase 05 build check and removed at the end of it.
+      description: Created by the phase 07 build check and removed at the end of it.
       impact: "3"
       urgency: "3"
       category: inquiry
@@ -155,7 +155,8 @@
       query: "short_descriptionSTARTSWITH{{ aap_content_check_run }}"
       columns: [sys_id, u_ai_enrichment_state, u_ai_enrichment_rev]
     - resource: sys_journal_field
-      query: "element_id={{ aap_content_check_inc.trigger.sys_id }}^element=work_notes^valueLIKEAI-generated enrichment"
+      # The note must carry a trace from the enrichment service, so it came from the service's answer.
+      query: "element_id={{ aap_content_check_inc.trigger.sys_id }}^element=work_notes^valueLIKEAI-generated enrichment^valueLIKEReferences: trace"
       columns: [sys_id]
   loop_control:
     label: "{{ item.resource }}"

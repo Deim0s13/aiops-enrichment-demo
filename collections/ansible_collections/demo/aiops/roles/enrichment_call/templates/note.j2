@@ -1,0 +1,18 @@
+{# The work note (design 5.4): labelled as AI-generated and unreviewed, with the references needed to reconstruct it. #}
+{% set a = enrichment_call_answer %}
+{% set p = a.provenance | default({}) %}
+[AI-generated enrichment | revision {{ enrichment_call_revision }} | not reviewed by an engineer]
+Summary: {{ a.summary }}
+{% for c in a.likely_causes %}
+Likely cause ({{ c.confidence | default('unknown') }}): {{ c.statement }} [{{ c.citations | join(', ') }}]
+{% endfor %}
+{% if a.next_steps %}
+Next steps:
+{% for s in a.next_steps %}
+  {{ loop.index }}. {{ s.step }} Verify: {{ s.verify | default('n/a') }} [{{ s.citations | join(', ') }}]
+{% endfor %}
+{% endif %}
+Recommended automation: {{ (a.recommended_job.job_id ~ ': ' ~ a.recommended_job.reason | default('')) if a.recommended_job else 'none' }}
+Gaps: {{ a.gaps | join('; ') if a.gaps else 'none' }}
+Manual review required: {{ 'yes' if a.manual_review_required else 'no' }}
+References: trace {{ p.trace_id | default('n/a') }} | model {{ p.model | default('', true) or 'n/a' }} | prompt {{ p.prompt_version | default('n/a') }} | policy {{ p.policy_version | default('n/a') }} | service {{ p.service_version | default('n/a') }}{{ (' | ' ~ enrichment_call_references) if enrichment_call_references | default('') else '' }}

@@ -1,5 +1,5 @@
 ---
-# Phase 05: the demo's content in AAP, declared as data and applied with infra.aap_configuration.
+# Phase 07: the demo's content in AAP, declared as data and applied with infra.aap_configuration.
 # Names that the rulebook and the business rule rely on are kept here, in one place.
 
 aap_content_instance_name: aap
@@ -21,6 +21,13 @@ aap_content_templates:
 aap_content_servicenow_credential_type: ServiceNow ITSM
 aap_content_servicenow_credential: "ServiceNow | svc-ai-enrichment"
 aap_content_servicenow_secret: servicenow-svc-ai-enrichment
+
+# The enrichment service (phase 06): its address and token, copied to the AAP namespace by phase 06,
+# and the service CA bundle OpenShift publishes in every namespace.
+aap_content_enrichment_credential_type: ACME enrichment service
+aap_content_enrichment_credential: Enrichment service | AAP jobs
+aap_content_enrichment_secret: enrichment-api-token
+aap_content_service_ca_configmap: openshift-service-ca.crt
 aap_content_github_credential: GitHub | aiops-enrichment-demo (read-only)
 
 # The AAP user EDA launches the workflow as, and may launch nothing else as (design 6.1).

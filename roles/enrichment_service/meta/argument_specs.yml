@@ -1,0 +1,39 @@
+---
+argument_specs:
+  main:
+    short_description: Build, deploy and check the enrichment service
+    description:
+      - Builds the image in the cluster from the repository's services/enrichment directory, only when that
+        directory has changed, and deploys it pinned by digest.
+      - TLS from OpenShift's service CA, its own API token (also copied to the AAP namespace for phase 07),
+        its Models-as-a-Service key from phase 02, and network policies that admit only AAP's jobs.
+      - Checks it from inside the cluster, from the AAP namespace and from a namespace that must be refused.
+      - Reads the cluster and source secrets from secrets_values.
+    options:
+      enrichment_service_namespace:
+        type: str
+        required: true
+        description: Namespace of the service; phase 02 created it with the service account and MaaS key.
+      enrichment_service_service_account:
+        type: str
+        required: true
+        description: The service's own service account, which Models-as-a-Service knows (phase 02).
+      enrichment_service_maas_secret:
+        type: str
+        required: true
+        description: Secret holding the service's MaaS key, model ID and URL (phase 02).
+      enrichment_service_caller_namespace:
+        type: str
+        required: true
+        description: The only namespace allowed to call the service; AAP runs its jobs there.
+      enrichment_service_refused_namespace:
+        type: str
+        required: true
+        description: A namespace the network policy must refuse, used by the checks.
+      enrichment_service_repository:
+        type: dict
+        required: true
+        description: The repository to build from, with url, owner, name and branch.
+      enrichment_service_checks:
+        type: bool
+        description: Check the service from inside the cluster.

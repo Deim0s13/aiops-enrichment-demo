@@ -104,7 +104,7 @@ servicenow_password_length: 32
 
 servicenow_timeout: 30
 
-# The trigger (phase 05, entry point trigger). The rule's condition is design 5.1: the on-call group,
+# The trigger (phase 07, entry point trigger). The rule's condition is design 5.1: the on-call group,
 # the category and these priorities, with an empty enrichment state.
 servicenow_trigger_secret: eda-event-stream-servicenow
 servicenow_trigger_rest_message: ACME AI enrichment event stream

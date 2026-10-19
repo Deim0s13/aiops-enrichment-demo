@@ -1,0 +1,12 @@
+# Built in the cluster by OpenShift Builds from this directory (DD08). Red Hat's UBI 9 Python image,
+# pinned by tag (DD12); it runs as a non-root user, under whatever UID OpenShift assigns.
+FROM registry.access.redhat.com/ubi9/python-312:9.8-1791998425
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app/ ./app/
+
+# TLS from OpenShift's service CA, mounted at /etc/tls by the deployment (phase 06).
+EXPOSE 8443
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8443", "--ssl-certfile", "/etc/tls/tls.crt", "--ssl-keyfile", "/etc/tls/tls.key", "--no-server-header"]

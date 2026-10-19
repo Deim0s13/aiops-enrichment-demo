@@ -1,0 +1,59 @@
+---
+# The service's API token is generated once and kept in the cluster: in the service's namespace,
+# where the service reads it, and in the caller's, where phase 07 gives it to AAP. The source secret
+# lets the in-cluster build read the private repository with the read-only token (DD16).
+
+- name: Read the service's API token, if it has one
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ enrichment_service_namespace }}"
+    name: "{{ enrichment_service_token_secret }}"
+  register: enrichment_service_token_read
+  until: enrichment_service_token_read is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Keep the existing token, or make a new one
+  ansible.builtin.set_fact:
+    enrichment_service_api: "{{ secrets_values.cluster_api_url | regex_replace('/$', '') }}"
+    enrichment_service_url: "https://{{ enrichment_service_name }}.{{ enrichment_service_namespace }}.svc"
+    enrichment_service_token_new: "{{ enrichment_service_token_read.resources | length == 0 }}"
+    enrichment_service_token: >-
+      {{ (enrichment_service_token_read.resources[0].data.token | b64decode) if enrichment_service_token_read.resources
+         else lookup('ansible.builtin.password', '/dev/null', length=enrichment_service_token_length, chars=['ascii_letters', 'digits']) }}
+  no_log: true
+
+- name: Store the token for the service and for its caller, and the build's source credentials
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: "{{ item.type }}"
+      metadata:
+        name: "{{ item.name }}"
+        namespace: "{{ item.namespace }}"
+        labels:
+          app.kubernetes.io/part-of: aiops-enrichment-demo
+          app.kubernetes.io/component: "{{ item.component }}"
+      data: "{{ dict(item.data.keys() | zip(item.data.values() | map('b64encode'))) }}"
+  loop:
+    - name: "{{ enrichment_service_token_secret }}"
+      namespace: "{{ enrichment_service_namespace }}"
+      type: Opaque
+      component: enrichment-api-token
+      data: { token: "{{ enrichment_service_token }}" }
+    - name: "{{ enrichment_service_token_secret }}"
+      namespace: "{{ enrichment_service_caller_namespace }}"
+      type: Opaque
+      component: enrichment-api-token
+      data: { token: "{{ enrichment_service_token }}", url: "{{ enrichment_service_url }}" }
+    - name: "{{ enrichment_service_git_secret }}"
+      namespace: "{{ enrichment_service_namespace }}"
+      type: kubernetes.io/basic-auth
+      component: build-source
+      data: { username: "{{ enrichment_service_repository.owner }}", password: "{{ secrets_values.github_token }}" }
+  loop_control:
+    label: "{{ item.namespace }}/{{ item.name }}"
+  no_log: true

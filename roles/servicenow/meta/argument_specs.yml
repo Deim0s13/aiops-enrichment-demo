@@ -67,8 +67,8 @@ argument_specs:
   trigger:
     short_description: Post qualifying incidents to the AAP event stream, and prove it hands-off
     description:
-      - Phase 05. Keeps an Outbound REST Message with the event stream's address and token, read from the Secret
-        phase 05 stores them in, and an asynchronous business rule that posts each new qualifying incident (design 5.1).
+      - Phase 07. Keeps an Outbound REST Message with the event stream's address and token, read from the Secret
+        phase 07 stores them in, and an asynchronous business rule that posts each new qualifying incident (design 5.1).
       - Proves it by raising incidents as svc-monitoring and reading the outcome back, then removes them.
     options:
       servicenow_assignment_group:

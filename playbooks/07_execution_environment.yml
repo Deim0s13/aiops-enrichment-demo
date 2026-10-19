@@ -1,13 +1,13 @@
 ---
-# Phase 05, first step: publish the execution environment built on the laptop to the cluster's
+# Phase 07, first step: publish the execution environment built on the laptop to the cluster's
 # internal registry, where AAP pulls it from (DD17). Runs on the laptop, outside the execution
 # environment, because it pushes from the laptop's Podman:
-#   ansible-playbook playbooks/05_execution_environment.yml
+#   ansible-playbook playbooks/07_execution_environment.yml
 #
 # Not part of site.yml, which runs inside the execution environment. Safe to rerun: an unchanged
 # image is not pushed again. Rerun it after rebuilding the execution environment.
 
-- name: "Phase 05 | Execution environment: publish to the cluster's registry"
+- name: "Phase 07 | Execution environment: publish to the cluster's registry"
   hosts: localhost
   gather_facts: false
   tags: [execution_environment]

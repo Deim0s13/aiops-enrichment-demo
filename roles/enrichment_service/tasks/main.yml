@@ -1,0 +1,13 @@
+---
+- name: Prepare the service's token and source credentials
+  ansible.builtin.include_tasks: tokens.yml
+
+- name: Build the image if the service's source has changed
+  ansible.builtin.include_tasks: build.yml
+
+- name: Deploy the service
+  ansible.builtin.include_tasks: deploy.yml
+
+- name: Check the service from inside the cluster
+  ansible.builtin.include_tasks: checks.yml
+  when: enrichment_service_checks | bool

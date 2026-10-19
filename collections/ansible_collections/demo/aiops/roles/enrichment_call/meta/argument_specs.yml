@@ -1,0 +1,32 @@
+---
+argument_specs:
+  main:
+    short_description: Call the enrichment service and validate its answer
+    description:
+      - Sends the incident's fields, the evidence and the catalogue to the enrichment service, over TLS checked
+        against the service CA, with the service's token.
+      - Fails, and so sends the workflow down its failure branch, unless the answer follows design 5.3, every cause
+        and step is cited, and any recommended job is in the catalogue.
+      - Sets enrichment_call_note, the work note text (design 5.4), and enrichment_call_state.
+    options:
+      enrichment_call_incident:
+        type: dict
+        required: true
+        description: The incident fields the rulebook passed (sys_id, number, short_description, cmdb_ci, priority, opened_at).
+      enrichment_call_revision:
+        type: int
+        description: Revision of the enrichment.
+      enrichment_call_evidence:
+        type: list
+        elements: dict
+        description: Evidence items from the diagnostic jobs (M3).
+      enrichment_call_catalogue:
+        type: list
+        elements: dict
+        description: The jobs enrichment may recommend, each with id and description (M3).
+      enrichment_call_references:
+        type: str
+        description: Extra references for the note's last line, such as the workflow job and event.
+      enrichment_call_timeout:
+        type: int
+        description: Seconds to wait for the service.

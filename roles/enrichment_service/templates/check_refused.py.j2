@@ -1,0 +1,12 @@
+# Runs in a Job in a namespace the network policy must refuse: tries to open a connection.
+import json
+import socket
+
+try:
+    socket.create_connection(("{{ enrichment_service_name }}.{{ enrichment_service_namespace }}.svc", 443), timeout=8).close()
+    outcome = "open"
+except socket.timeout:
+    outcome = "timed out"
+except OSError as error:
+    outcome = "refused: " + str(error)[:100]
+print(json.dumps({"connect": outcome}))

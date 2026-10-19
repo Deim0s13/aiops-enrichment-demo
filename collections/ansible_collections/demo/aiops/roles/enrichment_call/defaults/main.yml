@@ -1,0 +1,8 @@
+---
+# Calls the enrichment service (design 5.3) and checks its answer before anything reaches ServiceNow.
+# The address, token and CA bundle come from the job's credential, as ENRICHMENT_URL,
+# ENRICHMENT_TOKEN and ENRICHMENT_CA_FILE.
+enrichment_call_revision: 1
+enrichment_call_evidence: []
+enrichment_call_catalogue: []
+enrichment_call_timeout: 90

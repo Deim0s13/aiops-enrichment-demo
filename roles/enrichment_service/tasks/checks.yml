@@ -1,0 +1,149 @@
+---
+# The service has no route, so it is checked from inside the cluster: a Job in the caller's
+# namespace, with the service CA and the token, and a Job in a namespace the policy must refuse.
+
+- name: Name this run's check Jobs
+  ansible.builtin.set_fact:
+    enrichment_service_check_run: "enrichment-check-{{ now(utc=true, fmt='%Y%m%d%H%M%S') }}"
+
+- name: Run the check Jobs
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: "{{ enrichment_service_check_run }}-{{ item.key }}"
+        namespace: "{{ item.namespace }}"
+        labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: build-check }
+      spec:
+        backoffLimit: 0
+        ttlSecondsAfterFinished: 600
+        template:
+          spec:
+            restartPolicy: Never
+            automountServiceAccountToken: false
+            containers:
+              - name: check
+                image: "{{ enrichment_service_check_image }}"
+                command: [python3, -c, "{{ lookup('ansible.builtin.template', item.script) }}"]
+                env: "{{ item.env }}"
+                volumeMounts: "{{ item.mounts }}"
+                resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 200m, memory: 128Mi } }
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  runAsNonRoot: true
+                  capabilities: { drop: [ALL] }
+                  seccompProfile: { type: RuntimeDefault }
+            volumes: "{{ item.volumes }}"
+  loop:
+    - key: caller
+      namespace: "{{ enrichment_service_caller_namespace }}"
+      script: check_caller.py.j2
+      env:
+        - { name: URL, value: "{{ enrichment_service_url }}" }
+        - name: TOKEN
+          valueFrom: { secretKeyRef: { name: "{{ enrichment_service_token_secret }}", key: token } }
+      # OpenShift publishes the service CA bundle in every namespace as this ConfigMap.
+      mounts: [{ name: ca, mountPath: /etc/ca, readOnly: true }]
+      volumes: [{ name: ca, configMap: { name: openshift-service-ca.crt } }]
+    - key: refused
+      namespace: "{{ enrichment_service_refused_namespace }}"
+      script: check_refused.py.j2
+      env: []
+      mounts: []
+      volumes: []
+  loop_control:
+    label: "{{ item.key }} ({{ item.namespace }})"
+
+- name: Wait for the check Jobs to finish
+  kubernetes.core.k8s_info:
+    api_version: batch/v1
+    kind: Job
+    namespace: "{{ item.namespace }}"
+    name: "{{ enrichment_service_check_run }}-{{ item.key }}"
+  loop:
+    - { key: caller, namespace: "{{ enrichment_service_caller_namespace }}" }
+    - { key: refused, namespace: "{{ enrichment_service_refused_namespace }}" }
+  loop_control:
+    label: "{{ item.key }}"
+  register: enrichment_service_jobs
+  until: >-
+    enrichment_service_jobs is not failed
+    and ((enrichment_service_jobs.resources | first | default({})).status | default({})).succeeded | default(0)
+        + ((enrichment_service_jobs.resources | first | default({})).status | default({})).failed | default(0) >= 1
+  retries: 30
+  delay: 5
+  no_log: true
+
+- name: Read what each check Job printed
+  kubernetes.core.k8s_log:
+    namespace: "{{ item.namespace }}"
+    label_selectors: ["job-name={{ enrichment_service_check_run }}-{{ item.key }}"]
+  loop:
+    - { key: caller, namespace: "{{ enrichment_service_caller_namespace }}" }
+    - { key: refused, namespace: "{{ enrichment_service_refused_namespace }}" }
+  loop_control:
+    label: "{{ item.key }}"
+  register: enrichment_service_logs
+  no_log: true
+
+- name: Keep only the results
+  ansible.builtin.set_fact:
+    enrichment_service_caller: "{{ (enrichment_service_logs.results[0].log_lines | select | last | default('{}')) | from_json }}"
+    enrichment_service_refused: "{{ (enrichment_service_logs.results[1].log_lines | select | last | default('{}')) | from_json }}"
+
+- name: Remove the check Jobs
+  kubernetes.core.k8s:
+    state: absent
+    api_version: batch/v1
+    kind: Job
+    namespace: "{{ item.namespace }}"
+    name: "{{ enrichment_service_check_run }}-{{ item.key }}"
+    delete_options:
+      propagationPolicy: Background
+  loop:
+    - { key: caller, namespace: "{{ enrichment_service_caller_namespace }}" }
+    - { key: refused, namespace: "{{ enrichment_service_refused_namespace }}" }
+  loop_control:
+    label: "{{ item.key }}"
+  changed_when: false
+
+- name: Judge each check
+  ansible.builtin.set_fact:
+    enrichment_service_results:
+      - check: the service answers over TLS from the service CA
+        passed: "{{ enrichment_service_caller.health | default(-1) == 200 }}"
+        detail: >-
+          HTTP {{ enrichment_service_caller.health | default('none')
+          }}{{ (', ' ~ enrichment_service_caller.error) if enrichment_service_caller.error | default(none) else '' }}
+      - check: a call without the token is refused
+        passed: "{{ enrichment_service_caller.no_token | default(-1) == 401 }}"
+        detail: "HTTP {{ enrichment_service_caller.no_token | default('none') }}"
+      - check: a call with the token gets a response in the design 5.3 shape
+        passed: >-
+          {{ enrichment_service_caller.with_token | default(-1) == 200
+             and enrichment_service_caller.status | default('') in ['enriched', 'insufficient_evidence']
+             and ['gaps', 'likely_causes', 'manual_review_required', 'next_steps', 'provenance', 'recommended_job', 'status', 'summary']
+                 | difference(enrichment_service_caller['keys'] | default([])) | length == 0 }}
+        detail: "HTTP {{ enrichment_service_caller.with_token | default('none') }}, status {{ enrichment_service_caller.status | default('none') }}"
+      - check: "a namespace other than {{ enrichment_service_caller_namespace }} cannot reach the service"
+        passed: "{{ enrichment_service_refused.connect | default('open') != 'open' }}"
+        detail: "from {{ enrichment_service_refused_namespace }}: {{ enrichment_service_refused.connect | default('no result') }}"
+
+- name: Report the checks
+  ansible.builtin.set_fact:
+    enrichment_service_report: "{{ enrichment_service_report + (enrichment_service_check_lines | from_json) }}"
+  vars:
+    enrichment_service_check_lines: >-
+      {%- set ns = namespace(lines=[]) -%}
+      {%- for c in enrichment_service_results -%}
+      {%- set ns.lines = ns.lines + [('Check passed: ' if c.passed | bool else 'CHECK FAILED: ') ~ c.check ~ ' (' ~ c.detail | trim ~ ')'] -%}
+      {%- endfor -%}
+      {{ ns.lines | to_json }}
+
+- name: Stop if a check failed
+  ansible.builtin.assert:
+    that: enrichment_service_results | map(attribute='passed') | map('bool') | reject | list | length == 0
+    fail_msg: "{{ enrichment_service_report | select('match', 'CHECK FAILED') | join('; ') }}"
+    quiet: true

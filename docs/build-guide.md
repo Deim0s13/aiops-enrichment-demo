@@ -2,7 +2,7 @@
 
 This guide builds the demo on a demo environment, one phase at a time. Follow it for every new environment. It assumes [laptop-setup.md](laptop-setup.md) is complete: Vault holds your entitlements and ServiceNow credentials, the execution environment is built, and preflight passes with the cluster checks skipped.
 
-Sections are added as each phase is implemented. Phases 01 to 03 are implemented, and phase 04 in part (M2). Phases 05 onwards are not implemented yet.
+Sections are added as each phase is implemented. Phases 01 to 04 and 07 are implemented, and phase 06 is in progress (M2). Phases 05 (knowledge) and 08 (workload) are not implemented yet.
 
 | Step | What you end up with | Time |
 |---|---|---|
@@ -14,8 +14,9 @@ Sections are added as each phase is implemented. Phases 01 to 03 are implemented
 | 6 | Phase 02: OpenShift AI checked, Connectivity Link installed, PostgreSQL deployed, Models-as-a-Service and MLflow enabled, the model served and published, the enrichment service given governed access, and the access checks passed | About 15 minutes, plus up to 30 for the first model start |
 | 7 | Phase 03: AAP operator installed, the platform running with Controller and Event-Driven Ansible, and its subscription attached | About 20 minutes on the first run |
 | 8 | Phase 04: ServiceNow incident fields, assignment group, custom roles and service identities, with their passwords in the cluster | About 2 minutes |
-| 9 | Phase 05, first step: the execution environment published to the cluster's registry | A few minutes the first time, depending on your upload speed |
-| 10 | Phase 05: AAP content, the trigger and the end-to-end checks | About 10 minutes on the first run |
+| 9 | Phase 06: the enrichment service built in the cluster, deployed behind TLS with its own token, and checked from inside the cluster | About 5 minutes on the first build |
+| 10 | Phase 07, first step: the execution environment published to the cluster's registry | A few minutes the first time, depending on your upload speed |
+| 11 | Phase 07: AAP content, the trigger and the end-to-end checks | About 10 minutes on the first run |
 
 Run each command on its own line. Pasting several lines at once, or a line containing `read`, can go wrong in zsh.
 
@@ -247,7 +248,7 @@ What it does (role `servicenow`), against the PDI in Vault, as its administrator
 2. **Creates the on-call group**, ACME Payments On-call (`demo_servicenow.assignment_group`), with one fictional member, ACME On-call engineer (`oncall@acme-bank.example`), so the group's notifications have a recipient. Incidents assigned to the group, in the Software category, are the ones the trigger will pick up.
 3. **Creates a custom role per service identity**, `acme_monitoring_integration` and `acme_ai_enrichment`, which marks what each identity is for (design section 6.1).
 4. **Creates the service identities**, `svc-monitoring` and `svc-ai-enrichment`, as web service only accounts that cannot sign in to the ServiceNow interface. Each holds its custom role and `itil`, for access to the incident table.
-5. **Sets their passwords.** The PDI outlives the cluster, so each password is kept in a Secret in the `aap` namespace (`servicenow-svc-monitoring`, `servicenow-svc-ai-enrichment`), where phase 05 will read it. A password is generated and set only when the cluster has none or the stored one no longer works, so the first run on a new environment resets both, and a rerun changes nothing. Either way, it signs in as the identity to prove the password works.
+5. **Sets their passwords.** The PDI outlives the cluster, so each password is kept in a Secret in the `aap` namespace (`servicenow-svc-monitoring`, `servicenow-svc-ai-enrichment`), where phase 07 will read it. A password is generated and set only when the cluster has none or the stored one no longer works, so the first run on a new environment resets both, and a rerun changes nothing. Either way, it signs in as the identity to prove the password works.
 6. **Adds two guard business rules** that narrow `itil`. They run inside ServiceNow before every incident insert and update, whatever the channel: `svc-ai-enrichment` cannot create incidents and can change only work notes, the enrichment state and the revision; `svc-monitoring` cannot set or change the enrichment fields. ServiceNow refuses access rule (ACL) changes over the API without the elevated `security_admin` role, which is why these are business rules.
 7. **Adds the "AI enrichment ready" notification**, sent to the incident's assignment group when the enrichment state changes to `complete` or `insufficient_evidence`. The PDI does not send email, so it appears in the Outbox (System Mailboxes > Outbound > Outbox).
 8. **Proves the guards** by acting as each identity: `svc-monitoring` creates a test incident and fails to set an enrichment state; `svc-ai-enrichment` fails to create an incident and to reassign the test incident, then writes a work note and sets the state. The outcome is read back as the administrator, not trusted from the response. Test incidents are priority 5, unassigned and begin with "ACME build check", so the trigger never picks them up, and they are deleted at the end. A failed check stops the play.
@@ -266,12 +267,30 @@ Each record is found first, created if missing and changed only where it differs
 
 On a rerun, every record line reads `none created; none updated`, each identity's `stored password works`, the checks pass again and the play recap shows `changed=0`.
 
-## 9 Phase 05, first step: publish the execution environment
+## 9 Phase 06: enrichment service
+
+The cluster builds the service from GitHub, so **push** any change to `services/enrichment` before running this phase.
+
+```bash
+ansible-navigator run playbooks/06_enrichment.yml
+```
+
+What it does (role `enrichment_service`):
+
+1. **Generates the service's API token** once and keeps it in the cluster: in `aiops-enrichment`, where the service reads it, and in `aap`, where phase 07 gives it to AAP.
+2. **Builds the image in the cluster** with OpenShift Builds from `services/enrichment` (DD08), reading the private repository with the read-only GitHub token. It builds only when that directory has changed since the last successful build, and deploys the image pinned by digest.
+3. **Deploys the service** behind a certificate that OpenShift's service CA issues for its in-cluster name, so callers can check who they are talking to. It runs as its own service account, with its Models-as-a-Service key from phase 02, and no access to the cluster API.
+4. **Applies network policies:** nothing reaches the `aiops-enrichment` namespace unless a policy allows it, and only the `aap` namespace, where AAP runs its jobs, may reach the service.
+5. **Checks it from inside the cluster**, because it has no route: a short-lived Job in `aap` confirms that the service answers over TLS, refuses a call without the token and answers a call with it in the design 5.3 shape; a Job in `aiops-data` confirms it cannot connect at all. The Jobs are removed afterwards.
+
+In milestone M2 the service is a skeleton: it returns a fixed, schema-valid answer, so the work note says so. Retrieval and the model are connected in M3.
+
+## 10 Phase 07, first step: publish the execution environment
 
 AAP runs the demo's automation in the execution environment you built on your laptop (DD17). This step pushes it to the cluster's internal registry. It runs with `ansible-playbook`, not `ansible-navigator`, because it uses your laptop's Podman, the same way as `00_secrets.yml`. It reads the cluster secrets from Vault itself, so your laptop needs the Vault collection and its Python library (laptop-setup step 1; on an older setup, run `pip install hvac` and `ansible-galaxy collection install -r collections/requirements-laptop.yml` once):
 
 ```bash
-ansible-playbook playbooks/05_execution_environment.yml
+ansible-playbook playbooks/07_execution_environment.yml
 ```
 
 What it does (role `ee_publish`):
@@ -283,23 +302,24 @@ What it does (role `ee_publish`):
 
 On a rerun, the image is `already in the cluster` and the recap shows `changed=0`. Rerun this step whenever you rebuild the execution environment.
 
-## 10 Phase 05: AAP content
+## 11 Phase 07: AAP content
 
 AAP syncs its project from GitHub, so **commit and push** your changes before running this phase: AAP runs what is on `main`, not what is on your laptop.
 
 ```bash
-ansible-navigator run playbooks/05_aap_content.yml
+ansible-navigator run playbooks/07_aap_content.yml
 ```
 
 What it does (role `aap_content`, the automation team's part). The content is declared as data and applied with `infra.aap_configuration`, the way a central automation team would keep its AAP configuration as code:
 
 1. **Organisation** ACME Bank. Project syncs are set to install no collections: everything the jobs need is in the execution environment.
 2. **Project** from this repository, with the read-only GitHub token (DD16), and the **execution environment** published in step 9, pinned by digest.
-3. **ServiceNow credential** for `svc-ai-enrichment`, through a custom credential type that hands the connection to the `servicenow.itsm` modules as environment variables, so no playbook holds a ServiceNow address or password. Its password comes from the Secret phase 04 keeps.
-4. **Three job templates and the AI incident enrichment workflow**: mark pending, then write the work note; any failure leads to the failure branch, which records enrichment as unavailable (design 5.5). In M2 the note is a fixed, labelled placeholder; the enrichment service replaces it in M2.5.
-5. **The trigger's user**, `svc-eda-enrichment`, which may launch the workflow and nothing else (design 6.1). Its password is generated once and kept in the `aap-svc-eda-enrichment` Secret.
-6. **In Event-Driven Ansible**: the same project, Red Hat's supported decision environment for AAP 2.7, pinned in `demo_aap_decision_environment` (the AAP 2.7 operator sets up none), the **event stream** ServiceNow will post to, protected by a token kept in the `eda-event-stream-servicenow` Secret, and the **rulebook activation** of `rulebooks/incident_enrichment.yml`. The rulebook passes only the incident's fields to the workflow, not the whole event. The first activation pulls the decision environment, which takes a few minutes.
-7. **Proves it**, on two test incidents it raises and removes (priority 5, unassigned, so the ServiceNow trigger never picks them up):
+3. **Enrichment service credential**: its address, its token from phase 06 and OpenShift's service CA bundle, which AAP writes to a file for the job, so the job checks the service's certificate. The work note step asks the service, checks its answer against design 5.3 (shape, citations, catalogue) and only then writes the note.
+4. **ServiceNow credential** for `svc-ai-enrichment`, through a custom credential type that hands the connection to the `servicenow.itsm` modules as environment variables, so no playbook holds a ServiceNow address or password. Its password comes from the Secret phase 04 keeps.
+5. **Three job templates and the AI incident enrichment workflow**: mark pending, then write the work note; any failure leads to the failure branch, which records enrichment as unavailable (design 5.5). In M2 the service is the skeleton, so the note says the service is connected but evidence and the model are not used yet.
+6. **The trigger's user**, `svc-eda-enrichment`, which may launch the workflow and nothing else (design 6.1). Its password is generated once and kept in the `aap-svc-eda-enrichment` Secret.
+7. **In Event-Driven Ansible**: the same project, Red Hat's supported decision environment for AAP 2.7, pinned in `demo_aap_decision_environment` (the AAP 2.7 operator sets up none), the **event stream** ServiceNow will post to, protected by a token kept in the `eda-event-stream-servicenow` Secret, and the **rulebook activation** of `rulebooks/incident_enrichment.yml`. The rulebook passes only the incident's fields to the workflow, not the whole event. The first activation pulls the decision environment, which takes a few minutes.
+8. **Proves it**, on two test incidents it raises and removes (priority 5, unassigned, so the ServiceNow trigger never picks them up):
    - an event with the wrong token is refused
    - an event with the token launches the workflow, which writes the note and sets the state to `complete`
    - a failing step leads to the failure branch, which sets the state to `unavailable`
@@ -307,8 +327,8 @@ What it does (role `aap_content`, the automation team's part). The content is de
    - the trigger's user cannot launch a job template directly
 
    Outcomes are read back from ServiceNow, not trusted from AAP. A failed check stops the play.
-8. **Connects ServiceNow to the event stream** (role `servicenow`, entry point `trigger`): an Outbound REST Message named *ACME AI enrichment event stream* holds the address and token, which change with every environment, and an asynchronous business rule, *ACME trigger: AI enrichment*, posts each new incident in the on-call group, category Software, priority 2 or 3 and with no enrichment state yet. You can see each call under System Logs > Outbound HTTP Requests.
-9. **Proves it hands-off.** As `svc-monitoring`, the identity the integration stand-in will use, it raises a qualifying incident and the same incident at priority 4. Nothing else is touched: the first must be enriched and its "AI enrichment ready" email queued in the Outbox, and the second must be left alone. Both are removed afterwards, with their emails.
+9. **Connects ServiceNow to the event stream** (role `servicenow`, entry point `trigger`): an Outbound REST Message named *ACME AI enrichment event stream* holds the address and token, which change with every environment, and an asynchronous business rule, *ACME trigger: AI enrichment*, posts each new incident in the on-call group, category Software, priority 2 or 3 and with no enrichment state yet. You can see each call under System Logs > Outbound HTTP Requests.
+10. **Proves it hands-off.** As `svc-monitoring`, the identity the integration stand-in will use, it raises a qualifying incident and the same incident at priority 4. Nothing else is touched: the first must be enriched and its "AI enrichment ready" email queued in the Outbox, and the second must be left alone. Both are removed afterwards, with their emails.
 
 ## Finish your session
 

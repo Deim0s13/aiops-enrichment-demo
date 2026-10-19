@@ -175,7 +175,7 @@
   delay: 5
   no_log: true
 
-# AAP pulls by digest, so a later push cannot change what a job runs without phase 05 knowing.
+# AAP pulls by digest, so a later push cannot change what a job runs without phase 07 knowing.
 # ['items'], not .items, which Jinja reads as the dictionary's items() method.
 - name: Keep only the image's address, pinned by digest
   ansible.builtin.set_fact:

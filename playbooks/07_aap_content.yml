@@ -1,13 +1,13 @@
 ---
-# Phase 05: the demo's content in AAP (design sections 5 and 6.1), declared as data and applied with
+# Phase 07: the demo's content in AAP (design sections 5 and 6.1), declared as data and applied with
 # infra.aap_configuration, then proved end to end.
-#   ansible-navigator run playbooks/05_aap_content.yml
+#   ansible-navigator run playbooks/07_aap_content.yml
 #
-# Run phases 03 and 04 and publish the execution environment first:
-#   ansible-playbook playbooks/05_execution_environment.yml
+# Run phases 03, 04 and 06 and publish the execution environment first:
+#   ansible-playbook playbooks/07_execution_environment.yml
 # Safe to rerun.
 
-- name: "Phase 05 | AAP content and the trigger: workflow, event stream, rulebook activation and ServiceNow business rule"
+- name: "Phase 07 | AAP content and the trigger: workflow, event stream, rulebook activation and ServiceNow business rule"
   hosts: localhost
   gather_facts: false
   tags: [aap_content]
@@ -47,6 +47,6 @@
         servicenow_trigger_category: "{{ demo_servicenow.category }}"
         servicenow_secret_namespace: "{{ demo_namespaces.aap }}"
 
-    - name: Report what phase 05 found and changed
+    - name: Report what phase 07 found and changed
       ansible.builtin.debug:
         msg: "{{ aap_content_report + servicenow_report }}"
