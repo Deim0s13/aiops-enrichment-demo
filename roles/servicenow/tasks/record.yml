@@ -60,6 +60,8 @@
            (servicenow_existing.sys_id if servicenow_existing | length > 0 else servicenow_created.record.sys_id)})
          if servicenow_record.key is defined else servicenow_ids }}
     servicenow_results: >-
-      {{ servicenow_results + [{'kind': servicenow_record.kind, 'label': servicenow_record.label,
+      {{ servicenow_results + [{'kind': servicenow_record.kind,
+         'label': servicenow_record.label ~ ((' (' ~ servicenow_changes.keys() | list | join(', ') ~ ')')
+                  if servicenow_existing | length > 0 and servicenow_changes | length > 0 else ''),
          'action': 'created' if servicenow_existing | length == 0
                    else ('updated' if servicenow_changes | length > 0 else 'unchanged')}] }}
