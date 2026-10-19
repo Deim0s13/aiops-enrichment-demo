@@ -7,11 +7,17 @@
     name: "{{ ee_publish_local_image }}"
   register: ee_publish_local
 
-- name: Stop if it has not been built
+- name: Stop if it has not been built, or not for the cluster's architecture
   ansible.builtin.assert:
-    that: ee_publish_local.images | length > 0
+    that:
+      - ee_publish_local.images | length > 0
+      - ee_publish_local.images[0].Architecture | default('') == ee_publish_architecture
     fail_msg: >-
-      There is no image {{ ee_publish_local_image }} on this laptop. Build it as in step 4 of docs/laptop-setup.md.
+      {{ ('There is no image ' ~ ee_publish_local_image ~ ' on this laptop.')
+         if ee_publish_local.images | length == 0 else
+         (ee_publish_local_image ~ ' is built for ' ~ ee_publish_local.images[0].Architecture | default('an unknown architecture')
+          ~ ', but the cluster runs ' ~ ee_publish_architecture ~ ': a job would fail with Exec format error.') }}
+      Build it as in step 4 of docs/laptop-setup.md.
     quiet: true
 
 - name: Prepare the cluster connection

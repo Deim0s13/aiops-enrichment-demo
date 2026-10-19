@@ -29,6 +29,7 @@
         ee_publish_local_image: "{{ demo_execution_environment.local_image }}"
         ee_publish_namespace: "{{ demo_namespaces.aap }}"
         ee_publish_name: "{{ demo_execution_environment.name }}"
+        ee_publish_architecture: "{{ demo_execution_environment.architecture }}"
 
     - name: Report what was found and changed
       ansible.builtin.debug:

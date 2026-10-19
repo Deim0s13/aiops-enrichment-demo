@@ -276,7 +276,7 @@ ansible-playbook playbooks/05_execution_environment.yml
 
 What it does (role `ee_publish`):
 
-1. **Finds the image** `localhost/aiops-demo-ee:latest` on your laptop, and stops if you have not built it.
+1. **Finds the image** `localhost/aiops-demo-ee:amd64` on your laptop, built for the cluster's x86_64 node (laptop-setup step 4), and stops if it is missing or built for another architecture.
 2. **Gives the registry a route**, if it has none, so the laptop can reach it. OpenShift's registry is internal by default.
 3. **Pushes the image** to `aap/aiops-demo-ee`, unless the cluster already has this build of it. The push uses your cluster token through a private auth file that is removed straight after, so the token never appears on a command line. The first push uploads the whole image, which takes a few minutes; later pushes only send changed layers.
 4. **Reports the address AAP will pull**, inside the cluster and pinned by digest, for example `image-registry.openshift-image-registry.svc:5000/aap/aiops-demo-ee@sha256:...`. AAP's job pods run in the `aap` namespace, so they can pull it without a pull secret.
@@ -298,7 +298,7 @@ What it does (role `aap_content`, the automation team's part). The content is de
 3. **ServiceNow credential** for `svc-ai-enrichment`, through a custom credential type that hands the connection to the `servicenow.itsm` modules as environment variables, so no playbook holds a ServiceNow address or password. Its password comes from the Secret phase 04 keeps.
 4. **Three job templates and the AI incident enrichment workflow**: mark pending, then write the work note; any failure leads to the failure branch, which records enrichment as unavailable (design 5.5). In M2 the note is a fixed, labelled placeholder; the enrichment service replaces it in M2.5.
 5. **The trigger's user**, `svc-eda-enrichment`, which may launch the workflow and nothing else (design 6.1). Its password is generated once and kept in the `aap-svc-eda-enrichment` Secret.
-6. **In Event-Driven Ansible**: the same project, the supported decision environment named by the installed AAP operator, the **event stream** ServiceNow will post to, protected by a token kept in the `eda-event-stream-servicenow` Secret, and the **rulebook activation** of `rulebooks/incident_enrichment.yml`. The rulebook passes only the incident's fields to the workflow, not the whole event. The first activation pulls the decision environment, which takes a few minutes.
+6. **In Event-Driven Ansible**: the same project, Red Hat's supported decision environment for AAP 2.7, pinned in `demo_aap_decision_environment` (the AAP 2.7 operator sets up none), the **event stream** ServiceNow will post to, protected by a token kept in the `eda-event-stream-servicenow` Secret, and the **rulebook activation** of `rulebooks/incident_enrichment.yml`. The rulebook passes only the incident's fields to the workflow, not the whole event. The first activation pulls the decision environment, which takes a few minutes.
 7. **Proves it**, on two test incidents it raises and removes (priority 5, unassigned, so the ServiceNow trigger never picks them up):
    - an event with the wrong token is refused
    - an event with the token launches the workflow, which writes the note and sets the state to `complete`

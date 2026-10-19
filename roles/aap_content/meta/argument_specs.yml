@@ -26,6 +26,9 @@ argument_specs:
         type: str
         required: true
         description: Name of the image stream that holds the published execution environment (phase 05, first step).
+      aap_content_de_image_override:
+        type: str
+        description: Decision environment image to use instead of the one the platform set up in EDA.
       aap_content_checks:
         type: bool
         description: Prove the trigger, workflow, failure branch, idempotency and the trigger user's limits.

@@ -187,7 +187,7 @@
 
     aap_content_cfg_eda_decision_environments:
       - name: "{{ aap_content_de_name }}"
-        description: The supported decision environment named by the installed AAP operator, pinned by digest.
+        description: Red Hat's supported decision environment, pinned in the kit's inventory (DD12).
         organization: "{{ aap_content_organisation }}"
         image_url: "{{ aap_content_de_image }}"
 

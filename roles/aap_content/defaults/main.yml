@@ -8,6 +8,8 @@ aap_content_validate_certs: true
 aap_content_project_name: aiops-enrichment-demo
 aap_content_ee_name: ACME AIOps execution environment
 aap_content_de_name: ACME AIOps decision environment
+# Empty: reuse the image of the decision environment the platform set up in EDA.
+aap_content_de_image_override: ""
 aap_content_inventory_name: ACME automation host
 aap_content_workflow_name: AI incident enrichment
 aap_content_templates:
@@ -29,7 +31,9 @@ aap_content_eda_aap_credential: "AAP | svc-eda-enrichment"
 # The event stream ServiceNow posts to, and its token.
 aap_content_event_stream_name: ServiceNow incidents
 aap_content_event_stream_secret: eda-event-stream-servicenow
-aap_content_event_stream_header: Authorization
+# Not Authorization: the platform gateway reads that header as its own credential and refuses the
+# request (HTTP 400) before EDA sees it.
+aap_content_event_stream_header: X-Acme-Event-Token
 aap_content_event_stream_credential: "Event stream | ServiceNow incidents"
 aap_content_rulebook: incident_enrichment.yml
 aap_content_rulebook_source: servicenow

@@ -24,25 +24,11 @@
   delay: 5
   no_log: true
 
-- name: Read the AAP operator, which names the decision environment image for this release
-  kubernetes.core.k8s_info:
-    api_version: operators.coreos.com/v1alpha1
-    kind: ClusterServiceVersion
-    namespace: "{{ aap_content_namespace }}"
-  register: aap_content_csvs
-  until: aap_content_csvs is not failed
-  retries: 3
-  delay: 5
-  no_log: true
-
 - name: Keep only the fields needed
   ansible.builtin.set_fact:
     aap_content_found: >-
       {{ dict(['route', 'admin', 'stream', 'servicenow', 'eda_user', 'event_stream']
          | zip(aap_content_read.results | map(attribute='resources') | map('first') | map('default', {}, true))) }}
-    aap_content_de_images: >-
-      {{ aap_content_csvs.resources | map(attribute='spec.relatedImages', default=[]) | flatten
-         | map(attribute='image') | select('search', '/de-supported') | unique | list }}
   no_log: true
 
 - name: Stop if something phase 05 relies on is missing
@@ -52,14 +38,12 @@
       - aap_content_found.admin | length > 0
       - aap_content_found.stream | length > 0
       - aap_content_found.servicenow | length > 0
-      - aap_content_de_images | length > 0
     fail_msg: >-
       Missing:
       {{ ([] + (['the AAP route (run phase 03)'] if not aap_content_found.route else [])
          + (['the AAP admin password Secret (run phase 03)'] if not aap_content_found.admin else [])
          + (['the published execution environment (run: ansible-playbook playbooks/05_execution_environment.yml)'] if not aap_content_found.stream else [])
-         + (['the svc-ai-enrichment Secret (run phase 04)'] if not aap_content_found.servicenow else [])
-         + (['a de-supported decision environment image in the AAP operator'] if not aap_content_de_images else [])) | join('; ') }}.
+         + (['the svc-ai-enrichment Secret (run phase 04)'] if not aap_content_found.servicenow else [])) | join('; ') }}.
     quiet: true
 
 - name: Work out the addresses and the identities' credentials
@@ -69,7 +53,6 @@
     aap_content_ee_image: >-
       {{ (aap_content_found.stream.status.tags | default([]) | selectattr('tag', 'equalto', 'latest') | first | default({}))['items']
          | default([{}]) | map(attribute='dockerImageReference', default='') | first }}
-    aap_content_de_image: "{{ aap_content_de_images | first }}"
     aap_content_servicenow: >-
       {{ dict(aap_content_found.servicenow.data.keys() | zip(aap_content_found.servicenow.data.values() | map('b64decode'))) }}
     # Reuse the generated secrets if the cluster has them; otherwise make new ones.
@@ -82,6 +65,44 @@
       {{ (aap_content_found.event_stream.data.token | b64decode) if aap_content_found.event_stream
          else lookup('ansible.builtin.password', '/dev/null', length=aap_content_secret_length, chars=['ascii_letters', 'digits']) }}
   no_log: true
+
+# The AAP 2.7 operator neither names nor sets up a decision environment, so the inventory pins one
+# (demo_aap_decision_environment). If it is emptied, one already defined in EDA is reused.
+- name: Read the decision environments EDA already has
+  ansible.eda.decision_environment_info:
+    aap_hostname: "{{ aap_content_url }}"
+    aap_username: admin
+    aap_password: "{{ aap_content_admin_password }}"
+    aap_validate_certs: "{{ aap_content_validate_certs }}"
+  register: aap_content_des
+  until: aap_content_des is not failed
+  retries: 3
+  delay: 5
+  when: aap_content_de_image_override | length == 0
+
+- name: Choose the decision environment image
+  ansible.builtin.set_fact:
+    aap_content_de_candidates: >-
+      {{ aap_content_des.decision_environments | default([]) | rejectattr('name', 'equalto', aap_content_de_name)
+         | sort(attribute='id') | list }}
+
+- name: Keep the chosen image
+  ansible.builtin.set_fact:
+    aap_content_de_image: >-
+      {{ aap_content_de_image_override if aap_content_de_image_override | length > 0
+         else (aap_content_de_candidates | map(attribute='image_url') | first | default('')) }}
+    aap_content_de_source: >-
+      {{ 'the inventory (demo_aap_decision_environment)' if aap_content_de_image_override | length > 0
+         else ('EDA decision environment ' ~ (aap_content_de_candidates | map(attribute='name') | first | default('none'))) }}
+
+- name: Stop if there is no decision environment image to use
+  ansible.builtin.assert:
+    that: aap_content_de_image | length > 0
+    fail_msg: >-
+      EDA has no decision environment to reuse, and the inventory names none. Set demo_aap_decision_environment
+      to a supported decision environment image, such as
+      registry.redhat.io/ansible-automation-platform-27/de-supported-rhel9 pinned by digest.
+    quiet: true
 
 - name: Store newly generated secrets in the cluster
   kubernetes.core.k8s:

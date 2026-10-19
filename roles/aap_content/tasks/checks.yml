@@ -39,13 +39,13 @@
   ansible.builtin.uri:
     url: "{{ aap_content_stream_url }}"
     method: POST
-    headers:
-      "{{ aap_content_event_stream_header }}": not-the-token
+    # Built as an expression: Ansible does not template the keys of a literal mapping.
+    headers: "{{ {aap_content_event_stream_header: 'not-the-token'} }}"
     body_format: json
     body:
       event_id: "{{ aap_content_check_run }} wrong token"
       incident: "{{ aap_content_check_inc.trigger }}"
-    status_code: [200, 201, 202, 401, 403]
+    status_code: [200, 201, 202, 400, 401, 403]
     validate_certs: "{{ aap_content_validate_certs }}"
   register: aap_content_check_wrong_token
 
@@ -53,8 +53,7 @@
   ansible.builtin.uri:
     url: "{{ aap_content_stream_url }}"
     method: POST
-    headers:
-      "{{ aap_content_event_stream_header }}": "{{ aap_content_stream_token }}"
+    headers: "{{ {aap_content_event_stream_header: aap_content_stream_token} }}"
     body_format: json
     body:
       event_id: "{{ aap_content_check_run }} trigger"
@@ -62,7 +61,7 @@
         sys_id: "{{ aap_content_check_inc.trigger.sys_id }}"
         number: "{{ aap_content_check_inc.trigger.number }}"
         short_description: "{{ aap_content_check_run }}: trigger"
-    status_code: [200, 201, 202, 401, 403]
+    status_code: [200, 201, 202, 400, 401, 403]
     validate_certs: "{{ aap_content_validate_certs }}"
   register: aap_content_check_event
   no_log: true
@@ -142,7 +141,8 @@
 
 - name: Keep only whether that launch was refused
   ansible.builtin.set_fact:
-    aap_content_check_eda_refused: "{{ aap_content_check_eda_limit.failed | default(false) and aap_content_check_eda_limit.id is not defined }}"
+    # failed_when: false clears .failed, so a refusal shows as no job ID.
+    aap_content_check_eda_refused: "{{ aap_content_check_eda_limit.id is not defined }}"
 
 - name: Read both test incidents and the trigger incident's work notes
   servicenow.itsm.api_info:

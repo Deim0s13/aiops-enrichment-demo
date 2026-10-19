@@ -36,6 +36,7 @@
         aap_content_organisation: "{{ demo_aap_organisation }}"
         aap_content_repository: "{{ demo_repository }}"
         aap_content_ee_stream: "{{ demo_execution_environment.name }}"
+        aap_content_de_image_override: "{{ demo_aap_decision_environment }}"
 
     - name: Report what phase 05 found and changed
       ansible.builtin.debug:

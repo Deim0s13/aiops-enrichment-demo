@@ -20,6 +20,9 @@ argument_specs:
         type: str
         required: true
         description: Name of the image stream.
+      ee_publish_architecture:
+        type: str
+        description: The architecture the image must be built for, the cluster node's.
       ee_publish_tag:
         type: str
         description: Tag to push.

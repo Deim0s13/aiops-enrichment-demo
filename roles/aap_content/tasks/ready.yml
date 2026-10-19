@@ -41,6 +41,7 @@
     definition:
       data:
         url: "{{ aap_content_stream_url | b64encode }}"
+        header: "{{ aap_content_event_stream_header | b64encode }}"
   no_log: true
 
 - name: Report the content
@@ -48,7 +49,7 @@
     aap_content_report:
       - "Platform: {{ aap_content_url }}; organisation {{ aap_content_organisation }}"
       - "Execution environment: {{ aap_content_ee_image }}"
-      - "Decision environment: {{ aap_content_de_image }}"
+      - "Decision environment: {{ aap_content_de_image }}, from {{ aap_content_de_source }}"
       - "Workflow: {{ aap_content_workflow_name }} ({{ aap_content_templates.values() | join(', ') }}); launched only by {{ aap_content_eda_user }}"
       - "Trigger: activation {{ aap_content_activation_name }} running; event stream {{ aap_content_stream_url }}"
       - >-

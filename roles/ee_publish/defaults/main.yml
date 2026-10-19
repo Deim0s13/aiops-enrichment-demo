@@ -2,6 +2,8 @@
 # Publishes the execution environment built on the laptop to the cluster's internal registry (DD17).
 # The local image, the namespace and the image name are inputs (meta/argument_specs.yml).
 ee_publish_tag: latest
+# The cluster node's architecture. An image built for another cannot start there.
+ee_publish_architecture: amd64
 ee_publish_validate_certs: true
 # The registry's route is created by the image registry operator once it is enabled.
 ee_publish_route_retries: 30

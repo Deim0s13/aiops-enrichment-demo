@@ -17,6 +17,7 @@ mock_modules:
   - containers.podman.podman_volume
   - ansible.controller.job_launch
   - ansible.controller.workflow_launch
+  - ansible.eda.decision_environment_info
   - ansible.eda.event_stream_info
   - ansible.eda.rulebook_activation_info
   - kubernetes.core.k8s

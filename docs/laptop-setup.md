@@ -141,6 +141,14 @@ The last line prints the token's length, not the token: expect several hundred c
 ansible-builder build -f execution-environment/execution-environment.yml -t localhost/aiops-demo-ee:latest --build-arg ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN
 ```
 
+That image runs on your laptop, so on Apple silicon it is built for arm64. AAP runs jobs on the cluster's x86_64 node, which cannot start an arm64 image (the job fails with `Exec format error`). Build a second image for the cluster while the token is still set. Podman emulates x86_64 for the build, so it takes noticeably longer:
+
+```bash
+ansible-builder build -f execution-environment/execution-environment.yml -t localhost/aiops-demo-ee:amd64 --build-arg ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN --extra-build-cli-args='--platform linux/amd64'
+```
+
+`playbooks/05_execution_environment.yml` publishes this one, and checks its architecture before pushing. On an Intel Mac, both builds give amd64 images.
+
 Then remove the token from your session and the intermediate build images, which can record build argument values in their history:
 
 ```bash
@@ -149,8 +157,6 @@ podman image prune -f
 ```
 
 Never pass the token as `--build-arg ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN="$ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN"`. That form puts the value in the printed command.
-
-This image runs on your laptop, so on Apple silicon it is built for arm64. AAP in the cluster will need an amd64 image, which is handled in milestone M2.
 
 Once it builds, record the collection versions it resolved and pin them in `collections/requirements.yml`:
 
