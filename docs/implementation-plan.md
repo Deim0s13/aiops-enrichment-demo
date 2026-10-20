@@ -104,6 +104,7 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 - AAP 2.7 details found by phase 07: the operator sets up no decision environment, so the kit pins Red Hat's supported one; and Ansible does not template the keys of a literal mapping, so a header named by a variable must be built as an expression.
 - The rulebook can hand a field over as a number (priority 3), which the enrichment service's contract rejected (HTTP 422). The failure branch caught it and marked the incident unavailable, as designed; the note step now sends every field as text, and the service's contract stays strict.
 - The second clean build from empty (2026-10-19) needed no fixes, up to and including phase 04. The next build is timed phase by phase (M1.10).
+- The third clean build from empty (2026-10-20) ran every implemented phase in the new order, 01 to 04, 06 and 07, with no code changes. The only interruption was a few minutes in which the cluster's API was unavailable (connection refused, then OpenShift's own resource types missing); rerunning the two affected steps, which are idempotent, completed the build. On a single node, the control plane restarting is a normal event to rerun through, not a fault in the kit.
 
 ### M2 Thin end to end
 
