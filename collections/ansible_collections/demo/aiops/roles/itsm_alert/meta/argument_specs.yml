@@ -1,0 +1,39 @@
+---
+argument_specs:
+  main:
+    short_description: Raise or update ServiceNow incidents from Alertmanager alerts
+    description:
+      - Stands in for the bank's monitoring-to-ITSM integration (design 2.1, step 1; DD19).
+      - One open incident per service and incident family, found by its correlation ID. A firing alert with no open
+        incident raises one; a new firing adds a work note and counts the occurrence, raising the priority for a
+        more severe alert; a cleared alert adds a work note and leaves the incident open for the engineer.
+      - The incident's alert state records the start of each alert already added, so a repeated notification
+        changes nothing.
+    options:
+      itsm_alert_alerts:
+        # raw, not list: a list option would split a string on commas.
+        type: raw
+        required: true
+        description: The alerts of one Alertmanager notification, as a list or its JSON or YAML text.
+      itsm_alert_assignment_group:
+        type: str
+        required: true
+        description: Name of the assignment group new incidents go to.
+      itsm_alert_category:
+        type: str
+        description: Category of new incidents.
+      itsm_alert_max_alerts:
+        type: int
+        description: Most alerts handled from one notification.
+      itsm_alert_text_limit:
+        type: int
+        description: Longest annotation text copied into ServiceNow.
+      itsm_alert_severity_priority:
+        type: dict
+        description: For each severity, the priority it calls for and the impact and urgency that give it.
+      itsm_alert_default_severity:
+        type: str
+        description: Severity assumed for an alert without a known one.
+      itsm_alert_correlation_display:
+        type: str
+        description: Shown in the incident's correlation display field, naming the integration.

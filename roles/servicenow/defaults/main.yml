@@ -6,9 +6,12 @@
 # Values ServiceNow returns as strings are written as strings here ("true", "10"), so the role can
 # compare what it wants with what is there and change only what differs.
 
-# Custom incident fields (design section 5.4).
+# Custom incident fields (design section 5.4). Group ai_enrichment marks the fields only the
+# enrichment writer may set; group integration holds the monitoring integration stand-in's own
+# record of the alerts it has added to an incident (DD19).
 servicenow_fields:
   - element: u_ai_enrichment_state
+    group: ai_enrichment
     column_label: AI enrichment state
     internal_type: string
     max_length: "40"
@@ -19,10 +22,12 @@ servicenow_fields:
       - { value: insufficient_evidence, label: Insufficient evidence }
       - { value: unavailable, label: Unavailable }
   - element: u_ai_enrichment_rev
+    group: ai_enrichment
     column_label: AI enrichment revision
     internal_type: integer
     choices: []
   - element: u_ai_enrichment_rating
+    group: ai_enrichment
     column_label: AI enrichment rating
     internal_type: string
     max_length: "40"
@@ -31,6 +36,17 @@ servicenow_fields:
       - { value: useful, label: Useful }
       - { value: incorrect, label: Incorrect }
       - { value: unsafe, label: Unsafe }
+  - element: u_acme_alert_occurrences
+    group: integration
+    column_label: Alert occurrences
+    internal_type: integer
+    choices: []
+  - element: u_acme_alert_state
+    group: integration
+    column_label: Alert state
+    internal_type: string
+    max_length: "4000"
+    choices: []
 
 # One custom role per identity. It marks what the identity is for: the guards below apply to
 # whoever holds it. The PDI refuses access rule (ACL) changes over the API, so the roles carry no

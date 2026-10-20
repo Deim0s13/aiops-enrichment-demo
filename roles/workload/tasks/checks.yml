@@ -1,7 +1,30 @@
 ---
 # The single scenario, end to end: trigger it from the AAP namespace, as the AAP job does, wait for the
-# OOM kill and the recovery, then confirm through the metrics API that the heap peak was recorded and
-# both alerts fired. Takes about five minutes.
+# OOM kill and the recovery, confirm through the metrics API that the heap peak was recorded and both
+# alerts fired, then confirm in ServiceNow that the integration stand-in raised or added to the
+# problem's incident and the AI trigger enriched it (DD19). Takes about five minutes.
+
+- name: Read the problem's open incident before the fault, if there is one
+  servicenow.itsm.api_info:
+    instance: &admin
+      host: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}"
+      username: "{{ secrets_values.servicenow_admin_username }}"
+      password: "{{ secrets_values.servicenow_admin_password }}"
+    resource: incident
+    sysparm_query: "correlation_id={{ workload_correlation }}^stateNOT IN6,7,8"
+    columns: [sys_id, number, u_acme_alert_occurrences]
+  register: workload_incident_before
+  until: workload_incident_before is not failed
+  retries: 3
+  delay: 5
+  vars: &correlation
+    workload_correlation: "{{ workload_alert_labels.service }}/{{ workload_alert_labels.incident_family }}"
+
+- name: Keep only how many alerts it has recorded
+  ansible.builtin.set_fact:
+    workload_occurrences_before: >-
+      {{ workload_incident_before.record | map(attribute='u_acme_alert_occurrences') | map('default', 0, true)
+         | map('int') | max | default(0) }}
 
 - name: Read the service's pod before the fault
   kubernetes.core.k8s_info:
@@ -176,6 +199,26 @@
       {%- endfor -%}
       {{ ns.out | to_json }}
 
+# Alertmanager waits a few seconds to group the alerts, then each notification is a short AAP job.
+- name: Wait for the integration's incident to record the OOM kill and for its enrichment to settle
+  servicenow.itsm.api_info:
+    instance: *admin
+    resource: incident
+    sysparm_query: "correlation_id={{ workload_correlation }}^stateNOT IN6,7,8"
+    columns: [sys_id, number, priority, sys_created_by, u_acme_alert_occurrences, u_ai_enrichment_state]
+  register: workload_incident
+  until: >-
+    workload_incident is not failed
+    and (workload_incident.record | map(attribute='u_acme_alert_occurrences') | map('default', 0, true) | map('int') | max | default(0))
+        > workload_occurrences_before | int
+    and (workload_incident.record | map(attribute='priority') | first | default('')) == '2'
+    and (workload_incident.record | map(attribute='u_ai_enrichment_state') | first | default(''))
+        in ['complete', 'insufficient_evidence', 'unavailable']
+  retries: "{{ workload_incident_retries }}"
+  delay: "{{ workload_incident_delay }}"
+  failed_when: false
+  vars: *correlation
+
 - name: Note whether the service is ready again
   ansible.builtin.set_fact:
     workload_ready_again: >-
@@ -203,6 +246,23 @@
       - check: the service comes back clean after the single scenario
         passed: "{{ workload_ready_again }}"
         detail: "{{ 'ready' if workload_ready_again else 'not ready' }}"
+      - check: the alerts reach ServiceNow through the integration stand-in, as one incident for the problem
+        passed: "{{ inc_count == 1 and inc.sys_created_by | default('') == 'svc-monitoring' and inc_occurrences > workload_occurrences_before | int }}"
+        detail: >-
+          {{ (inc.number ~ (' raised' if workload_occurrences_before | int == 0 else ' added to') ~ ' by ' ~ inc.sys_created_by
+              ~ ', occurrences ' ~ workload_occurrences_before ~ ' before and ' ~ inc_occurrences ~ ' after') if inc
+             else 'no open incident for ' ~ workload_correlation ~ '; check the Alertmanager log and the Monitoring integration activation' }}
+      - check: the OOM kill raises the incident to priority 2
+        passed: "{{ inc.priority | default('') == '2' }}"
+        detail: "priority {{ inc.priority | default('none') }}"
+      - check: the AI trigger enriches the incident
+        passed: "{{ inc.u_ai_enrichment_state | default('') in ['complete', 'insufficient_evidence'] }}"
+        detail: "enrichment state {{ inc.u_ai_enrichment_state | default('', true) or 'empty' }}"
+  vars:
+    workload_correlation: "{{ workload_alert_labels.service }}/{{ workload_alert_labels.incident_family }}"
+    inc_count: "{{ workload_incident.record | default([]) | length }}"
+    inc: "{{ workload_incident.record | default([]) | first | default({}) }}"
+    inc_occurrences: "{{ inc.u_acme_alert_occurrences | default(0, true) | int }}"
 
 - name: Report the checks
   ansible.builtin.set_fact:

@@ -48,6 +48,24 @@ aap_content_rulebook: incident_enrichment.yml
 aap_content_rulebook_source: servicenow
 aap_content_activation_name: AI incident enrichment trigger
 
+# The monitoring integration stand-in (DD19), kept apart from the AI path: its own job template,
+# ServiceNow identity, AAP user, event stream and activation (design 6.1).
+aap_content_integration_template: "Integration | Raise incident"
+aap_content_integration_servicenow_credential: "ServiceNow | svc-monitoring"
+aap_content_integration_servicenow_secret: servicenow-svc-monitoring
+aap_content_integration_eda_user: svc-eda-integration
+aap_content_integration_eda_user_secret: aap-svc-eda-integration
+aap_content_integration_eda_aap_credential: "AAP | svc-eda-integration"
+# Alertmanager signs in to its event stream with Basic authentication: it cannot send a custom
+# header. Phase 08 copies this Secret to the workload's namespace for its AlertmanagerConfig.
+aap_content_alert_stream_name: Alertmanager alerts
+aap_content_alert_stream_secret: eda-event-stream-alertmanager
+aap_content_alert_stream_username: alertmanager
+aap_content_alert_stream_credential: "Event stream | Alertmanager alerts"
+aap_content_integration_rulebook: integration_alerts.yml
+aap_content_integration_rulebook_source: alertmanager
+aap_content_integration_activation: Monitoring integration
+
 aap_content_secret_length: 40
 aap_content_ready_retries: 60
 aap_content_ready_delay: 10
@@ -57,3 +75,5 @@ aap_content_checks: true
 aap_content_check_prefix: ACME build check
 aap_content_check_retries: 30
 aap_content_check_delay: 10
+# The integration check's alerts carry this service label, so its incident is its own.
+aap_content_check_service: acme-build-check

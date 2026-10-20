@@ -9,7 +9,7 @@
     if (!grant.hasNext()) {
         return;
     }
-    var protectedFields = {{ servicenow_fields | map(attribute='element') | list | to_json }};
+    var protectedFields = {{ servicenow_fields | selectattr('group', 'equalto', 'ai_enrichment') | map(attribute='element') | list | to_json }};
     var denied = [];
     for (var i = 0; i < protectedFields.length; i++) {
         var name = protectedFields[i];

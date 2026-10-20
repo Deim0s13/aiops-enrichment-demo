@@ -19,7 +19,44 @@
     incluster_build_repository: "{{ workload_repository }}"
     incluster_build_git_secret: "{{ workload_git_secret }}"
 
-- name: Deploy the service, its metrics, its alert rules and its network policies
+- name: Read the integration's event stream address and credentials (phase 07)
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ workload_caller_namespace }}"
+    name: "{{ workload_alert_stream_secret }}"
+  register: workload_alert_stream
+  until: workload_alert_stream is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Stop if phase 07 has not set up the integration's event stream
+  ansible.builtin.assert:
+    that: ((workload_alert_stream.resources | first | default({})).data | default({})).url is defined
+    fail_msg: >-
+      There is no event stream address in Secret {{ workload_alert_stream_secret }} in {{ workload_caller_namespace }}.
+      Run phase 07 first.
+    quiet: true
+
+- name: Give Alertmanager the event stream's address and credentials
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ workload_alertmanager_secret }}"
+        namespace: "{{ workload_namespace }}"
+        labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: alert-routing }
+      data:
+        url: "{{ workload_alert_stream.resources[0].data.url }}"
+        username: "{{ workload_alert_stream.resources[0].data.username }}"
+        password: "{{ workload_alert_stream.resources[0].data.password }}"
+  no_log: true
+
+- name: Deploy the service, its metrics, its alert rules and routing, and its network policies
   kubernetes.core.k8s:
     state: present
     definition: "{{ lookup('ansible.builtin.template', 'resources.yml.j2') | from_yaml_all | list }}"
@@ -49,7 +86,10 @@
         maximum heap {{ workload_max_heap }}; callers only from {{ workload_caller_namespace }} and user workload monitoring
       - >-
         Alert rules: PaymentsNotifyHeapHigh (heap above {{ (workload_heap_alert_ratio * 100) | int }}% for
-        {{ workload_heap_alert_for }}), PaymentsNotifyOOMKilled
+        {{ workload_heap_alert_for }}), PaymentsNotifyOOMKilled (for {{ workload_oom_alert_window }} after each kill)
+      - >-
+        Alert routing: grouped by service and incident family, to the integration stand-in's event stream with
+        Basic authentication (Secret {{ workload_alertmanager_secret }})
 
 - name: Prove the fault
   ansible.builtin.include_tasks: checks.yml

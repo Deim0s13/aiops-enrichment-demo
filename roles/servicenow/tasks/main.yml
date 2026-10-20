@@ -18,7 +18,7 @@
       table: sys_dictionary
       query: "name=incident^element={{ servicenow_field.element }}"
       data: >-
-        {{ servicenow_field | dict2items | rejectattr('key', 'equalto', 'choices') | items2dict
+        {{ servicenow_field | dict2items | rejectattr('key', 'in', ['choices', 'group']) | items2dict
            | combine({'name': 'incident'}) }}
 
 - name: Create or update the fields' choices

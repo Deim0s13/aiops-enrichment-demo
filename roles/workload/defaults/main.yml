@@ -20,6 +20,18 @@ workload_alert_labels:
   service: payments-notify
   incident_family: jvm-memory
   team: payments
+# The OOMKilled alert stays firing this long after a kill. Shorter than the time between kills in the
+# recurring scenario (about three and a half minutes), so each kill is a new occurrence.
+workload_oom_alert_window: 2m
+
+# Alertmanager routing to the monitoring integration stand-in (DD19). Phase 07 keeps its event
+# stream's address and Basic credentials in a Secret in the AAP namespace; phase 08 copies them here.
+# Alerts are grouped by problem, so one notification carries every alert for it.
+workload_alert_stream_secret: eda-event-stream-alertmanager
+workload_alertmanager_secret: alertmanager-integration
+workload_alert_group_wait: 10s
+workload_alert_group_interval: 30s
+workload_alert_repeat_interval: 12h
 
 workload_ready_retries: 30
 workload_ready_delay: 10
@@ -30,3 +42,6 @@ workload_checks: true
 workload_check_image: registry.access.redhat.com/ubi9/python-312:9.8-1791998425
 workload_check_retries: 48
 workload_check_delay: 10
+# After the alerts fire: how long to wait for the integration's incident and its enrichment.
+workload_incident_retries: 30
+workload_incident_delay: 10

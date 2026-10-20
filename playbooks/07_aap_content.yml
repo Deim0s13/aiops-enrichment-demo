@@ -7,7 +7,7 @@
 #   ansible-playbook playbooks/07_execution_environment.yml
 # Safe to rerun.
 
-- name: "Phase 07 | AAP content and the trigger: workflow, event stream, rulebook activation and ServiceNow business rule"
+- name: "Phase 07 | AAP content, the trigger and the integration stand-in"
   hosts: localhost
   gather_facts: false
   tags: [aap_content]
@@ -37,6 +37,8 @@
         aap_content_repository: "{{ demo_repository }}"
         aap_content_ee_stream: "{{ demo_execution_environment.name }}"
         aap_content_de_image_override: "{{ demo_aap_decision_environment }}"
+        aap_content_integration_assignment_group: "{{ demo_servicenow.assignment_group }}"
+        aap_content_integration_category: "{{ demo_servicenow.category }}"
         aap_content_workload_url: "http://payments-notify.{{ demo_namespaces.workload }}.svc:8080"
 
     - name: Connect ServiceNow to the event stream, and prove it hands-off
@@ -47,6 +49,12 @@
         servicenow_assignment_group: "{{ demo_servicenow.assignment_group }}"
         servicenow_trigger_category: "{{ demo_servicenow.category }}"
         servicenow_secret_namespace: "{{ demo_namespaces.aap }}"
+
+    - name: Prove the monitoring integration stand-in, from alert to enriched incident
+      ansible.builtin.include_role:
+        name: aap_content
+        tasks_from: checks_integration
+      when: aap_content_checks | default(true) | bool
 
     - name: Report what phase 07 found and changed
       ansible.builtin.debug:

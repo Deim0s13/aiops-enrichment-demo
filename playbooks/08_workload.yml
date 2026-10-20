@@ -3,9 +3,10 @@
 # heap metrics, alert rules and network policies, and a check of the single fault scenario end to end.
 #   ansible-navigator run playbooks/08_workload.yml
 #
-# Run phases 01 (user workload monitoring) and 03 (the AAP namespace the service admits) first. The
-# cluster builds from GitHub, so push changes to services/payments-notify first. Safe to rerun; the
-# check triggers the fault once on each run, which takes about five minutes.
+# Run phases 01 (user workload monitoring) and 07 (the integration stand-in the alerts are routed to)
+# first. The cluster builds from GitHub, so push changes to services/payments-notify first. Safe to
+# rerun; the check triggers the fault once on each run, which raises or adds to a real incident and
+# takes about five minutes. reset.yml closes the incident.
 
 - name: "Phase 08 | Workload: payments-notify, its metrics and alert rules"
   hosts: localhost
@@ -23,11 +24,11 @@
     kubernetes.core.k8s_log: *cluster_auth
 
   tasks:
-    - name: Resolve the cluster and source secrets
+    - name: Resolve the cluster, ServiceNow and source secrets
       ansible.builtin.include_role:
         name: secrets
       vars:
-        secrets_groups: [cluster, source]
+        secrets_groups: [cluster, servicenow, source]
 
     - name: Deploy payments-notify and prove the fault
       ansible.builtin.include_role:

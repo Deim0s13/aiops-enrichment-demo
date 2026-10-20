@@ -133,9 +133,9 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 
 | ID | Task | Closes |
 |---|---|---|
-| M3.1 | Sample service `payments-notify` with a heap growth endpoint, sized to fail predictably. Written (2026-10-21): single and recurring scenarios, heap equal to the container limit (DD18), and a Demo | Trigger memory fault job template | |
-| M3.2 | Phase 08: deployment, alert rules for heap usage and restarts, and Alertmanager routing. Deployment, metrics, alert rules and the fault check written (2026-10-21, stage A); routing comes with the integration stand-in (stage B) | |
-| M3.3 | Integration stand-in: rulebook `integration_alerts.yml`, its playbook in `automation/integration/` and its own ServiceNow identity | |
+| M3.1 | Sample service `payments-notify` with a heap growth endpoint, sized to fail predictably. Done (2026-10-21): single and recurring scenarios, heap equal to the container limit (DD18), and a Demo | Trigger memory fault job template | |
+| M3.2 | Phase 08: deployment, alert rules for heap usage and restarts, and Alertmanager routing. Deployment, metrics, alert rules and the fault check done (2026-10-21, stage A: OOMKilled at a heap peak of 83.5%, both alerts fired, clean recovery). Routing to the integration stand-in written (2026-10-21, stage B): an AlertmanagerConfig grouped by service and incident family, to an event stream with Basic authentication | |
+| M3.3 | Integration stand-in: rulebook `integration_alerts.yml`, its playbook in `automation/integration/` and its own ServiceNow identity. Written (2026-10-21, stage B): one incident per problem with alerts rolled up as work notes, escalation to priority 2 on a critical alert, cleared alerts noted and the incident left open (DD19); its own AAP user; checked in phase 07 and, from the real fault, in phase 08 | |
 | M3.4 | Roles `evidence`, `diag_pod_status`, `diag_metrics`, `diag_changes` and `diag_logs`, with runtime and output limits | |
 | M3.5 | Phase 07 (part): diagnostic job templates in the workflow, run as the read-only `aiops-diagnostics` service account | |
 | M3.6 | Extend `reset.yml` to restart the sample service and clear heap dumps | |

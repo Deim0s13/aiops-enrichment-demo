@@ -1,0 +1,13 @@
+Raised by the ACME monitoring integration from an Alertmanager alert. Later alerts for the same service and problem are added to this incident as work notes, not raised as new incidents.
+
+Service: {{ itsm_alert_this.service }}
+Problem: {{ itsm_alert_this.family }}
+{% if itsm_alert_this.team %}Team: {{ itsm_alert_this.team }}
+{% endif %}
+First alert: {{ itsm_alert_this.name }} ({{ itsm_alert_this.severity }}), firing since {{ itsm_alert_this.since_text }}
+{% if itsm_alert_this.where %}Where: {{ itsm_alert_this.where }}
+{% endif %}
+{% if itsm_alert_this.detail %}
+
+{{ itsm_alert_this.detail }}
+{% endif %}

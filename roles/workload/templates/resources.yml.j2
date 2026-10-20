@@ -90,13 +90,41 @@ spec:
             description: "Pod {{ '{{' }} $labels.pod {{ '}}' }} heap is at {{ '{{' }} $value | humanizePercentage {{ '}}' }} of its maximum."
         - alert: PaymentsNotifyOOMKilled
           expr: >-
-            (increase(kube_pod_container_status_restarts_total{namespace="{{ workload_namespace }}", container="{{ workload_name }}"}[5m]) > 0)
+            (increase(kube_pod_container_status_restarts_total{namespace="{{ workload_namespace }}", container="{{ workload_name }}"}[{{ workload_oom_alert_window }}]) > 0)
             and on (namespace, pod, container)
             (kube_pod_container_status_last_terminated_reason{namespace="{{ workload_namespace }}", container="{{ workload_name }}", reason="OOMKilled"} == 1)
           labels: {{ workload_alert_labels | combine({'severity': 'critical'}) | to_json }}
           annotations:
             summary: "payments-notify was terminated for exceeding its memory limit (OOMKilled) and restarted"
-            description: "Pod {{ '{{' }} $labels.pod {{ '}}' }} was OOMKilled and restarted in the last 5 minutes."
+            description: "Pod {{ '{{' }} $labels.pod {{ '}}' }} was OOMKilled and restarted in the last {{ workload_oom_alert_window }}."
+---
+# Routes this namespace's alerts that name an incident family to the monitoring integration stand-in
+# (DD19). The operator adds a namespace matcher, so only this namespace's alerts are routed.
+apiVersion: monitoring.coreos.com/v1beta1
+kind: AlertmanagerConfig
+metadata:
+  name: {{ workload_name }}-integration
+  namespace: {{ workload_namespace }}
+  labels: {{ labels | to_json }}
+spec:
+  route:
+    receiver: monitoring-integration
+    groupBy: [service, incident_family]
+    groupWait: {{ workload_alert_group_wait }}
+    groupInterval: {{ workload_alert_group_interval }}
+    repeatInterval: {{ workload_alert_repeat_interval }}
+    matchers:
+      - {name: incident_family, matchType: "=~", value: ".+"}
+  receivers:
+    - name: monitoring-integration
+      webhookConfigs:
+        - urlSecret: {name: {{ workload_alertmanager_secret }}, key: url}
+          sendResolved: true
+          maxAlerts: 20
+          httpConfig:
+            basicAuth:
+              username: {name: {{ workload_alertmanager_secret }}, key: username}
+              password: {name: {{ workload_alertmanager_secret }}, key: password}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

@@ -1,0 +1,131 @@
+---
+# One alert: find the open incident for its service and incident family, then raise it, add the alert
+# to it, or note that the alert cleared. The incident's alert state, keyed by alert name, holds when
+# each alert started and when it cleared, so an alert already recorded changes nothing.
+
+- name: "Describe the alert: {{ itsm_alert_item.labels.alertname | default('unnamed') }}"
+  ansible.builtin.set_fact:
+    itsm_alert_this:
+      name: "{{ itsm_alert_item.labels.alertname | default('Unnamed alert') | string | truncate(80) }}"
+      status: "{{ itsm_alert_item.status }}"
+      severity: >-
+        {{ itsm_alert_item.labels.severity if itsm_alert_item.labels.severity | default('') in itsm_alert_severity_priority
+           else itsm_alert_default_severity }}
+      since: "{{ itsm_alert_item.startsAt | string | truncate(40) }}"
+      since_text: "{{ (itsm_alert_item.startsAt | string)[:19] | replace('T', ' ') }} UTC"
+      ended: "{{ itsm_alert_item.endsAt | default('') | string | truncate(40) }}"
+      ended_text: "{{ (itsm_alert_item.endsAt | default('') | string)[:19] | replace('T', ' ') }} UTC"
+      service: "{{ itsm_alert_item.labels.service }}"
+      family: "{{ itsm_alert_item.labels.incident_family }}"
+      team: "{{ itsm_alert_item.labels.team | default('') | string | truncate(80) }}"
+      correlation: "{{ itsm_alert_item.labels.service }}/{{ itsm_alert_item.labels.incident_family }}"
+      summary: >-
+        {{ itsm_alert_item.annotations.summary | default(itsm_alert_item.labels.alertname | default('Alert'), true)
+           | string | truncate(160) }}
+      detail: "{{ itsm_alert_item.annotations.description | default('') | string | truncate(itsm_alert_text_limit) }}"
+      where: >-
+        {%- set parts = [] -%}
+        {%- for key in ['namespace', 'pod', 'container'] if itsm_alert_item.labels[key] is defined -%}
+        {%- set _ = parts.append(key ~ ' ' ~ itsm_alert_item.labels[key] | string | truncate(80)) -%}
+        {%- endfor -%}
+        {{ parts | join(', ') }}
+
+- name: "Find the open incident for {{ itsm_alert_this.correlation }}"
+  servicenow.itsm.api_info:
+    resource: incident
+    # Resolved (6), closed (7) and cancelled (8) incidents are finished: a new alert opens a new one.
+    sysparm_query: "correlation_id={{ itsm_alert_this.correlation }}^stateNOT IN6,7,8^ORDERBYsys_created_on"
+    columns: [sys_id, number, priority, u_acme_alert_occurrences, u_acme_alert_state]
+  register: itsm_alert_found
+  until: itsm_alert_found is not failed
+  retries: 3
+  delay: 5
+
+- name: Read what the incident has recorded
+  ansible.builtin.set_fact:
+    itsm_alert_open: "{{ itsm_alert_open_record }}"
+    itsm_alert_seen: >-
+      {{ (itsm_alert_open_record.u_acme_alert_state | from_json)
+         if itsm_alert_open_record.u_acme_alert_state | default('') is match('^\s*\{') else {} }}
+  vars:
+    itsm_alert_open_record: "{{ itsm_alert_found.record | first | default({}) }}"
+
+- name: Decide what to do
+  ansible.builtin.set_fact:
+    itsm_alert_action: >-
+      {%- set previous = itsm_alert_seen[itsm_alert_this.name] | default({}) -%}
+      {%- if itsm_alert_this.status == 'firing' -%}
+      {{ 'raise' if not itsm_alert_open else ('repeat' if previous.since | default('') == itsm_alert_this.since else 'add') }}
+      {%- else -%}
+      {{ 'none' if not itsm_alert_open else ('repeat' if previous.cleared | default('') == itsm_alert_this.ended else 'clear') }}
+      {%- endif -%}
+    itsm_alert_target: "{{ itsm_alert_severity_priority[itsm_alert_this.severity] }}"
+
+- name: Work out the incident's new alert record
+  ansible.builtin.set_fact:
+    itsm_alert_occurrence: >-
+      {{ 1 if itsm_alert_action == 'raise'
+         else (itsm_alert_open.u_acme_alert_occurrences | default(0, true) | int) + (1 if itsm_alert_action == 'add' else 0) }}
+    itsm_alert_escalate: >-
+      {{ itsm_alert_action == 'add' and (itsm_alert_open.priority | default('5', true) | int) > (itsm_alert_target.priority | int) }}
+    itsm_alert_state: >-
+      {{ itsm_alert_seen | combine({itsm_alert_this.name: {
+           'since': (itsm_alert_seen[itsm_alert_this.name].since | default(itsm_alert_this.since))
+                    if itsm_alert_action == 'clear' else itsm_alert_this.since,
+           'cleared': itsm_alert_this.ended if itsm_alert_action == 'clear' else ''}}) | to_json }}
+
+- name: Write the work note
+  ansible.builtin.set_fact:
+    itsm_alert_note: >-
+      {%- if itsm_alert_action == 'clear' -%}
+      Monitoring integration: {{ itsm_alert_this.name }} cleared at {{ itsm_alert_this.ended_text }}.
+      The incident stays open for the assigned team to review and close.
+      {%- else -%}
+      Monitoring integration: {{ itsm_alert_this.name }} ({{ itsm_alert_this.severity }}) firing since
+      {{ itsm_alert_this.since_text }}. Occurrence {{ itsm_alert_occurrence }} of this problem.
+      {%- if itsm_alert_this.detail %} {{ itsm_alert_this.detail }}{% endif -%}
+      {%- if itsm_alert_escalate | bool %} Priority raised to {{ itsm_alert_target.priority }} for a {{ itsm_alert_this.severity }} alert.{% endif -%}
+      {%- endif -%}
+
+- name: "Raise the incident for {{ itsm_alert_this.correlation }}"
+  servicenow.itsm.api:
+    resource: incident
+    action: post
+    data:
+      short_description: "{{ itsm_alert_this.summary }}"
+      description: "{{ lookup('ansible.builtin.template', 'description.j2') | trim }}"
+      category: "{{ itsm_alert_category }}"
+      assignment_group: "{{ itsm_alert_group_id }}"
+      impact: "{{ itsm_alert_target.impact }}"
+      urgency: "{{ itsm_alert_target.urgency }}"
+      correlation_id: "{{ itsm_alert_this.correlation }}"
+      correlation_display: "{{ itsm_alert_correlation_display }}"
+      work_notes: "{{ itsm_alert_note }}"
+      u_acme_alert_occurrences: "1"
+      u_acme_alert_state: "{{ itsm_alert_state }}"
+  register: itsm_alert_raised
+  when: itsm_alert_action == 'raise'
+
+- name: "Add the alert to {{ itsm_alert_open.number | default('the incident') }}"
+  servicenow.itsm.api:
+    resource: incident
+    action: patch
+    sys_id: "{{ itsm_alert_open.sys_id }}"
+    data: >-
+      {{ {'work_notes': itsm_alert_note, 'u_acme_alert_state': itsm_alert_state,
+          'u_acme_alert_occurrences': itsm_alert_occurrence | string}
+         | combine({'impact': itsm_alert_target.impact, 'urgency': itsm_alert_target.urgency} if itsm_alert_escalate | bool else {}) }}
+  when: itsm_alert_action in ['add', 'clear']
+
+- name: Record the outcome
+  ansible.builtin.set_fact:
+    itsm_alert_outcomes: "{{ itsm_alert_outcomes + [itsm_alert_this.name ~ ' ' ~ itsm_alert_this.status ~ ': ' ~ itsm_alert_outcome] }}"
+  vars:
+    itsm_alert_number: "{{ itsm_alert_open.number | default(itsm_alert_raised.record.number | default('')) }}"
+    itsm_alert_outcome: >-
+      {{ {'raise': 'raised ' ~ itsm_alert_number ~ ' for ' ~ itsm_alert_this.correlation ~ ', priority ' ~ itsm_alert_target.priority,
+          'add': 'added to ' ~ itsm_alert_number ~ ', occurrence ' ~ itsm_alert_occurrence
+                 ~ (', priority raised to ' ~ itsm_alert_target.priority if itsm_alert_escalate | bool else ''),
+          'clear': 'noted as cleared on ' ~ itsm_alert_number ~ ', which stays open',
+          'repeat': 'already recorded on ' ~ itsm_alert_number ~ '; nothing added',
+          'none': 'no open incident for ' ~ itsm_alert_this.correlation ~ '; nothing to do'}[itsm_alert_action] }}

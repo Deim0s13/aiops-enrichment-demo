@@ -19,7 +19,9 @@ argument_specs:
       servicenow_fields:
         type: list
         elements: dict
-        description: Custom incident fields, each with its choices.
+        description:
+          - Custom incident fields, each with its choices and a group, ai_enrichment or integration.
+          - The monitoring guard protects the ai_enrichment group.
       servicenow_roles:
         type: list
         elements: dict

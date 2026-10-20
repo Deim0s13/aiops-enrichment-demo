@@ -1,0 +1,15 @@
+---
+# Monitoring integration stand-in (flow step 1): raises or updates the ServiceNow incident for the
+# alerts in one Alertmanager notification, as svc-monitoring (DD19). Vars from the rulebook:
+# alertmanager_alerts. From the job template: integration_assignment_group and integration_category.
+- name: "Integration | Raise or update the incident for an Alertmanager notification"
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Raise or update the incident
+      ansible.builtin.include_role:
+        name: demo.aiops.itsm_alert
+      vars:
+        itsm_alert_alerts: "{{ alertmanager_alerts }}"
+        itsm_alert_assignment_group: "{{ integration_assignment_group }}"
+        itsm_alert_category: "{{ integration_category }}"

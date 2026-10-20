@@ -1,0 +1,30 @@
+---
+# Monitoring integration stand-in (flow step 1, DD19). Receives Alertmanager notifications through an
+# EDA event stream with Basic authentication, and passes only their alerts to the integration job,
+# which raises or updates the incident as svc-monitoring. Separate from the AI path: its own
+# activation, its own AAP user and its own ServiceNow identity (design 6.1). The event stream
+# replaces this webhook source when the activation is created, and checks the credentials first.
+- name: Raise incidents from Alertmanager notifications
+  hosts: all
+  sources:
+    - name: alertmanager
+      ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+  rules:
+    - name: Pass the notification's alerts to the integration job
+      condition: event.payload.alerts is defined and event.payload.receiver is defined
+      action:
+        run_job_template:
+          name: Integration | Raise incident
+          organization: ACME Bank
+          include_events: false
+          job_args:
+            extra_vars:
+              alertmanager_alerts: "{{ event.payload.alerts }}"
+
+    - name: Log and drop an event that is not an Alertmanager notification
+      condition: event.payload.alerts is not defined or event.payload.receiver is not defined
+      action:
+        debug:
+          msg: "Dropped an event without receiver and alerts: not an Alertmanager notification."

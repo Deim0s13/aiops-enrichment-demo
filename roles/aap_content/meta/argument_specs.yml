@@ -7,6 +7,8 @@ argument_specs:
         enrichment job templates and the AI incident enrichment workflow with its failure branch."
       - "EDA: the AAP user the trigger runs as, a project, a decision environment, the event stream ServiceNow
         posts to, and the rulebook activation."
+      - "The monitoring integration stand-in (DD19): its job template and ServiceNow credential, its own AAP user,
+        the event stream Alertmanager posts to with Basic authentication, and its activation."
       - Reads the cluster and source secrets from secrets_values, and the AAP admin, ServiceNow identity and
         generated secrets from the cluster.
     options:
@@ -22,6 +24,14 @@ argument_specs:
         type: dict
         required: true
         description: The repository AAP syncs as its project, with url, owner, name and branch.
+      aap_content_integration_assignment_group:
+        type: str
+        required: true
+        description: Assignment group of the incidents the integration raises.
+      aap_content_integration_category:
+        type: str
+        required: true
+        description: Category of the incidents the integration raises.
       aap_content_workload_url:
         type: str
         required: true
@@ -35,4 +45,7 @@ argument_specs:
         description: Decision environment image to use instead of the one the platform set up in EDA.
       aap_content_checks:
         type: bool
-        description: Prove the trigger, workflow, failure branch, idempotency and the trigger user's limits.
+        description: Prove the trigger, workflow, failure branch, idempotency and the trigger user's limits, and the integration.
+      aap_content_check_service:
+        type: str
+        description: Service label on the integration check's alerts.

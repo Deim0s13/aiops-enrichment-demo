@@ -1,0 +1,62 @@
+---
+- name: Accept the alerts as a list, however EDA passed them
+  ansible.builtin.set_fact:
+    itsm_alert_received: >-
+      {{ (itsm_alert_alerts | from_yaml) if itsm_alert_alerts is string else itsm_alert_alerts }}
+
+- name: Stop if the alerts are not a list
+  ansible.builtin.assert:
+    that: itsm_alert_received is sequence and itsm_alert_received is not string and itsm_alert_received is not mapping
+    fail_msg: The notification's alerts are not a list, so this is not an Alertmanager notification.
+    quiet: true
+
+# Labels become a correlation ID and a ServiceNow query, so only plain names are accepted.
+- name: Keep the well-formed alerts, oldest first
+  ansible.builtin.set_fact:
+    itsm_alert_valid: >-
+      {{ itsm_alert_received | select('mapping')
+         | selectattr('status', 'defined') | selectattr('status', 'in', ['firing', 'resolved'])
+         | selectattr('startsAt', 'defined')
+         | selectattr('labels.service', 'defined') | selectattr('labels.service', 'match', '^[a-z0-9][a-z0-9-]{0,62}$')
+         | selectattr('labels.incident_family', 'defined')
+         | selectattr('labels.incident_family', 'match', '^[a-z0-9][a-z0-9-]{0,62}$')
+         | sort(attribute='startsAt') | list }}
+
+- name: Find the assignment group
+  servicenow.itsm.api_info:
+    resource: sys_user_group
+    sysparm_query: "name={{ itsm_alert_assignment_group }}"
+    columns: [sys_id]
+  register: itsm_alert_group
+  until: itsm_alert_group is not failed
+  retries: 3
+  delay: 5
+  when: itsm_alert_valid | length > 0
+
+- name: Stop if there is no such group
+  ansible.builtin.assert:
+    that: itsm_alert_group.record | length == 1
+    fail_msg: "There is no assignment group named {{ itsm_alert_assignment_group }}, or this identity cannot read it."
+    quiet: true
+  when: itsm_alert_valid | length > 0
+
+- name: Start the report
+  ansible.builtin.set_fact:
+    itsm_alert_group_id: "{{ itsm_alert_group.record[0].sys_id | default('') }}"
+    itsm_alert_outcomes: []
+
+- name: Raise, add to or clear an incident for each alert
+  ansible.builtin.include_tasks: alert.yml
+  loop: "{{ itsm_alert_valid[:itsm_alert_max_alerts] }}"
+  loop_control:
+    loop_var: itsm_alert_item
+    label: "{{ itsm_alert_item.labels.alertname | default('unnamed') }} {{ itsm_alert_item.status }}"
+
+- name: Report
+  ansible.builtin.debug:
+    msg: >-
+      {{ itsm_alert_outcomes
+         + (['Ignored ' ~ (itsm_alert_received | length - itsm_alert_valid | length) ~ ' alert(s) without a status, a start time,'
+             ~ ' or service and incident_family labels'] if itsm_alert_received | length > itsm_alert_valid | length else [])
+         + (['Ignored ' ~ (itsm_alert_valid | length - itsm_alert_max_alerts) ~ ' alert(s) beyond the limit of ' ~ itsm_alert_max_alerts]
+            if itsm_alert_valid | length > itsm_alert_max_alerts else []) }}

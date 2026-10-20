@@ -18,6 +18,9 @@
     - { api_version: v1, kind: Secret, name: "{{ aap_content_event_stream_secret }}" }
     - { api_version: v1, kind: Secret, name: "{{ aap_content_enrichment_secret }}" }
     - { api_version: v1, kind: ConfigMap, name: "{{ aap_content_service_ca_configmap }}" }
+    - { api_version: v1, kind: Secret, name: "{{ aap_content_integration_servicenow_secret }}" }
+    - { api_version: v1, kind: Secret, name: "{{ aap_content_integration_eda_user_secret }}" }
+    - { api_version: v1, kind: Secret, name: "{{ aap_content_alert_stream_secret }}" }
   loop_control:
     label: "{{ item.kind }} {{ item.name }}"
   register: aap_content_read
@@ -29,7 +32,8 @@
 - name: Keep only the fields needed
   ansible.builtin.set_fact:
     aap_content_found: >-
-      {{ dict(['route', 'admin', 'stream', 'servicenow', 'eda_user', 'event_stream', 'enrichment', 'service_ca']
+      {{ dict(['route', 'admin', 'stream', 'servicenow', 'eda_user', 'event_stream', 'enrichment', 'service_ca',
+          'monitoring', 'integration_user', 'alert_stream']
          | zip(aap_content_read.results | map(attribute='resources') | map('first') | map('default', {}, true))) }}
   no_log: true
 
@@ -42,6 +46,7 @@
       - aap_content_found.servicenow | length > 0
       - aap_content_found.enrichment | length > 0
       - aap_content_found.service_ca | length > 0
+      - aap_content_found.monitoring | length > 0
     fail_msg: >-
       Missing:
       {{ ([] + (['the AAP route (run phase 03)'] if not aap_content_found.route else [])
@@ -49,7 +54,8 @@
          + (['the published execution environment (run: ansible-playbook playbooks/07_execution_environment.yml)'] if not aap_content_found.stream else [])
          + (['the svc-ai-enrichment Secret (run phase 04)'] if not aap_content_found.servicenow else [])
          + (['the enrichment service token (run phase 06)'] if not aap_content_found.enrichment else [])
-         + (['the service CA bundle ConfigMap'] if not aap_content_found.service_ca else [])) | join('; ') }}.
+         + (['the service CA bundle ConfigMap'] if not aap_content_found.service_ca else [])
+         + (['the svc-monitoring Secret (run phase 04)'] if not aap_content_found.monitoring else [])) | join('; ') }}.
     quiet: true
 
 - name: Work out the addresses and the identities' credentials
@@ -64,6 +70,8 @@
     aap_content_service_ca: "{{ aap_content_found.service_ca.data['service-ca.crt'] }}"
     aap_content_servicenow: >-
       {{ dict(aap_content_found.servicenow.data.keys() | zip(aap_content_found.servicenow.data.values() | map('b64decode'))) }}
+    aap_content_monitoring: >-
+      {{ dict(aap_content_found.monitoring.data.keys() | zip(aap_content_found.monitoring.data.values() | map('b64decode'))) }}
     # Reuse the generated secrets if the cluster has them; otherwise make new ones.
     aap_content_eda_password_new: "{{ aap_content_found.eda_user | length == 0 }}"
     aap_content_eda_password: >-
@@ -72,6 +80,14 @@
     aap_content_stream_token_new: "{{ aap_content_found.event_stream | length == 0 }}"
     aap_content_stream_token: >-
       {{ (aap_content_found.event_stream.data.token | b64decode) if aap_content_found.event_stream
+         else lookup('ansible.builtin.password', '/dev/null', length=aap_content_secret_length, chars=['ascii_letters', 'digits']) }}
+    aap_content_integration_password_new: "{{ aap_content_found.integration_user | length == 0 }}"
+    aap_content_integration_password: >-
+      {{ (aap_content_found.integration_user.data.password | b64decode) if aap_content_found.integration_user
+         else lookup('ansible.builtin.password', '/dev/null', length=aap_content_secret_length, chars=['ascii_letters', 'digits']) }}
+    aap_content_alert_stream_password_new: "{{ aap_content_found.alert_stream | length == 0 }}"
+    aap_content_alert_stream_password: >-
+      {{ (aap_content_found.alert_stream.data.password | b64decode) if aap_content_found.alert_stream
          else lookup('ansible.builtin.password', '/dev/null', length=aap_content_secret_length, chars=['ascii_letters', 'digits']) }}
   no_log: true
 
@@ -140,6 +156,18 @@
       data:
         header: "{{ aap_content_event_stream_header }}"
         token: "{{ aap_content_stream_token }}"
+    - name: "{{ aap_content_integration_eda_user_secret }}"
+      component: aap-identity
+      new: "{{ aap_content_integration_password_new }}"
+      data:
+        username: "{{ aap_content_integration_eda_user }}"
+        password: "{{ aap_content_integration_password }}"
+    - name: "{{ aap_content_alert_stream_secret }}"
+      component: event-stream-credentials
+      new: "{{ aap_content_alert_stream_password_new }}"
+      data:
+        username: "{{ aap_content_alert_stream_username }}"
+        password: "{{ aap_content_alert_stream_password }}"
   loop_control:
     label: "{{ item.name }}"
   when: item.new | bool

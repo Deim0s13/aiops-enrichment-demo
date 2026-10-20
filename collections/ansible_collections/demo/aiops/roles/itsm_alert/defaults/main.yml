@@ -1,0 +1,17 @@
+---
+# Raises or updates ServiceNow incidents from Alertmanager alerts as the svc-monitoring identity,
+# standing in for the bank's monitoring-to-ITSM integration (DD19): one open incident per service
+# and incident family, with later alerts added to it as work notes. The ServiceNow connection comes
+# from the job's credential, as SN_HOST, SN_USERNAME and SN_PASSWORD.
+itsm_alert_category: software
+# A notification with more alerts than this is handled up to the limit, and the rest reported.
+itsm_alert_max_alerts: 20
+# Longest annotation text copied into ServiceNow.
+itsm_alert_text_limit: 500
+# ServiceNow derives the priority from impact and urgency: 2 and 2 give priority 3, 2 and 1 give 2.
+# An alert with another severity, or none, is treated as itsm_alert_default_severity.
+itsm_alert_severity_priority:
+  critical: { priority: "2", impact: "2", urgency: "1" }
+  warning: { priority: "3", impact: "2", urgency: "2" }
+itsm_alert_default_severity: warning
+itsm_alert_correlation_display: ACME monitoring integration

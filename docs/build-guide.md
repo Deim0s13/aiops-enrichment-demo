@@ -16,8 +16,8 @@ Sections are added as each phase is implemented. Phases 01 to 04, 06 and 07 are 
 | 8 | Phase 04: ServiceNow incident fields, assignment group, custom roles and service identities, with their passwords in the cluster | About 2 minutes |
 | 9 | Phase 06: the enrichment service built in the cluster, deployed behind TLS with its own token, and checked from inside the cluster | About 5 minutes on the first build |
 | 10 | Phase 07, first step: the execution environment published to the cluster's registry | A few minutes the first time, depending on your upload speed |
-| 11 | Phase 07: AAP content, the trigger and the end-to-end checks | About 10 minutes on the first run |
-| 12 | Phase 08: payments-notify, its metrics and alert rules, and a check of the fault | About 10 minutes, five of them the fault check |
+| 11 | Phase 07: AAP content, the trigger, the monitoring integration stand-in and the end-to-end checks | About 15 minutes on the first run |
+| 12 | Phase 08: payments-notify, its metrics, alert rules and alert routing, and a check from the fault to the enriched incident | About 10 minutes, five of them the fault check |
 
 Run each command on its own line. Pasting several lines at once, or a line containing `read`, can go wrong in zsh.
 
@@ -245,7 +245,7 @@ ansible-navigator run playbooks/04_servicenow.yml
 
 What it does (role `servicenow`), against the PDI in Vault, as its administrator:
 
-1. **Adds the enrichment fields** to the incident table: `u_ai_enrichment_state` and `u_ai_enrichment_rating`, with their choices, and `u_ai_enrichment_rev` (design section 5.4).
+1. **Adds the custom fields** to the incident table: the enrichment fields `u_ai_enrichment_state` and `u_ai_enrichment_rating`, with their choices, and `u_ai_enrichment_rev` (design section 5.4); and the integration stand-in's own record of the alerts it has added to an incident, `u_acme_alert_occurrences` and `u_acme_alert_state` (DD19).
 2. **Creates the on-call group**, ACME Payments On-call (`demo_servicenow.assignment_group`), with one fictional member, ACME On-call engineer (`oncall@acme-bank.example`), so the group's notifications have a recipient. Incidents assigned to the group, in the Software category, are the ones the trigger will pick up.
 3. **Creates a custom role per service identity**, `acme_monitoring_integration` and `acme_ai_enrichment`, which marks what each identity is for (design section 6.1).
 4. **Creates the service identities**, `svc-monitoring` and `svc-ai-enrichment`, as web service only accounts that cannot sign in to the ServiceNow interface. Each holds its custom role and `itil`, for access to the incident table.
@@ -257,7 +257,7 @@ What it does (role `servicenow`), against the PDI in Vault, as its administrator
 Each record is found first, created if missing and changed only where it differs, so the phase is safe to rerun. On the first run against a PDI, expect something like:
 
 ```text
-- 'Fields: 3; created incident.u_ai_enrichment_state, ...; none updated'
+- 'Fields: 5; created incident.u_ai_enrichment_state, ...; none updated'
 - ...
 - 'Guards: 2; created ACME guard: AI enrichment writer, ACME guard: monitoring integration; none updated'
 - 'Notifications: 1; created AI enrichment ready; none updated'
@@ -316,11 +316,12 @@ What it does (role `aap_content`, the automation team's part). The content is de
 1. **Organisation** ACME Bank. Project syncs are set to install no collections: everything the jobs need is in the execution environment.
 2. **Project** from this repository, with the read-only GitHub token (DD16), and the **execution environment** published in step 9, pinned by digest.
 3. **Enrichment service credential**: its address, its token from phase 06 and OpenShift's service CA bundle, which AAP writes to a file for the job, so the job checks the service's certificate. The work note step asks the service, checks its answer against design 5.3 (shape, citations, catalogue) and only then writes the note.
-4. **ServiceNow credential** for `svc-ai-enrichment`, through a custom credential type that hands the connection to the `servicenow.itsm` modules as environment variables, so no playbook holds a ServiceNow address or password. Its password comes from the Secret phase 04 keeps.
+4. **ServiceNow credentials** for `svc-ai-enrichment` and, for the integration stand-in only, `svc-monitoring`, through a custom credential type that hands the connection to the `servicenow.itsm` modules as environment variables, so no playbook holds a ServiceNow address or password. The passwords come from the Secrets phase 04 keeps.
 5. **Three job templates and the AI incident enrichment workflow**: mark pending, then write the work note; any failure leads to the failure branch, which records enrichment as unavailable (design 5.5). In M2 the service is the skeleton, so the note says the service is connected but evidence and the model are not used yet.
 6. **The trigger's user**, `svc-eda-enrichment`, which may launch the workflow and nothing else (design 6.1). Its password is generated once and kept in the `aap-svc-eda-enrichment` Secret.
-7. **In Event-Driven Ansible**: the same project, Red Hat's supported decision environment for AAP 2.7, pinned in `demo_aap_decision_environment` (the AAP 2.7 operator sets up none), the **event stream** ServiceNow will post to, protected by a token kept in the `eda-event-stream-servicenow` Secret, and the **rulebook activation** of `rulebooks/incident_enrichment.yml`. The rulebook passes only the incident's fields to the workflow, not the whole event. The first activation pulls the decision environment, which takes a few minutes.
-8. **Proves it**, on two test incidents it raises and removes (priority 5, unassigned, so the ServiceNow trigger never picks them up):
+7. **The monitoring integration stand-in** (DD19), kept apart from the AI path as the bank's real integration would be: the job template *Integration | Raise incident*, which runs as `svc-monitoring`, one job at a time; its own AAP user, `svc-eda-integration` (Secret `aap-svc-eda-integration`), which may launch that template and nothing else; a second event stream, *Alertmanager alerts*, protected by a user name and password, because Alertmanager can only sign in with Basic authentication (Secret `eda-event-stream-alertmanager`, which phase 08 copies for Alertmanager); and the *Monitoring integration* activation of `rulebooks/integration_alerts.yml`, which passes only the notification's alerts to the job.
+8. **In Event-Driven Ansible**: the same project, Red Hat's supported decision environment for AAP 2.7, pinned in `demo_aap_decision_environment` (the AAP 2.7 operator sets up none), the **event stream** ServiceNow will post to, protected by a token kept in the `eda-event-stream-servicenow` Secret, and the **rulebook activation** of `rulebooks/incident_enrichment.yml`. The rulebook passes only the incident's fields to the workflow, not the whole event. The first activation pulls the decision environment, which takes a few minutes.
+9. **Proves it**, on two test incidents it raises and removes (priority 5, unassigned, so the ServiceNow trigger never picks them up):
    - an event with the wrong token is refused
    - an event with the token launches the workflow, which writes the note and sets the state to `complete`
    - a failing step leads to the failure branch, which sets the state to `unavailable`
@@ -328,12 +329,22 @@ What it does (role `aap_content`, the automation team's part). The content is de
    - the trigger's user cannot launch a job template directly
 
    Outcomes are read back from ServiceNow, not trusted from AAP. A failed check stops the play.
-9. **Connects ServiceNow to the event stream** (role `servicenow`, entry point `trigger`): an Outbound REST Message named *ACME AI enrichment event stream* holds the address and token, which change with every environment, and an asynchronous business rule, *ACME trigger: AI enrichment*, posts each new incident in the on-call group, category Software, priority 2 or 3 and with no enrichment state yet. You can see each call under System Logs > Outbound HTTP Requests.
-10. **Proves it hands-off.** As `svc-monitoring`, the identity the integration stand-in will use, it raises a qualifying incident and the same incident at priority 4. Nothing else is touched: the first must be enriched and its "AI enrichment ready" email queued in the Outbox, and the second must be left alone. Both are removed afterwards, with their emails.
+10. **Connects ServiceNow to the event stream** (role `servicenow`, entry point `trigger`): an Outbound REST Message named *ACME AI enrichment event stream* holds the address and token, which change with every environment, and an asynchronous business rule, *ACME trigger: AI enrichment*, posts each new incident in the on-call group, category Software, priority 2 or 3 and with no enrichment state yet. You can see each call under System Logs > Outbound HTTP Requests.
+11. **Proves it hands-off.** As `svc-monitoring`, the identity the integration stand-in uses, it raises a qualifying incident and the same incident at priority 4. Nothing else is touched: the first must be enriched and its "AI enrichment ready" email queued in the Outbox, and the second must be left alone. Both are removed afterwards, with their emails.
+12. **Proves the integration stand-in**, from alert to enriched incident, by posting Alertmanager notifications to its event stream for a test service of its own (`acme-build-check`):
+    - a notification with the wrong password is refused
+    - a warning alert raises one incident, as `svc-monitoring`, at priority 3
+    - the same notification again adds nothing
+    - a critical alert for the same problem is added to that incident as occurrence 2 and raises it to priority 2
+    - the warning alert clearing is noted, and the incident stays open
+    - the AI trigger enriches the incident the integration raised
+    - the integration's user cannot launch the enrichment workflow
+
+    The incident is removed afterwards. This step takes a few minutes, because each notification is a short AAP job and the enrichment runs too.
 
 ## 12 Phase 08: workload
 
-The cluster builds the sample service from GitHub, so **push** any change to `services/payments-notify` first.
+The cluster builds the sample service from GitHub, so **push** any change to `services/payments-notify` first. Run phase 07 first: the alerts are routed to its integration stand-in.
 
 ```bash
 ansible-navigator run playbooks/08_workload.yml
@@ -343,9 +354,10 @@ What it does (role `workload`):
 
 1. **Builds `payments-notify`** in the cluster, in `demo-payments`, with the same build role as the enrichment service: only when its directory has changed, deployed pinned by digest.
 2. **Deploys it deliberately misconfigured**, as many real JVM services are: its maximum heap equals its container's 256 MiB memory limit. When its notification template cache grows, the JVM's own memory pushes the container over the limit before the heap is full, so the kernel kills it (OOMKilled) rather than Java raising an error (DD18).
-3. **Publishes its heap metrics** to user workload monitoring, and adds two alert rules: `PaymentsNotifyHeapHigh` (heap above 60% for 30 seconds) and `PaymentsNotifyOOMKilled`. Both carry the labels `service`, `incident_family` and `team`.
-4. **Applies network policies**: only the `aap` namespace (where the fault trigger runs) and user workload monitoring (which scrapes it) can reach the service.
-5. **Proves the fault**: it triggers the single scenario from the `aap` namespace, waits for the OOM kill and the recovery, and confirms through the metrics API that the heap peak was recorded and both alerts fired. This takes about five minutes on every run.
+3. **Publishes its heap metrics** to user workload monitoring, and adds two alert rules: `PaymentsNotifyHeapHigh` (heap above 60% for 30 seconds) and `PaymentsNotifyOOMKilled`, which fires for two minutes after each kill. Both carry the labels `service`, `incident_family` and `team`.
+4. **Routes the alerts to the integration stand-in** with an `AlertmanagerConfig`: alerts that name an incident family go, grouped by service and incident family, to phase 07's *Alertmanager alerts* event stream, signed in with the user name and password phase 07 generated (copied to the `alertmanager-integration` Secret). The stand-in keeps one open incident per service and problem (DD19): the first alert raises it at priority 3, later alerts are added as work notes with an occurrence count, a critical alert raises it to priority 2, and a cleared alert is noted while the incident stays open for the engineer.
+5. **Applies network policies**: only the `aap` namespace (where the fault trigger runs) and user workload monitoring (which scrapes it) can reach the service.
+6. **Proves the fault, end to end**: it triggers the single scenario from the `aap` namespace, waits for the OOM kill and the recovery, and confirms through the metrics API that the heap peak was recorded and both alerts fired. Then it confirms in ServiceNow that the alerts raised one incident, or added to the one already open, as `svc-monitoring`; that the OOM kill raised it to priority 2; and that the AI trigger enriched it. This takes about five minutes on every run, and leaves a real incident behind: `reset.yml` closes it.
 
 ### Triggering the fault in a demo
 
@@ -378,7 +390,16 @@ To stop a recurring fault by hand, clear it through the same port forward. The c
 curl -s -X POST 'http://localhost:8080/fault/clear'
 ```
 
-Watch it happen with `oc -n demo-payments get pods -w`, or in the console under Observe > Alerting.
+Watch it happen with `oc -n demo-payments get pods -w`, or in the console under Observe > Alerting. In ServiceNow, the incident appears in the ACME Payments On-call group within a minute of the heap alert, with the AI enrichment note shortly after:
+
+- **Single**: one incident, a note for the heap alert, a second for the OOM kill (priority raised to 2), then notes as each alert clears. The service is healthy again; the engineer reads the enrichment and closes the incident.
+- **Recurring**: the same incident collects a new occurrence every few minutes, a heap alert and an OOM kill each time, until the fault is cleared. This is where the engineer has to act.
+
+If no incident appears, look at the Alertmanager log first, then the *Monitoring integration* activation's history in AAP:
+
+```bash
+oc -n openshift-user-workload-monitoring logs alertmanager-user-workload-0 -c alertmanager --tail=50
+```
 
 ## 13 Verify, and reset between demos
 

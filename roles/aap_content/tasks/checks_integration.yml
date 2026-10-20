@@ -1,0 +1,199 @@
+---
+# Proves the monitoring integration stand-in (DD19) by posting Alertmanager notifications to its
+# event stream, as Alertmanager will, for a test service of its own: one incident for the problem,
+# raised as svc-monitoring; a repeated notification ignored; a critical alert added to the same
+# incident and raising its priority; a cleared alert noted with the incident left open; and the AI
+# trigger enriching the incident it raised. The incident is removed at the end.
+# Entry point checks_integration, run by phase 07 after the main entry point and after the ServiceNow
+# trigger exists, since the last check needs it.
+
+- name: Prepare the integration checks
+  ansible.builtin.set_fact:
+    aap_content_icheck_run: "{{ aap_content_check_prefix }} {{ now(utc=true, fmt='%Y%m%d%H%M%S') }}"
+    aap_content_icheck_correlation: "{{ aap_content_check_service }}/build-check"
+    aap_content_icheck_epoch: "{{ now().timestamp() | int }}"
+    aap_content_sn_url: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}"
+
+- name: Describe the test alerts
+  ansible.builtin.set_fact:
+    aap_content_icheck_alerts:
+      heap: "{{ aap_content_icheck_heap }}"
+      oom: >-
+        {{ aap_content_icheck_heap | combine({
+             'startsAt': '%Y-%m-%dT%H:%M:%SZ' | strftime(aap_content_icheck_epoch | int - 120, utc=true),
+             'labels': {'alertname': 'AcmeBuildCheckOOMKilled', 'severity': 'critical'},
+             'annotations': {'summary': aap_content_icheck_run ~ ': integration, critical'}}, recursive=true) }}
+      heap_cleared: >-
+        {{ aap_content_icheck_heap | combine({'status': 'resolved',
+             'endsAt': '%Y-%m-%dT%H:%M:%SZ' | strftime(aap_content_icheck_epoch | int - 60, utc=true)}) }}
+  vars:
+    aap_content_icheck_heap:
+      status: firing
+      startsAt: "{{ '%Y-%m-%dT%H:%M:%SZ' | strftime(aap_content_icheck_epoch | int - 180, utc=true) }}"
+      endsAt: "0001-01-01T00:00:00Z"
+      labels:
+        alertname: AcmeBuildCheckHeapHigh
+        service: "{{ aap_content_check_service }}"
+        incident_family: build-check
+        team: payments
+        severity: warning
+        namespace: acme-build-check
+      annotations:
+        summary: "{{ aap_content_icheck_run }}: integration"
+        description: Test alert posted by the phase 07 build check.
+
+- name: Post a notification with the wrong password, which the event stream must refuse
+  ansible.builtin.uri:
+    url: "{{ aap_content_alert_stream_url }}"
+    method: POST
+    url_username: "{{ aap_content_alert_stream_username }}"
+    url_password: not-the-password
+    force_basic_auth: true
+    body_format: json
+    body:
+      receiver: build-check
+      status: firing
+      alerts: ["{{ aap_content_icheck_alerts.heap }}"]
+    status_code: [200, 201, 202, 400, 401, 403]
+    validate_certs: "{{ aap_content_validate_certs }}"
+  register: aap_content_icheck_wrong
+
+# The activation handles one notification at a time, in order, and the job template runs one job at
+# a time, so the incident ends up the same however quickly these arrive.
+- name: Post the notifications as Alertmanager would
+  ansible.builtin.uri:
+    url: "{{ aap_content_alert_stream_url }}"
+    method: POST
+    url_username: "{{ aap_content_alert_stream_username }}"
+    url_password: "{{ aap_content_alert_stream_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      version: "4"
+      receiver: build-check
+      status: "{{ 'resolved' if item.alerts | map(attribute='status') | unique == ['resolved'] else 'firing' }}"
+      groupLabels: { service: "{{ aap_content_check_service }}", incident_family: build-check }
+      commonLabels: { service: "{{ aap_content_check_service }}", incident_family: build-check }
+      alerts: "{{ item.alerts }}"
+    status_code: [200, 201, 202, 400, 401, 403]
+    validate_certs: "{{ aap_content_validate_certs }}"
+  loop:
+    - label: warning alert fires
+      alerts: ["{{ aap_content_icheck_alerts.heap }}"]
+    - label: the same notification again
+      alerts: ["{{ aap_content_icheck_alerts.heap }}"]
+    - label: critical alert fires as well
+      alerts: ["{{ aap_content_icheck_alerts.heap }}", "{{ aap_content_icheck_alerts.oom }}"]
+    - label: warning alert clears
+      alerts: ["{{ aap_content_icheck_alerts.heap_cleared }}", "{{ aap_content_icheck_alerts.oom }}"]
+  loop_control:
+    label: "{{ item.label }}"
+  register: aap_content_icheck_posts
+  no_log: true
+
+- name: Keep only the event stream's answers
+  ansible.builtin.set_fact:
+    aap_content_icheck_post_status: "{{ aap_content_icheck_posts.results | map(attribute='status', default=-1) | list }}"
+
+- name: Wait for the last notification to be recorded and the incident's enrichment to settle
+  servicenow.itsm.api_info:
+    instance: &admin
+      host: "{{ aap_content_sn_url }}"
+      username: "{{ secrets_values.servicenow_admin_username }}"
+      password: "{{ secrets_values.servicenow_admin_password }}"
+    resource: incident
+    sysparm_query: "correlation_id={{ aap_content_icheck_correlation }}"
+    columns: [sys_id, number, priority, state, sys_created_by, u_acme_alert_occurrences, u_acme_alert_state, u_ai_enrichment_state]
+  register: aap_content_icheck_inc
+  until: >-
+    aap_content_icheck_inc is not failed
+    and (aap_content_icheck_inc.record | map(attribute='u_acme_alert_state') | first | default('')) is search('"cleared": "2')
+    and (aap_content_icheck_inc.record | map(attribute='u_ai_enrichment_state') | first | default(''))
+        in ['complete', 'insufficient_evidence', 'unavailable']
+  retries: "{{ aap_content_check_retries }}"
+  delay: "{{ aap_content_check_delay }}"
+  failed_when: false
+  when: aap_content_icheck_post_status | select('in', [200, 201, 202]) | list | length == 4
+
+- name: Read the integration's work notes on the incident
+  servicenow.itsm.api_info:
+    instance: *admin
+    resource: sys_journal_field
+    sysparm_query: "element_id={{ aap_content_icheck_inc.record[0].sys_id }}^element=work_notes^valueSTARTSWITHMonitoring integration:"
+    columns: [value]
+  register: aap_content_icheck_notes
+  until: aap_content_icheck_notes is not failed
+  retries: 3
+  delay: 5
+  when: aap_content_icheck_inc.record | default([]) | length > 0
+
+- name: Try to launch the enrichment workflow as the integration's user, which it must not be able to do
+  ansible.controller.workflow_launch:
+    workflow_template: "{{ aap_content_workflow_name }}"
+    organization: "{{ aap_content_organisation }}"
+    extra_vars:
+      incident_sys_id: "{{ '0' * 32 }}"
+    controller_host: "{{ aap_content_url }}"
+    controller_username: "{{ aap_content_integration_eda_user }}"
+    controller_password: "{{ aap_content_integration_password }}"
+    validate_certs: "{{ aap_content_validate_certs }}"
+  register: aap_content_icheck_limit
+  failed_when: false
+  changed_when: false
+  no_log: true
+
+- name: Judge each integration check
+  ansible.builtin.set_fact:
+    aap_content_icheck_results:
+      - check: the Alertmanager event stream refuses a notification with the wrong password
+        passed: "{{ aap_content_icheck_wrong.status | default(-1) in [401, 403] }}"
+        detail: "HTTP {{ aap_content_icheck_wrong.status | default(-1) }}"
+      - check: the event stream accepts Alertmanager's notifications with Basic authentication
+        passed: "{{ aap_content_icheck_post_status | select('in', [200, 201, 202]) | list | length == 4 }}"
+        detail: "HTTP {{ aap_content_icheck_post_status | join(', ') }}"
+      - check: one incident is raised for the problem, as svc-monitoring
+        passed: "{{ inc_count == 1 and inc.sys_created_by | default('') == 'svc-monitoring' }}"
+        detail: "{{ inc_count }} incident(s){{ ', ' ~ inc.number ~ ' created by ' ~ inc.sys_created_by if inc else '' }}"
+      - check: a repeated notification adds nothing, and the critical alert is added to the same incident at priority 2
+        passed: "{{ inc.u_acme_alert_occurrences | default('') == '2' and inc.priority | default('') == '2' }}"
+        detail: "occurrences {{ inc.u_acme_alert_occurrences | default('none') }}, priority {{ inc.priority | default('none') }}"
+      - check: the cleared alert is noted and the incident stays open
+        passed: "{{ notes | length == 3 and notes | select('search', 'cleared at') | list | length == 1 and inc.state | default('') not in ['6', '7', '8'] }}"
+        detail: "{{ notes | length }} integration note(s), state {{ inc.state | default('none') }}"
+      - check: the AI trigger enriches the incident the integration raised
+        passed: "{{ inc.u_ai_enrichment_state | default('') in ['complete', 'insufficient_evidence'] }}"
+        detail: "enrichment state {{ inc.u_ai_enrichment_state | default('', true) or 'empty' }}"
+      - check: the integration's user cannot launch the enrichment workflow
+        passed: "{{ aap_content_icheck_limit.id is not defined }}"
+        detail: "workflow launch {{ 'refused' if aap_content_icheck_limit.id is not defined else 'allowed' }}"
+  vars:
+    inc_count: "{{ aap_content_icheck_inc.record | default([]) | length }}"
+    inc: "{{ aap_content_icheck_inc.record | default([]) | first | default({}) }}"
+    notes: "{{ aap_content_icheck_notes.record | default([]) | map(attribute='value') | list }}"
+
+# Test data the check itself created, so removing it is not a change to the configuration.
+- name: Remove the integration check's incidents
+  servicenow.itsm.api:
+    instance: *admin
+    resource: incident
+    action: delete
+    sys_id: "{{ item }}"
+  loop: "{{ aap_content_icheck_inc.record | default([]) | map(attribute='sys_id') | list }}"
+  changed_when: false
+
+- name: Report the integration checks
+  ansible.builtin.set_fact:
+    aap_content_report: "{{ aap_content_report + (aap_content_icheck_lines | from_json) }}"
+  vars:
+    aap_content_icheck_lines: >-
+      {%- set ns = namespace(lines=[]) -%}
+      {%- for c in aap_content_icheck_results -%}
+      {%- set ns.lines = ns.lines + [('Check passed: ' if c.passed | bool else 'CHECK FAILED: ') ~ c.check ~ ' (' ~ c.detail | trim ~ ')'] -%}
+      {%- endfor -%}
+      {{ ns.lines | to_json }}
+
+- name: Stop if an integration check failed
+  ansible.builtin.assert:
+    that: aap_content_icheck_results | map(attribute='passed') | map('bool') | reject | list | length == 0
+    fail_msg: "{{ aap_content_report | select('match', 'CHECK FAILED') | join('; ') }}"
+    quiet: true

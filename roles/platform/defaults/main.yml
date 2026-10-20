@@ -21,7 +21,7 @@ platform_gpu_request_query: '[?spec.containers[?resources.requests."nvidia.com/g
 
 # Settings merged into the monitoring ConfigMaps. Existing settings are kept.
 # The first enables user workload monitoring; the second gives it its own Alertmanager and lets
-# namespaces route their alerts with AlertmanagerConfig resources (DD02, phase 07).
+# namespaces route their alerts with AlertmanagerConfig resources (DD02, phase 08).
 platform_monitoring_settings:
   - namespace: openshift-monitoring
     name: cluster-monitoring-config
