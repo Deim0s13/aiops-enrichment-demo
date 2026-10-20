@@ -17,6 +17,7 @@ Sections are added as each phase is implemented. Phases 01 to 04, 06 and 07 are 
 | 9 | Phase 06: the enrichment service built in the cluster, deployed behind TLS with its own token, and checked from inside the cluster | About 5 minutes on the first build |
 | 10 | Phase 07, first step: the execution environment published to the cluster's registry | A few minutes the first time, depending on your upload speed |
 | 11 | Phase 07: AAP content, the trigger and the end-to-end checks | About 10 minutes on the first run |
+| 12 | Phase 08: payments-notify, its metrics and alert rules, and a check of the fault | About 10 minutes, five of them the fault check |
 
 Run each command on its own line. Pasting several lines at once, or a line containing `read`, can go wrong in zsh.
 
@@ -330,7 +331,56 @@ What it does (role `aap_content`, the automation team's part). The content is de
 9. **Connects ServiceNow to the event stream** (role `servicenow`, entry point `trigger`): an Outbound REST Message named *ACME AI enrichment event stream* holds the address and token, which change with every environment, and an asynchronous business rule, *ACME trigger: AI enrichment*, posts each new incident in the on-call group, category Software, priority 2 or 3 and with no enrichment state yet. You can see each call under System Logs > Outbound HTTP Requests.
 10. **Proves it hands-off.** As `svc-monitoring`, the identity the integration stand-in will use, it raises a qualifying incident and the same incident at priority 4. Nothing else is touched: the first must be enriched and its "AI enrichment ready" email queued in the Outbox, and the second must be left alone. Both are removed afterwards, with their emails.
 
-## 12 Verify, and reset between demos
+## 12 Phase 08: workload
+
+The cluster builds the sample service from GitHub, so **push** any change to `services/payments-notify` first.
+
+```bash
+ansible-navigator run playbooks/08_workload.yml
+```
+
+What it does (role `workload`):
+
+1. **Builds `payments-notify`** in the cluster, in `demo-payments`, with the same build role as the enrichment service: only when its directory has changed, deployed pinned by digest.
+2. **Deploys it deliberately misconfigured**, as many real JVM services are: its maximum heap equals its container's 256 MiB memory limit. When its notification template cache grows, the JVM's own memory pushes the container over the limit before the heap is full, so the kernel kills it (OOMKilled) rather than Java raising an error (DD18).
+3. **Publishes its heap metrics** to user workload monitoring, and adds two alert rules: `PaymentsNotifyHeapHigh` (heap above 60% for 30 seconds) and `PaymentsNotifyOOMKilled`. Both carry the labels `service`, `incident_family` and `team`.
+4. **Applies network policies**: only the `aap` namespace (where the fault trigger runs) and user workload monitoring (which scrapes it) can reach the service.
+5. **Proves the fault**: it triggers the single scenario from the `aap` namespace, waits for the OOM kill and the recovery, and confirms through the metrics API that the heap peak was recorded and both alerts fired. This takes about five minutes on every run.
+
+### Triggering the fault in a demo
+
+There are two scenarios:
+
+- **Single**: the cache grows for a few minutes, the container is OOMKilled once, and it restarts clean.
+- **Recurring**: as single, but the fault resumes after every restart, so the service keeps failing until an engineer acts. `reset.yml` clears it.
+
+In AAP, launch **Demo | Trigger memory fault** and choose the scenario in the survey. Phase 07 creates the template.
+
+To trigger it by hand instead, forward the service's port to your laptop in one terminal:
+
+```bash
+oc -n demo-payments port-forward deploy/payments-notify 8080:8080
+```
+
+Then, in a second terminal, start the scenario you want:
+
+```bash
+curl -s -X POST 'http://localhost:8080/fault?scenario=single'
+```
+
+```bash
+curl -s -X POST 'http://localhost:8080/fault?scenario=recurring'
+```
+
+To stop a recurring fault by hand, clear it through the same port forward. The current container recovers straight away:
+
+```bash
+curl -s -X POST 'http://localhost:8080/fault/clear'
+```
+
+Watch it happen with `oc -n demo-payments get pods -w`, or in the console under Observe > Alerting.
+
+## 13 Verify, and reset between demos
 
 Check the demo against its M2 acceptance criteria at any time after a build:
 

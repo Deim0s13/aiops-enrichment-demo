@@ -1,0 +1,56 @@
+---
+- name: Create the namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ workload_namespace }}"
+        labels: { app.kubernetes.io/part-of: aiops-enrichment-demo }
+
+- name: Build the image in the cluster, if the service's source has changed
+  ansible.builtin.include_role:
+    name: incluster_build
+  vars:
+    incluster_build_name: "{{ workload_name }}"
+    incluster_build_namespace: "{{ workload_namespace }}"
+    incluster_build_context_dir: "{{ workload_context_dir }}"
+    incluster_build_repository: "{{ workload_repository }}"
+    incluster_build_git_secret: "{{ workload_git_secret }}"
+
+- name: Deploy the service, its metrics, its alert rules and its network policies
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('ansible.builtin.template', 'resources.yml.j2') | from_yaml_all | list }}"
+
+- name: Wait for the service to be ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ workload_namespace }}"
+    name: "{{ workload_name }}"
+  register: workload_deployment
+  until: >-
+    workload_deployment is not failed
+    and (workload_deployment.resources | map(attribute='status') | first | default({})).availableReplicas | default(0) >= 1
+  retries: "{{ workload_ready_retries }}"
+  delay: "{{ workload_ready_delay }}"
+  no_log: true
+
+- name: Report the service
+  ansible.builtin.set_fact:
+    workload_report:
+      - >-
+        Image: {{ 'built from commit ' ~ incluster_build_commit[:12] if incluster_build_built else
+                  'already built for commit ' ~ incluster_build_commit[:12] }}; {{ incluster_build_image }}
+      - >-
+        Service: {{ workload_name }}.{{ workload_namespace }}.svc:{{ workload_port }}, memory limit {{ workload_memory_limit }},
+        maximum heap {{ workload_max_heap }}; callers only from {{ workload_caller_namespace }} and user workload monitoring
+      - >-
+        Alert rules: PaymentsNotifyHeapHigh (heap above {{ (workload_heap_alert_ratio * 100) | int }}% for
+        {{ workload_heap_alert_for }}), PaymentsNotifyOOMKilled
+
+- name: Prove the fault
+  ansible.builtin.include_tasks: checks.yml
+  when: workload_checks | bool

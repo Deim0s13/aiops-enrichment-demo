@@ -1,0 +1,128 @@
+{# The sample service and everything around it, applied together by phase 08. #}
+{% set labels = {'app': workload_name, 'app.kubernetes.io/part-of': 'aiops-enrichment-demo'} %}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ workload_name }}
+  namespace: {{ workload_namespace }}
+  labels: {{ labels | to_json }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: {{ workload_name }}}
+  template:
+    metadata:
+      labels: {app: {{ workload_name }}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: {{ workload_name }}
+          image: {{ incluster_build_image }}
+          ports:
+            - {name: http, containerPort: {{ workload_port }}}
+          env:
+            - {name: JVM_MAX_HEAP, value: "{{ workload_max_heap }}"}
+            - {name: LEAK_MB_PER_SECOND, value: "{{ workload_leak_mb_per_second }}"}
+            - {name: FAULT_STATE_DIR, value: /var/lib/payments-notify}
+          volumeMounts:
+            # Survives a container restart, not a new pod: where the recurring fault's marker lives.
+            - {name: fault-state, mountPath: /var/lib/payments-notify}
+          readinessProbe:
+            httpGet: {path: /healthz, port: {{ workload_port }}}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: {{ workload_port }}}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests: {cpu: 50m, memory: {{ workload_memory_limit }}}
+            limits: {cpu: 500m, memory: {{ workload_memory_limit }}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+      volumes:
+        - {name: fault-state, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ workload_name }}
+  namespace: {{ workload_namespace }}
+  labels: {{ labels | to_json }}
+spec:
+  selector: {app: {{ workload_name }}}
+  ports:
+    - {name: http, port: {{ workload_port }}, targetPort: {{ workload_port }}}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ workload_name }}
+  namespace: {{ workload_namespace }}
+  labels: {{ labels | to_json }}
+spec:
+  selector:
+    matchLabels: {app: {{ workload_name }}}
+  endpoints:
+    - {port: http, path: /metrics, interval: 15s}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ workload_name }}
+  namespace: {{ workload_namespace }}
+  labels: {{ labels | to_json }}
+spec:
+  groups:
+    - name: {{ workload_name }}
+      rules:
+        - alert: PaymentsNotifyHeapHigh
+          expr: >-
+            max by (namespace, pod) (jvm_memory_used_bytes{namespace="{{ workload_namespace }}", area="heap"})
+            / max by (namespace, pod) (jvm_memory_max_bytes{namespace="{{ workload_namespace }}", area="heap"})
+            > {{ workload_heap_alert_ratio }}
+          for: {{ workload_heap_alert_for }}
+          labels: {{ workload_alert_labels | combine({'severity': 'warning'}) | to_json }}
+          annotations:
+            summary: "payments-notify heap is above {{ (workload_heap_alert_ratio * 100) | int }}% of its maximum"
+            description: "Pod {{ '{{' }} $labels.pod {{ '}}' }} heap is at {{ '{{' }} $value | humanizePercentage {{ '}}' }} of its maximum."
+        - alert: PaymentsNotifyOOMKilled
+          expr: >-
+            (increase(kube_pod_container_status_restarts_total{namespace="{{ workload_namespace }}", container="{{ workload_name }}"}[5m]) > 0)
+            and on (namespace, pod, container)
+            (kube_pod_container_status_last_terminated_reason{namespace="{{ workload_namespace }}", container="{{ workload_name }}", reason="OOMKilled"} == 1)
+          labels: {{ workload_alert_labels | combine({'severity': 'critical'}) | to_json }}
+          annotations:
+            summary: "payments-notify was terminated for exceeding its memory limit (OOMKilled) and restarted"
+            description: "Pod {{ '{{' }} $labels.pod {{ '}}' }} was OOMKilled and restarted in the last 5 minutes."
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: {{ workload_namespace }}
+  labels: {{ labels | to_json }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-aap-and-monitoring
+  namespace: {{ workload_namespace }}
+  labels: {{ labels | to_json }}
+spec:
+  podSelector:
+    matchLabels: {app: {{ workload_name }}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ workload_caller_namespace }}}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: openshift-user-workload-monitoring}
+      ports:
+        - {protocol: TCP, port: {{ workload_port }}}

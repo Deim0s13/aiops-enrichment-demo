@@ -11,8 +11,6 @@ enrichment_service_token_length: 40
 enrichment_service_resources:
   requests: { cpu: 50m, memory: 128Mi }
   limits: { cpu: 500m, memory: 256Mi }
-enrichment_service_build_retries: 60
-enrichment_service_build_delay: 10
 enrichment_service_ready_retries: 30
 enrichment_service_ready_delay: 10
 # The image the in-cluster checks run in: the same base as the service, so it is already on the node.

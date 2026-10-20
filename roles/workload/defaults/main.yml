@@ -1,0 +1,32 @@
+---
+# Phase 08: the sample service payments-notify (DD01), its metrics and its alert rules.
+workload_name: payments-notify
+workload_context_dir: services/payments-notify
+workload_git_secret: payments-notify-git-source
+workload_port: 8080
+
+# The misconfiguration the fault relies on: the maximum heap equals the container's memory limit, so
+# the JVM's own memory pushes the container over the limit before the heap is full, and the kernel
+# kills it (OOMKilled). Growth is slow enough for the heap alert to fire before the kill.
+workload_memory_limit: 256Mi
+workload_max_heap: 256m
+workload_leak_mb_per_second: 1
+
+# Alert rules (OpenShift user workload monitoring). Labels let the integration stand-in and the
+# enrichment know what the alert is about.
+workload_heap_alert_ratio: 0.6
+workload_heap_alert_for: 30s
+workload_alert_labels:
+  service: payments-notify
+  incident_family: jvm-memory
+  team: payments
+
+workload_ready_retries: 30
+workload_ready_delay: 10
+
+# Prove the fault on every build: trigger the single scenario, wait for the OOMKill and recovery, and
+# confirm the metrics and the alert. Takes about five minutes.
+workload_checks: true
+workload_check_image: registry.access.redhat.com/ubi9/python-312:9.8-1791998425
+workload_check_retries: 48
+workload_check_delay: 10

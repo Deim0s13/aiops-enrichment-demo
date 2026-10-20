@@ -1,7 +1,6 @@
 ---
 # The service's API token is generated once and kept in the cluster: in the service's namespace,
-# where the service reads it, and in the caller's, where phase 07 gives it to AAP. The source secret
-# lets the in-cluster build read the private repository with the read-only token (DD16).
+# where the service reads it, and in the caller's, where phase 07 gives it to AAP.
 
 - name: Read the service's API token, if it has one
   kubernetes.core.k8s_info:
@@ -24,7 +23,7 @@
          else lookup('ansible.builtin.password', '/dev/null', length=enrichment_service_token_length, chars=['ascii_letters', 'digits']) }}
   no_log: true
 
-- name: Store the token for the service and for its caller, and the build's source credentials
+- name: Store the token for the service and for its caller
   kubernetes.core.k8s:
     state: present
     definition:
@@ -49,11 +48,6 @@
       type: Opaque
       component: enrichment-api-token
       data: { token: "{{ enrichment_service_token }}", url: "{{ enrichment_service_url }}" }
-    - name: "{{ enrichment_service_git_secret }}"
-      namespace: "{{ enrichment_service_namespace }}"
-      type: kubernetes.io/basic-auth
-      component: build-source
-      data: { username: "{{ enrichment_service_repository.owner }}", password: "{{ secrets_values.github_token }}" }
   loop_control:
     label: "{{ item.namespace }}/{{ item.name }}"
   no_log: true

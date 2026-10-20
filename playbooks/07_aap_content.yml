@@ -37,6 +37,7 @@
         aap_content_repository: "{{ demo_repository }}"
         aap_content_ee_stream: "{{ demo_execution_environment.name }}"
         aap_content_de_image_override: "{{ demo_aap_decision_environment }}"
+        aap_content_workload_url: "http://payments-notify.{{ demo_namespaces.workload }}.svc:8080"
 
     - name: Connect ServiceNow to the event stream, and prove it hands-off
       ansible.builtin.include_role:

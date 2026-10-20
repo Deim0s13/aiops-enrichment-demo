@@ -1,0 +1,4 @@
+---
+incluster_build_dockerfile: Containerfile
+incluster_build_build_retries: 60
+incluster_build_build_delay: 10

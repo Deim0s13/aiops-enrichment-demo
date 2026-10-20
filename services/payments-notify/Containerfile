@@ -1,0 +1,12 @@
+# Built in the cluster by OpenShift Builds from this directory (DD08). Red Hat's UBI 9 OpenJDK 21
+# image, pinned by tag (DD12). It compiles the single source file at build time and runs as a
+# non-root user under whatever UID OpenShift assigns.
+FROM registry.access.redhat.com/ubi9/openjdk-21:1.24-3.1791779559
+
+COPY PaymentsNotify.java /deployments/src/
+RUN javac -d /deployments/classes /deployments/src/PaymentsNotify.java
+
+# The maximum heap equals the container's memory limit (JVM_MAX_HEAP, set by phase 08): a common,
+# real misconfiguration, and the reason the container is OOMKilled before the heap is full.
+EXPOSE 8080
+ENTRYPOINT ["sh", "-c", "exec java -Xmx${JVM_MAX_HEAP:-256m} -XX:+UseSerialGC -cp /deployments/classes PaymentsNotify"]

@@ -1,0 +1,39 @@
+---
+argument_specs:
+  main:
+    short_description: Build an image in the cluster from a directory of this repository
+    description:
+      - OpenShift Builds, Docker strategy, from the private repository with the read-only GitHub token (DD08, DD16).
+      - Builds only when the directory has changed since the last successful build; waits for the build.
+      - Sets incluster_build_image (the image pinned by digest), incluster_build_commit and incluster_build_built.
+      - Reads the cluster and source secrets from secrets_values.
+    options:
+      incluster_build_name:
+        type: str
+        required: true
+        description: Name of the image stream and build.
+      incluster_build_namespace:
+        type: str
+        required: true
+        description: Namespace to build in; the image stream lives there.
+      incluster_build_context_dir:
+        type: str
+        required: true
+        description: The repository directory to build from.
+      incluster_build_repository:
+        type: dict
+        required: true
+        description: The repository, with url, owner, name and branch.
+      incluster_build_git_secret:
+        type: str
+        required: true
+        description: Name of the Secret holding the build's source credentials.
+      incluster_build_dockerfile:
+        type: str
+        description: Containerfile path within the directory.
+      incluster_build_build_retries:
+        type: int
+        description: How many times to check whether the build has finished.
+      incluster_build_build_delay:
+        type: int
+        description: Seconds between those checks.

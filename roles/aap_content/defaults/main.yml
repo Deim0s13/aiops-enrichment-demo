@@ -12,6 +12,8 @@ aap_content_de_name: ACME AIOps decision environment
 aap_content_de_image_override: ""
 aap_content_inventory_name: ACME automation host
 aap_content_workflow_name: AI incident enrichment
+# Demo control: starts the payments-notify memory fault (phase 08), single or recurring.
+aap_content_fault_template: "Demo | Trigger memory fault"
 aap_content_templates:
   pending: "AI enrichment | Mark pending"
   note: "AI enrichment | Write work note"

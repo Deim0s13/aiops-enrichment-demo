@@ -1,0 +1,11 @@
+# Runs in a Job in the caller's namespace: starts the single fault scenario.
+import json
+import urllib.request
+
+request = urllib.request.Request(
+    "http://{{ workload_name }}.{{ workload_namespace }}.svc:{{ workload_port }}/fault?scenario=single", data=b"", method="POST")
+try:
+    with urllib.request.urlopen(request, timeout=15) as response:
+        print(json.dumps({"status": response.status}))
+except Exception as error:  # noqa: BLE001 - reported, not raised
+    print(json.dumps({"status": -1, "error": str(error)[:200]}))

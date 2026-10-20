@@ -1,0 +1,222 @@
+---
+# The single scenario, end to end: trigger it from the AAP namespace, as the AAP job does, wait for the
+# OOM kill and the recovery, then confirm through the metrics API that the heap peak was recorded and
+# both alerts fired. Takes about five minutes.
+
+- name: Read the service's pod before the fault
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: "{{ workload_namespace }}"
+    label_selectors: ["app={{ workload_name }}"]
+  register: workload_pod_before
+  until: workload_pod_before is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Keep only its restart count, and name this run's trigger Job
+  ansible.builtin.set_fact:
+    workload_restarts_before: >-
+      {{ (workload_pod_before.resources | first).status.containerStatuses | map(attribute='restartCount') | first | default(0) }}
+    workload_check_job: "payments-notify-check-{{ now(utc=true, fmt='%Y%m%d%H%M%S') }}"
+
+- name: Trigger the single fault from the AAP namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: "{{ workload_check_job }}"
+        namespace: "{{ workload_caller_namespace }}"
+        labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: build-check }
+      spec:
+        backoffLimit: 0
+        ttlSecondsAfterFinished: 600
+        template:
+          spec:
+            restartPolicy: Never
+            automountServiceAccountToken: false
+            containers:
+              - name: trigger
+                image: "{{ workload_check_image }}"
+                command: [python3, -c, "{{ lookup('ansible.builtin.template', 'trigger.py.j2') }}"]
+                resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 200m, memory: 128Mi } }
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  runAsNonRoot: true
+                  capabilities: { drop: [ALL] }
+                  seccompProfile: { type: RuntimeDefault }
+
+- name: Wait for the trigger Job to finish
+  kubernetes.core.k8s_info:
+    api_version: batch/v1
+    kind: Job
+    namespace: "{{ workload_caller_namespace }}"
+    name: "{{ workload_check_job }}"
+  register: workload_trigger_job
+  until: >-
+    workload_trigger_job is not failed
+    and ((workload_trigger_job.resources | first | default({})).status | default({})).succeeded | default(0)
+        + ((workload_trigger_job.resources | first | default({})).status | default({})).failed | default(0) >= 1
+  retries: 30
+  delay: 5
+  no_log: true
+
+- name: Read what the trigger Job printed
+  kubernetes.core.k8s_log:
+    namespace: "{{ workload_caller_namespace }}"
+    label_selectors: ["job-name={{ workload_check_job }}"]
+  register: workload_trigger_log
+  no_log: true
+
+- name: Keep only the trigger's answer, and remove the Job
+  ansible.builtin.set_fact:
+    workload_trigger: "{{ (workload_trigger_log.log_lines | select | last | default('{}')) | from_json }}"
+
+- name: Remove the trigger Job
+  kubernetes.core.k8s:
+    state: absent
+    api_version: batch/v1
+    kind: Job
+    namespace: "{{ workload_caller_namespace }}"
+    name: "{{ workload_check_job }}"
+    delete_options:
+      propagationPolicy: Background
+  changed_when: false
+
+# The cache grows by a megabyte a second, so the kill comes a few minutes after the trigger.
+- name: Wait for the container to be OOMKilled and restarted
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: "{{ workload_namespace }}"
+    label_selectors: ["app={{ workload_name }}"]
+  register: workload_pod_after
+  until: >-
+    workload_pod_after is not failed
+    and ((workload_pod_after.resources | first | default({})).status.containerStatuses | default([{}]) | first).restartCount | default(0)
+        | int > workload_restarts_before | int
+  retries: "{{ workload_check_retries }}"
+  delay: "{{ workload_check_delay }}"
+  when: workload_trigger.status | default(-1) == 202
+  failed_when: false
+  no_log: true
+
+- name: Keep only how the container ended
+  ansible.builtin.set_fact:
+    workload_last_state: >-
+      {{ ((workload_pod_after.resources | default([{}]) | first).status | default({})).containerStatuses | default([{}])
+         | map(attribute='lastState') | first | default({}) }}
+
+- name: Wait for the service to be ready again
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ workload_namespace }}"
+    name: "{{ workload_name }}"
+  register: workload_recovered
+  until: >-
+    workload_recovered is not failed
+    and (workload_recovered.resources | map(attribute='status') | first | default({})).readyReplicas | default(0) >= 1
+  retries: "{{ workload_ready_retries }}"
+  delay: "{{ workload_ready_delay }}"
+  failed_when: false
+  no_log: true
+
+- name: Find the metrics API
+  kubernetes.core.k8s_info:
+    api_version: route.openshift.io/v1
+    kind: Route
+    namespace: openshift-monitoring
+    name: thanos-querier
+  register: workload_thanos
+  until: workload_thanos is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+# Alert rules for user workloads are evaluated every 30 seconds, after kube-state-metrics has seen
+# the restart, so the OOMKilled alert can take a minute or two to appear.
+- name: Ask the metrics API for the heap peak and the alerts that fired
+  ansible.builtin.uri:
+    url: "https://{{ (workload_thanos.resources | first).spec.host }}/api/v1/query?query={{ item.query | urlencode }}"
+    headers:
+      Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+    validate_certs: "{{ demo_cluster_validate_certs }}"
+    timeout: 30
+  loop:
+    - key: heap_peak
+      query: >-
+        max_over_time((max(jvm_memory_used_bytes{namespace="{{ workload_namespace }}", area="heap"})
+        / max(jvm_memory_max_bytes{namespace="{{ workload_namespace }}", area="heap"}))[20m:15s])
+    - key: heap_alert
+      query: max(max_over_time(ALERTS{namespace="{{ workload_namespace }}", alertname="PaymentsNotifyHeapHigh", alertstate="firing"}[20m]))
+    - key: oom_alert
+      query: max(max_over_time(ALERTS{namespace="{{ workload_namespace }}", alertname="PaymentsNotifyOOMKilled", alertstate="firing"}[20m]))
+  loop_control:
+    label: "{{ item.key }}"
+  register: workload_metrics
+  until: >-
+    workload_metrics is not failed
+    and (item.key == 'heap_peak' or workload_metrics.json.data.result | length > 0)
+  retries: 18
+  delay: 10
+  failed_when: false
+  no_log: true
+
+- name: Keep only the values
+  ansible.builtin.set_fact:
+    workload_observed: "{{ workload_observed_json | from_json }}"
+  vars:
+    workload_observed_json: >-
+      {%- set ns = namespace(out={}) -%}
+      {%- for r in workload_metrics.results -%}
+      {%- set result = ((r.json | default({})).data | default({})).result | default([]) -%}
+      {%- set ns.out = ns.out | combine({r.item.key: (result[0].value[1] | float) if result else 0.0}) -%}
+      {%- endfor -%}
+      {{ ns.out | to_json }}
+
+- name: Note whether the service is ready again
+  ansible.builtin.set_fact:
+    workload_ready_again: >-
+      {{ (workload_recovered.resources | default([{}]) | map(attribute='status') | first | default({})).readyReplicas | default(0) >= 1 }}
+
+- name: Judge each check
+  ansible.builtin.set_fact:
+    workload_results:
+      - check: the fault starts when triggered from the AAP namespace
+        passed: "{{ workload_trigger.status | default(-1) == 202 }}"
+        detail: "HTTP {{ workload_trigger.status | default('none') }}{{ (', ' ~ workload_trigger.error) if workload_trigger.error | default(none) else '' }}"
+      - check: the container is OOMKilled by the kernel, not stopped by Java
+        passed: "{{ (workload_last_state.terminated | default({})).reason | default('') == 'OOMKilled' }}"
+        detail: >-
+          last state {{ (workload_last_state.terminated | default({})).reason | default('none') }}, exit code
+          {{ (workload_last_state.terminated | default({})).exitCode | default('none') }}
+      - check: the heap peak is recorded in the metrics
+        passed: "{{ workload_observed.heap_peak | float >= workload_heap_alert_ratio | float }}"
+        detail: "peak {{ (workload_observed.heap_peak | float * 100) | round(1) }}% of the maximum heap"
+      - check: both alerts fire
+        passed: "{{ workload_observed.heap_alert | float == 1.0 and workload_observed.oom_alert | float == 1.0 }}"
+        detail: >-
+          PaymentsNotifyHeapHigh {{ 'fired' if workload_observed.heap_alert | float == 1.0 else 'not seen' }},
+          PaymentsNotifyOOMKilled {{ 'fired' if workload_observed.oom_alert | float == 1.0 else 'not seen' }}
+      - check: the service comes back clean after the single scenario
+        passed: "{{ workload_ready_again }}"
+        detail: "{{ 'ready' if workload_ready_again else 'not ready' }}"
+
+- name: Report the checks
+  ansible.builtin.set_fact:
+    workload_report: "{{ workload_report + (workload_check_lines | from_json) }}"
+  vars:
+    workload_check_lines: >-
+      {%- set ns = namespace(lines=[]) -%}
+      {%- for c in workload_results -%}
+      {%- set ns.lines = ns.lines + [('Check passed: ' if c.passed | bool else 'CHECK FAILED: ') ~ c.check ~ ' (' ~ c.detail | trim ~ ')'] -%}
+      {%- endfor -%}
+      {{ ns.lines | to_json }}
+
+- name: Stop if a check failed
+  ansible.builtin.assert:
+    that: workload_results | map(attribute='passed') | map('bool') | reject | list | length == 0
+    fail_msg: "{{ workload_report | select('match', 'CHECK FAILED') | join('; ') }}"
+    quiet: true

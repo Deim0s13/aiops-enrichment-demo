@@ -111,6 +111,29 @@
         credentials: ["{{ aap_content_servicenow_credential }}"]
         ask_variables_on_launch: true
 
+      # A demo control, not part of the enrichment path: the presenter starts the fault here.
+      - name: "{{ aap_content_fault_template }}"
+        description: Starts the payments-notify memory fault. Single, it is OOMKilled once and comes back clean; recurring, it keeps coming back until cleared.
+        playbook: automation/demo/trigger_fault.yml
+        organization: "{{ aap_content_organisation }}"
+        project: "{{ aap_content_project_name }}"
+        inventory: "{{ aap_content_inventory_name }}"
+        execution_environment: "{{ aap_content_ee_name }}"
+        extra_vars:
+          fault_service_url: "{{ aap_content_workload_url }}"
+        survey_enabled: true
+        survey_spec:
+          name: Memory fault
+          description: Which scenario to run
+          spec:
+            - question_name: Scenario
+              question_description: "single: killed once, comes back clean. recurring: keeps coming back until cleared."
+              variable: fault_scenario
+              type: multiplechoice
+              choices: [single, recurring]
+              default: single
+              required: true
+
     # Any failed step leads to the failure branch (design 5.5).
     aap_content_cfg_controller_workflows:
       - name: "{{ aap_content_workflow_name }}"

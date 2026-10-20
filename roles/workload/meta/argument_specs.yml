@@ -1,0 +1,26 @@
+---
+argument_specs:
+  main:
+    short_description: Deploy payments-notify with its metrics and alert rules, and prove the fault
+    description:
+      - Builds the sample service in the cluster (role incluster_build) and deploys it with its maximum heap equal to its
+        memory limit, the misconfiguration the fault relies on.
+      - A ServiceMonitor for its heap metrics, alert rules for heap usage and OOM kills, and network policies that admit
+        only the AAP namespace (to trigger the fault) and user workload monitoring (to scrape it).
+      - Checks the single fault scenario end to end, from inside the cluster.
+    options:
+      workload_namespace:
+        type: str
+        required: true
+        description: The sample service's namespace.
+      workload_caller_namespace:
+        type: str
+        required: true
+        description: The namespace allowed to call the service, where AAP runs its jobs (the fault trigger).
+      workload_repository:
+        type: dict
+        required: true
+        description: The repository to build from, with url, owner, name and branch.
+      workload_checks:
+        type: bool
+        description: Prove the fault on this build.

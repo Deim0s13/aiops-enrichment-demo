@@ -22,6 +22,10 @@ argument_specs:
         type: dict
         required: true
         description: The repository AAP syncs as its project, with url, owner, name and branch.
+      aap_content_workload_url:
+        type: str
+        required: true
+        description: Address of payments-notify inside the cluster, for the fault trigger job template.
       aap_content_ee_stream:
         type: str
         required: true

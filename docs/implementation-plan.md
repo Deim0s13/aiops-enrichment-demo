@@ -133,8 +133,8 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 
 | ID | Task | Closes |
 |---|---|---|
-| M3.1 | Sample service `payments-notify` with a heap growth endpoint, sized to fail predictably | |
-| M3.2 | Phase 08: deployment, alert rules for heap usage and restarts, and Alertmanager routing | |
+| M3.1 | Sample service `payments-notify` with a heap growth endpoint, sized to fail predictably. Written (2026-10-21): single and recurring scenarios, heap equal to the container limit (DD18), and a Demo | Trigger memory fault job template | |
+| M3.2 | Phase 08: deployment, alert rules for heap usage and restarts, and Alertmanager routing. Deployment, metrics, alert rules and the fault check written (2026-10-21, stage A); routing comes with the integration stand-in (stage B) | |
 | M3.3 | Integration stand-in: rulebook `integration_alerts.yml`, its playbook in `automation/integration/` and its own ServiceNow identity | |
 | M3.4 | Roles `evidence`, `diag_pod_status`, `diag_metrics`, `diag_changes` and `diag_logs`, with runtime and output limits | |
 | M3.5 | Phase 07 (part): diagnostic job templates in the workflow, run as the read-only `aiops-diagnostics` service account | |

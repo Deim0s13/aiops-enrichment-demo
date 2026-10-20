@@ -18,6 +18,8 @@ Roles used by the build phases in `playbooks/`.
 | `enrichment_service` | `06_enrichment.yml` | The application team's part: builds the enrichment service in the cluster from `services/enrichment` only when it has changed, deploys it pinned by digest behind TLS from the service CA with its own API token and MaaS key, applies default-deny and allow-from-AAP network policies, and checks it from inside the cluster with Jobs in the allowed and a refused namespace |
 | `verify` | `verify.yml` | The M2 acceptance checks: time to note, no retrigger, a safe retry, an engineer's concurrent edit, and the unavailable path with the enrichment service stopped and always restarted. Keeps its incidents for review unless `verify_cleanup` is true |
 | `demo_reset` | `reset.yml` | Resolves and closes the demo's own incidents with a close note, and deletes build-check leftovers. Touches nothing else in the PDI |
+| `incluster_build` | `06_enrichment.yml`, `08_workload.yml` | Builds an image in the cluster with OpenShift Builds from a directory of this repository, with the read-only GitHub token, only when that directory has changed; returns the image pinned by digest |
+| `workload` | `08_workload.yml` | The application team's sample service: builds and deploys `payments-notify` with its heap metrics, alert rules and network policies, and proves the single fault scenario end to end |
 | `platform` | `01_platform.yml` | Frees the GPU, checks the GPU stack and default storage the environment provides, and enables user workload monitoring with its Alertmanager. Installs no operators (DD13) |
 
 ## Conventions

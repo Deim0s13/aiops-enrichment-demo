@@ -1,0 +1,32 @@
+---
+# Demo control, not part of the enrichment path: starts the payments-notify memory fault (DD01).
+#   single     the notification template cache grows until the container is OOMKilled once; it
+#              restarts clean.
+#   recurring  as single, but the fault resumes after every restart, until reset.yml replaces the pod
+#              or an engineer clears it.
+# Vars: fault_scenario (survey), fault_service_url (set on the job template by phase 07).
+- name: "Demo | Trigger the payments-notify memory fault"
+  hosts: localhost
+  gather_facts: false
+  vars:
+    fault_scenario: single
+  tasks:
+    - name: Check the scenario
+      ansible.builtin.assert:
+        that: fault_scenario in ['single', 'recurring']
+        fail_msg: "fault_scenario must be single or recurring, not {{ fault_scenario }}."
+        quiet: true
+
+    - name: Start the fault
+      ansible.builtin.uri:
+        url: "{{ fault_service_url }}/fault?scenario={{ fault_scenario }}"
+        method: POST
+        status_code: [202]
+        timeout: 15
+
+    - name: Say what happens next
+      ansible.builtin.debug:
+        msg: >-
+          The {{ fault_scenario }} fault has started. payments-notify's heap grows for a few minutes, then the
+          container is OOMKilled{{ ' and restarts clean' if fault_scenario == 'single'
+          else ', and the fault resumes after every restart until it is cleared' }}. The alerts raise the incident.
