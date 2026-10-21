@@ -1,6 +1,7 @@
 ---
 # The workflow's failure branch (design 5.5): any failed step leads here. The incident stays with its
-# assigned team; the note says enrichment is unavailable. Vars from the rulebook: incident_sys_id.
+# assigned team; the note says enrichment is unavailable and, when the failed step passed it on, why.
+# Vars from the rulebook: incident_sys_id. From a failed step, as a workflow artefact: enrichment_failure_reason.
 - name: "AI enrichment | Record that enrichment is unavailable"
   hosts: localhost
   gather_facts: false
@@ -14,4 +15,5 @@
         itsm_worknote_text: |-
           [AI enrichment unavailable | not reviewed by an engineer]
           The enrichment workflow could not complete, so no AI enrichment was added. The incident stays with its assigned team.
+          Reason: {{ enrichment_failure_reason | default('not recorded by the failed step', true) | string | truncate(400) }}
           References: workflow job {{ awx_workflow_job_id | default('n/a') }} | event {{ event_id | default('n/a') }}

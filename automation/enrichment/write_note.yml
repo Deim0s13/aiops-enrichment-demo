@@ -12,34 +12,50 @@
   vars:
     enrichment_simulate_failure: false
   tasks:
-    - name: Fail on request, to exercise the workflow's failure branch
-      ansible.builtin.fail:
-        msg: Failing on request (enrichment_simulate_failure), to exercise the failure branch.
-      when: enrichment_simulate_failure | bool
+    # A failure hands its reason to the failure branch as a workflow artefact, so the "AI enrichment
+    # unavailable" note can say why. The reason never contains the service's token.
+    - name: Ask the service and write the note, passing on the reason if either fails
+      block:
+        - name: Fail on request, to exercise the workflow's failure branch
+          ansible.builtin.fail:
+            msg: Failing on request (enrichment_simulate_failure), to exercise the failure branch.
+          when: enrichment_simulate_failure | bool
 
-    - name: Ask the enrichment service and check its answer
-      ansible.builtin.include_role:
-        name: demo.aiops.enrichment_call
-      vars:
-        # Every field as a string: the rulebook can pass a number, such as priority 3, which the
-        # service's contract rejects.
-        enrichment_call_incident:
-          sys_id: "{{ incident_sys_id | string }}"
-          number: "{{ incident_number | string }}"
-          short_description: "{{ short_description | default('') | string | truncate(160) }}"
-          cmdb_ci: "{{ cmdb_ci | default('') | string }}"
-          priority: "{{ priority | default('') | string }}"
-          opened_at: "{{ opened_at | default('') | string }}"
-        enrichment_call_evidence: >-
-          {{ query('ansible.builtin.vars', *query('ansible.builtin.varnames', '^diagnostics_evidence_')) | flatten | sort(attribute='id') }}
-        enrichment_call_references: "workflow job {{ awx_workflow_job_id | default('n/a') }} | event {{ event_id | default('n/a') }}"
+        - name: Ask the enrichment service and check its answer
+          ansible.builtin.include_role:
+            name: demo.aiops.enrichment_call
+          vars:
+            # Every field as a string: the rulebook can pass a number, such as priority 3, which the
+            # service's contract rejects.
+            enrichment_call_incident:
+              sys_id: "{{ incident_sys_id | string }}"
+              number: "{{ incident_number | string }}"
+              short_description: "{{ short_description | default('') | string | truncate(160) }}"
+              cmdb_ci: "{{ cmdb_ci | default('') | string }}"
+              priority: "{{ priority | default('') | string }}"
+              opened_at: "{{ opened_at | default('') | string }}"
+            enrichment_call_evidence: >-
+              {{ query('ansible.builtin.vars', *query('ansible.builtin.varnames', '^diagnostics_evidence_')) | flatten | sort(attribute='id') }}
+            enrichment_call_references: "workflow job {{ awx_workflow_job_id | default('n/a') }} | event {{ event_id | default('n/a') }}"
 
-    - name: Write the work note
-      ansible.builtin.include_role:
-        name: demo.aiops.itsm_worknote
-      vars:
-        itsm_worknote_incident_sys_id: "{{ incident_sys_id }}"
-        itsm_worknote_action: note
-        itsm_worknote_revision: 1
-        itsm_worknote_state: "{{ enrichment_call_state }}"
-        itsm_worknote_text: "{{ enrichment_call_note }}"
+        - name: Write the work note
+          ansible.builtin.include_role:
+            name: demo.aiops.itsm_worknote
+          vars:
+            itsm_worknote_incident_sys_id: "{{ incident_sys_id }}"
+            itsm_worknote_action: note
+            itsm_worknote_revision: 1
+            itsm_worknote_state: "{{ enrichment_call_state }}"
+            itsm_worknote_text: "{{ enrichment_call_note }}"
+      rescue:
+        - name: Hand the reason to the failure branch
+          ansible.builtin.set_stats:
+            data:
+              enrichment_failure_reason: >-
+                {{ ansible_failed_task.name | default('A step') }}:
+                {{ ansible_failed_result.msg | default('no detail') | string | truncate(400) }}
+            per_host: false
+
+        - name: Fail the step, so the workflow takes its failure branch
+          ansible.builtin.fail:
+            msg: "{{ ansible_failed_result.msg | default('The work note step failed.') | string | truncate(400) }}"

@@ -155,6 +155,10 @@
       query: "short_descriptionSTARTSWITH{{ aap_content_check_run }}"
       columns: [sys_id, u_ai_enrichment_state, u_ai_enrichment_rev]
     - resource: sys_journal_field
+      # If the trigger incident ended unavailable, the failure branch's note says why.
+      query: "element_id={{ aap_content_check_inc.trigger.sys_id }}^element=work_notes^valueLIKEAI enrichment unavailable"
+      columns: [value]
+    - resource: sys_journal_field
       # The note must carry a trace from the enrichment service, so it came from the service's answer.
       query: "element_id={{ aap_content_check_inc.trigger.sys_id }}^element=work_notes^valueLIKEAI-generated enrichment^valueLIKEReferences: trace"
       columns: [sys_id]
@@ -173,15 +177,18 @@
         detail: "HTTP {{ aap_content_check_wrong_token.status | default(-1) }}"
       - check: an event with the token launches the workflow, which writes the work note and completes
         passed: "{{ aap_content_check_event_status | int in [200, 201, 202] and aap_content_check_state.trigger == 'complete' }}"
-        detail: "event HTTP {{ aap_content_check_event_status }}, state {{ aap_content_check_state.trigger or 'empty' }}"
+        detail: >-
+          event HTTP {{ aap_content_check_event_status }}, state {{ aap_content_check_state.trigger or 'empty' }}{{
+          ('; ' ~ (aap_content_check_read.results[1].record | map(attribute='value') | first | regex_search('Reason: [^\n]*') | default('', true)))
+          if aap_content_check_state.trigger == 'unavailable' else '' }}
       - check: a failed step leads to the failure branch, which records enrichment as unavailable
         passed: "{{ aap_content_check_state.failure == 'unavailable' }}"
         detail: "workflow {{ aap_content_check_failure_run.status | default('not run') }}, state {{ aap_content_check_state.failure or 'empty' }}"
       - check: a retried workflow adds no second note and leaves the state complete
         passed: >-
-          {{ aap_content_check_read.results[1].record | length == 1 and aap_content_check_state.trigger == 'complete'
+          {{ aap_content_check_read.results[2].record | length == 1 and aap_content_check_state.trigger == 'complete'
              and aap_content_check_retry_run.status | default('') == 'successful' }}
-        detail: "{{ aap_content_check_read.results[1].record | length }} note(s), workflow {{ aap_content_check_retry_run.status | default('not run') }}"
+        detail: "{{ aap_content_check_read.results[2].record | length }} note(s), workflow {{ aap_content_check_retry_run.status | default('not run') }}"
       - check: the trigger's user cannot launch anything but the workflow
         passed: "{{ aap_content_check_eda_refused }}"
         detail: "direct job template launch {{ 'refused' if aap_content_check_eda_refused else 'allowed' }}"
