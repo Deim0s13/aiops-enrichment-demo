@@ -2,6 +2,9 @@
 # reset.yml: back to a clean demo. Works only on the demo's own incidents: those svc-monitoring
 # raised in the on-call group. They are resolved and closed, not deleted, so their history stays.
 demo_reset_identity: svc-monitoring
+# Set to close only the incident for one problem (the integration stand-in's correlation ID), as
+# phase 08's check does before it raises a fresh one. Empty: every open demo incident.
+demo_reset_correlation_id: ""
 demo_reset_close_notes: Closed by the demo reset (reset.yml). The incident was raised for an ACME Bank demonstration.
 # The first of these that the PDI offers is used as the resolution code.
 demo_reset_close_codes: [Solution provided, Solved (Permanently), Resolved by caller]

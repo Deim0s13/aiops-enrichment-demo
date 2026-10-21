@@ -4,6 +4,19 @@
 # alerts fired, then confirm in ServiceNow that the integration stand-in raised or added to the
 # problem's incident and the AI trigger enriched it (DD19). Takes about five minutes.
 
+# Enrichment runs once, when an incident is raised. An incident still open from an earlier fault would
+# collect this run's alerts without a new enrichment, so it is closed first and the check proves the
+# whole chain on a fresh incident.
+- name: Close the problem's incident if an earlier fault left it open
+  ansible.builtin.include_role:
+    name: demo_reset
+  vars:
+    demo_reset_assignment_group: "{{ workload_assignment_group }}"
+    demo_reset_correlation_id: "{{ workload_alert_labels.service }}/{{ workload_alert_labels.incident_family }}"
+    demo_reset_close_notes: >-
+      Closed by the phase 08 build check, which triggers the fault again and expects a fresh incident for the same
+      problem. The incident was raised for an ACME Bank demonstration.
+
 - name: Read the problem's open incident before the fault, if there is one
   servicenow.itsm.api_info:
     instance: &admin
@@ -236,6 +249,13 @@
   ansible.builtin.set_fact:
     workload_ready_again: >-
       {{ (workload_recovered.resources | default([{}]) | map(attribute='status') | first | default({})).readyReplicas | default(0) >= 1 }}
+
+- name: Report what the check closed first
+  ansible.builtin.set_fact:
+    workload_report: >-
+      {{ workload_report + ['Closed ' ~ demo_reset_open.record | map(attribute='number') | join(', ')
+         ~ ', left open by an earlier fault, so the check starts with no open incident for the problem']
+         if demo_reset_open.record | default([]) | length > 0 else workload_report }}
 
 - name: Judge each check
   ansible.builtin.set_fact:

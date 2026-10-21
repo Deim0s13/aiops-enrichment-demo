@@ -21,6 +21,10 @@ argument_specs:
         type: dict
         required: true
         description: The repository to build from, with url, owner, name and branch.
+      workload_assignment_group:
+        type: str
+        required: true
+        description: The on-call group, for closing an incident an earlier check left open.
       workload_checks:
         type: bool
         description: Prove the fault on this build.

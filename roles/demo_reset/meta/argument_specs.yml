@@ -11,3 +11,9 @@ argument_specs:
         type: str
         required: true
         description: The on-call group whose demo incidents are closed.
+      demo_reset_correlation_id:
+        type: str
+        description: Close only the open incident with this correlation ID, the problem the integration stand-in raised it for.
+      demo_reset_close_notes:
+        type: str
+        description: The close note written on each incident closed.

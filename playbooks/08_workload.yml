@@ -37,6 +37,7 @@
         workload_namespace: "{{ demo_namespaces.workload }}"
         workload_caller_namespace: "{{ demo_namespaces.aap }}"
         workload_repository: "{{ demo_repository }}"
+        workload_assignment_group: "{{ demo_servicenow.assignment_group }}"
 
     - name: Report what phase 08 found and changed
       ansible.builtin.debug:

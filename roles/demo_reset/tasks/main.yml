@@ -44,7 +44,8 @@
     resource: incident
     sysparm_query: >-
       assignment_group={{ demo_reset_lookups.results[0].record[0].sys_id
-      }}^opened_by={{ demo_reset_lookups.results[1].record[0].sys_id }}^active=true
+      }}^opened_by={{ demo_reset_lookups.results[1].record[0].sys_id }}^active=true{{
+      ('^correlation_id=' ~ demo_reset_correlation_id) if demo_reset_correlation_id | length > 0 else '' }}
     columns: [sys_id, number]
   register: demo_reset_open
   until: demo_reset_open is not failed
