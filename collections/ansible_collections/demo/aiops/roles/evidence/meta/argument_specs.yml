@@ -1,0 +1,36 @@
+---
+argument_specs:
+  main:
+    short_description: Run one diagnostic and publish its evidence for the work note step
+    description:
+      - Finds the incident's configuration item in the service map. An item not in the map gets no diagnostics, so
+        the incident's text cannot point the diagnostics anywhere else (design 5.2).
+      - Runs the diagnostic role, demo.aiops.diag_ followed by the diagnostic's name. A diagnostic that fails or times
+        out publishes a gap item instead, so the workflow carries on (M3 exit criterion).
+      - Publishes the items as the workflow artefact diagnostics_evidence_ followed by the diagnostic's name, with
+        the collection time added and each fact cut to the limit.
+    options:
+      evidence_diagnostic:
+        type: str
+        required: true
+        choices: [pod_status, metrics, changes, logs]
+        description: Which diagnostic to run.
+      evidence_cmdb_ci:
+        type: str
+        description: The incident's configuration item, by name, as the trigger passed it.
+      evidence_service_map:
+        type: dict
+        required: true
+        description: Configuration items the diagnostics may look at, each with namespace, app and container.
+      evidence_max_items:
+        type: int
+        description: Most items one diagnostic may publish.
+      evidence_fact_limit:
+        type: int
+        description: Longest fact, in characters.
+      evidence_sa_dir:
+        type: str
+        description: Where the pod's service account token and CA bundles are mounted.
+      evidence_call_timeout:
+        type: int
+        description: Seconds each call may take.

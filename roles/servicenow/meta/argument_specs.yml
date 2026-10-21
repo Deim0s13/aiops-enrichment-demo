@@ -22,6 +22,12 @@ argument_specs:
         description:
           - Custom incident fields, each with its choices and a group, ai_enrichment or integration.
           - The monitoring guard protects the ai_enrichment group.
+      servicenow_configuration_items:
+        type: dict
+        description: Configuration items to create, keyed by name, each with a description (the service map).
+      servicenow_ci_class:
+        type: str
+        description: CMDB table the configuration items are created in.
       servicenow_roles:
         type: list
         elements: dict

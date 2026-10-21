@@ -3,8 +3,9 @@ argument_specs:
   main:
     short_description: Declare the demo's AAP content and prove it works
     description:
-      - "Controller: organisation, project, execution environment, ServiceNow credential, inventory, the three
-        enrichment job templates and the AI incident enrichment workflow with its failure branch."
+      - "Controller: organisation, project, execution environment, ServiceNow credential, inventory, the enrichment
+        job templates, the four diagnostic job templates in their own container group (DD20), and the AI incident
+        enrichment workflow with its failure branch."
       - "EDA: the AAP user the trigger runs as, a project, a decision environment, the event stream ServiceNow
         posts to, and the rulebook activation."
       - "The monitoring integration stand-in (DD19): its job template and ServiceNow credential, its own AAP user,
@@ -32,6 +33,10 @@ argument_specs:
         type: str
         required: true
         description: Category of the incidents the integration raises.
+      aap_content_service_map:
+        type: dict
+        required: true
+        description: Configuration items the diagnostics may look at, each with namespace, app and container (design 5.2).
       aap_content_workload_url:
         type: str
         required: true

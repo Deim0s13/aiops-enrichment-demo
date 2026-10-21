@@ -87,6 +87,19 @@
       {%- if itsm_alert_escalate | bool %} Priority raised to {{ itsm_alert_target.priority }} for a {{ itsm_alert_this.severity }} alert.{% endif -%}
       {%- endif -%}
 
+# The service label names the configuration item, which tells the diagnostics where to look
+# (design 5.2). A service with no CI is raised without one.
+- name: "Find the configuration item for {{ itsm_alert_this.service }}"
+  servicenow.itsm.api_info:
+    resource: cmdb_ci
+    sysparm_query: "name={{ itsm_alert_this.service }}"
+    columns: [sys_id]
+  register: itsm_alert_ci
+  until: itsm_alert_ci is not failed
+  retries: 3
+  delay: 5
+  when: itsm_alert_action == 'raise'
+
 - name: "Raise the incident for {{ itsm_alert_this.correlation }}"
   servicenow.itsm.api:
     resource: incident
@@ -95,6 +108,7 @@
       short_description: "{{ itsm_alert_this.summary }}"
       description: "{{ lookup('ansible.builtin.template', 'description.j2') | trim }}"
       category: "{{ itsm_alert_category }}"
+      cmdb_ci: "{{ itsm_alert_ci.record | map(attribute='sys_id') | first | default('') }}"
       assignment_group: "{{ itsm_alert_group_id }}"
       impact: "{{ itsm_alert_target.impact }}"
       urgency: "{{ itsm_alert_target.urgency }}"
@@ -123,7 +137,8 @@
   vars:
     itsm_alert_number: "{{ itsm_alert_open.number | default(itsm_alert_raised.record.number | default('')) }}"
     itsm_alert_outcome: >-
-      {{ {'raise': 'raised ' ~ itsm_alert_number ~ ' for ' ~ itsm_alert_this.correlation ~ ', priority ' ~ itsm_alert_target.priority,
+      {{ {'raise': 'raised ' ~ itsm_alert_number ~ ' for ' ~ itsm_alert_this.correlation ~ ', priority ' ~ itsm_alert_target.priority
+                   ~ (', configuration item ' ~ itsm_alert_this.service if itsm_alert_ci.record | default([]) | length > 0 else ', no configuration item'),
           'add': 'added to ' ~ itsm_alert_number ~ ', occurrence ' ~ itsm_alert_occurrence
                  ~ (', priority raised to ' ~ itsm_alert_target.priority if itsm_alert_escalate | bool else ''),
           'clear': 'noted as cleared on ' ~ itsm_alert_number ~ ', which stays open',

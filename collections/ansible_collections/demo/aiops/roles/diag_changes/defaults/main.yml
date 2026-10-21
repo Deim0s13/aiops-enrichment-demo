@@ -1,0 +1,5 @@
+---
+diag_changes_window_hours: 24
+# Environment variables reported from the deployment: JVM settings only, never anything else, since
+# other variables can hold credentials.
+diag_changes_env_pattern: "^(JAVA|JVM)_"

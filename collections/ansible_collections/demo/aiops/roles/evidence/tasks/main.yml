@@ -1,0 +1,67 @@
+---
+- name: Find the incident's configuration item in the service map
+  ansible.builtin.set_fact:
+    evidence_target: >-
+      {{ (evidence_service_map[evidence_cmdb_ci] | combine({'service': evidence_cmdb_ci}))
+         if evidence_cmdb_ci | length > 0 and evidence_cmdb_ci in evidence_service_map else {} }}
+    evidence_prefix: "{{ {'pod_status': 'EV-POD', 'metrics': 'EV-MET', 'changes': 'EV-CHG', 'logs': 'EV-LOG'}[evidence_diagnostic] }}"
+    evidence_source: "{{ {'pod_status': 'openshift.pod_status', 'metrics': 'openshift.metrics', 'changes': 'openshift.rollouts',
+                          'logs': 'openshift.logs'}[evidence_diagnostic] }}"
+    evidence_items: []
+
+- name: Connect to the cluster as this pod's service account
+  ansible.builtin.set_fact:
+    evidence_api: "https://{{ lookup('ansible.builtin.env', 'KUBERNETES_SERVICE_HOST') }}:{{ lookup('ansible.builtin.env', 'KUBERNETES_SERVICE_PORT') }}"
+    evidence_token: "{{ lookup('ansible.builtin.file', evidence_sa_dir ~ '/token') }}"
+  when: evidence_target | length > 0
+  no_log: true
+
+- name: Run the diagnostic
+  when: evidence_target | length > 0
+  block:
+    - name: "Run diag_{{ evidence_diagnostic }}"
+      ansible.builtin.include_role:
+        name: "demo.aiops.diag_{{ evidence_diagnostic }}"
+  rescue:
+    - name: Record that the diagnostic failed, so the work note can say so
+      ansible.builtin.set_fact:
+        evidence_items:
+          - id: "{{ evidence_prefix }}-GAP"
+            source: "{{ evidence_source }}"
+            target: "{{ evidence_target.namespace }}/{{ evidence_target.app }}"
+            fact: >-
+              The {{ evidence_diagnostic | replace('_', ' ') }} diagnostic failed, so this evidence is missing:
+              {{ (ansible_failed_result.msg | default('unknown error') | string | truncate(300)) }}
+            ref: ""
+
+- name: Record that there is nothing to diagnose
+  ansible.builtin.set_fact:
+    evidence_items:
+      - id: "{{ evidence_prefix }}-GAP"
+        source: "{{ evidence_source }}"
+        target: ""
+        fact: >-
+          No {{ evidence_diagnostic | replace('_', ' ') }} diagnostic was run: the incident's configuration item
+          ({{ evidence_cmdb_ci or 'none' }}) is not in the service map.
+        ref: ""
+  when: evidence_target | length == 0
+
+# Workflow artefacts reach the work note step. Each diagnostic has its own key, so the four, which
+# run in parallel, do not overwrite each other.
+- name: Publish the evidence for the work note step
+  ansible.builtin.set_stats:
+    data: "{{ {'diagnostics_evidence_' ~ evidence_diagnostic: evidence_published | from_json} }}"
+    per_host: false
+  vars:
+    evidence_published: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for item in evidence_items[:evidence_max_items] -%}
+      {%- set ns.out = ns.out + [{'id': item.id, 'source': item.source | default(evidence_source),
+            'collected_at': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'), 'target': item.target | default(''),
+            'fact': item.fact | string | truncate(evidence_fact_limit), 'ref': item.ref | default('')}] -%}
+      {%- endfor -%}
+      {{ ns.out | to_json }}
+
+- name: Report
+  ansible.builtin.debug:
+    msg: "{{ evidence_items[:evidence_max_items] | map(attribute='id') | zip(evidence_items[:evidence_max_items] | map(attribute='fact') | map('truncate', 200)) | map('join', ': ') | list }}"

@@ -19,6 +19,20 @@ aap_content_templates:
   note: "AI enrichment | Write work note"
   unavailable: "AI enrichment | Record unavailable"
 
+# The diagnostics (design 5.2, DD20): four job templates that run in parallel, in a container group
+# whose pods use the read-only aiops-diagnostics service account. Each job calls the cluster with its
+# own pod's short-lived token, so AAP holds no cluster credential for them. Phase 08 grants the
+# account view on the workload's namespace.
+aap_content_diagnostics_sa: aiops-diagnostics
+aap_content_diagnostics_group: ACME diagnostics
+# Seconds a diagnostic job may run; a job that takes longer is stopped and the note is written without it.
+aap_content_diagnostics_timeout: 60
+aap_content_diagnostics:
+  pod_status: "AI enrichment | Diagnostics: pod status"
+  metrics: "AI enrichment | Diagnostics: metrics"
+  changes: "AI enrichment | Diagnostics: recent changes"
+  logs: "AI enrichment | Diagnostics: log excerpt"
+
 # ServiceNow: the enrichment writer's credentials come from the Secret phase 04 keeps them in.
 aap_content_servicenow_credential_type: ServiceNow ITSM
 aap_content_servicenow_credential: "ServiceNow | svc-ai-enrichment"

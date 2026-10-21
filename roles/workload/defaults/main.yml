@@ -38,6 +38,11 @@ workload_alert_group_wait: 10s
 workload_alert_group_interval: 30s
 workload_alert_repeat_interval: 12h
 
+# The diagnostics' service account (phase 07, DD20), in the caller's namespace. The application team
+# grants it view on this namespace and nothing else: pods, events, logs and, through the Thanos
+# Querier tenancy endpoint, metrics.
+workload_diagnostics_sa: aiops-diagnostics
+
 workload_ready_retries: 30
 workload_ready_delay: 10
 

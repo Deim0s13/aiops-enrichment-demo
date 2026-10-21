@@ -93,6 +93,7 @@ These decisions apply to the demonstration only. They do not change the referenc
 | DD17 | The execution environment AAP runs the demo's automation in is the one the operator builds on the laptop, built for linux/amd64, the cluster's architecture, and pushed to the cluster's internal image registry by a playbook run on the laptop, like `00_secrets.yml`. AAP pulls it from the registry's service address inside the cluster. | Automation Hub is switched off (phase 03), and the internal registry needs no external account and disappears with the environment. The laptop push avoids putting the Automation Hub token, which the build needs for certified collections, into the cluster. In production, the execution environment would come from the bank's private Automation Hub or registry, built and signed by its pipeline. |
 | DD18 | `payments-notify` is a single-file Java 21 service whose maximum heap equals its container's memory limit. Its fault grows a notification template cache that is never evicted, so the container is OOMKilled by the kernel before the heap is full. The fault runs once (single) or resumes after every restart until cleared (recurring); the recurring marker lives in an `emptyDir` volume, which survives a container restart but not a new pod. | Heap equal to the container limit is a common, real misconfiguration, so the evidence and the runbook are realistic: an OOM kill with a high but not full heap. The single scenario keeps rehearsals simple; the recurring one shows an incident where the engineer has to act. No framework keeps the build quick and the code readable on a slide. |
 | DD19 | The monitoring integration stand-in keeps one open incident per problem, identified by the alert labels `service` and `incident_family` and stored in the incident's correlation ID. The first alert raises the incident; later alerts are added as work notes with an occurrence count; a critical alert raises it from priority 3 to 2; a cleared alert is noted and the incident stays open for the engineer to close. The stand-in records each alert's start and clear times on the incident (`u_acme_alert_state`), so a repeated notification changes nothing. Alertmanager reaches it through an EDA event stream with Basic authentication, through the platform gateway, and its job runs one at a time. | One incident per problem, with alerts rolled up into it, is what a well-run integration does, and it is what makes the recurring scenario visible: the occurrence count climbs on the same incident. Escalating on a later alert, rather than re-raising, keeps the AI trigger to one enrichment per incident. A real integration keeps its alert state in its own store; keeping it on the incident avoids another component. Alertmanager cannot send a custom header, so Basic authentication replaces the header token the ServiceNow trigger uses. Running one job at a time stops two notifications both raising an incident for the same problem. |
+| DD20 | The diagnostics run as four job templates in their own AAP container group, whose pods use the `aiops-diagnostics` service account with its token mounted. Each job calls the cluster API and the Thanos Querier tenancy endpoint with its own pod's projected token. The account has `view` on the workload's namespace only, granted by phase 08. Which namespace and app to look at comes from a service map held in AAP, keyed by the incident's configuration item, never from the incident's text. | The token is issued by OpenShift for that pod, expires with it, and is never stored in AAP or passed between workflow steps; a minted token handed on as a workflow artefact would be stored in plain text on the job record. It is the workload identity pattern platform teams are moving to. The service map stops an incident's content from pointing the diagnostics at another namespace, and RBAC enforces the same boundary underneath it. |
 
 ## 4 Component view
 
@@ -144,7 +145,7 @@ Recursion is prevented in three ways. The business rule fires on insert only, it
 
 ### 5.2 Diagnostic evidence
 
-Each diagnostic job returns a list of evidence items in a common format, passed to later workflow nodes as workflow artefacts.
+Each diagnostic job returns a list of evidence items in a common format, passed to the work note step as a workflow artefact of its own (`diagnostics_evidence_pod_status`, `_metrics`, `_changes` and `_logs`), since the four run in parallel. The jobs run in their own container group as the read-only `aiops-diagnostics` service account, using their pod's own token (DD20). They find what to look at in the service map, by the incident's configuration item: its namespace, app label and container. An incident whose configuration item is not in the map gets no diagnostics. A diagnostic that fails publishes a gap item (an ID ending in `-GAP`) saying what is missing, and the note is written without that evidence.
 
 ```yaml
 evidence:
@@ -158,12 +159,12 @@ evidence:
 
 | Diagnostic | Source | Bounds |
 |---|---|---|
-| Pod status and events | OpenShift API | Namespace mapped from the configuration item |
-| Heap and garbage collection metrics | Thanos Querier tenancy endpoint, which limits queries to namespaces the identity can view | 30-minute window |
-| Recent changes | Deployment rollout history and ServiceNow change requests for the configuration item | 24-hour window |
-| Log excerpt | Container logs filtered to error patterns | Line and byte limits |
+| Pod status and events | OpenShift API | Namespace mapped from the configuration item; up to three pods; warning events from the last 30 minutes |
+| Heap and garbage collection metrics, container memory and restarts | Thanos Querier tenancy endpoint, which limits queries to namespaces the identity can view | 30-minute window. The sample service exports no garbage collection metrics, which the diagnostic reports as a fact |
+| Recent changes | Deployment rollout history, the running container's resources and JVM settings (only environment variables named `JAVA_` or `JVM_`, since others can hold credentials), and ServiceNow change requests for the configuration item | 24-hour window |
+| Log excerpt | The previous container's log if it restarted, otherwise the current one, filtered to warnings and errors | The last 500 lines and 128 KB read; the last 15 matching lines kept, 240 characters each |
 
-Initial limits are 60 seconds runtime per job and 4 KB per fact. These will be tuned during the build.
+Limits are 60 seconds runtime per job (the job template's timeout), 15 seconds per call, 8 items per diagnostic and 4,000 characters per fact.
 
 ### 5.3 Enrichment request and response
 
@@ -218,7 +219,7 @@ Enrichment uses three custom incident fields:
 
 ### 5.5 Failure handling
 
-Any node failure takes the workflow's failure branch. This writes an "AI enrichment unavailable" note with the reason and sets the enrichment state to `unavailable`. Initial timeouts are 90 seconds for the enrichment call and 5 minutes for the workflow as a whole. Retries are bounded, and the incident remains with its assigned team throughout.
+A failure to mark the incident pending or to write the note takes the workflow's failure branch. A failed diagnostic does not: the note is written without its evidence, and its gap item says what is missing. This writes an "AI enrichment unavailable" note with the reason and sets the enrichment state to `unavailable`. Initial timeouts are 90 seconds for the enrichment call and 5 minutes for the workflow as a whole. Retries are bounded, and the incident remains with its assigned team throughout.
 
 ### 5.6 Knowledge corpus
 
@@ -242,7 +243,7 @@ Each document carries labels for its ID, origin, service, product version, owner
 |---|---|---|---|
 | Integration stand-in | EDA event stream user name and password, AAP `svc-eda-integration` and ServiceNow `svc-monitoring` | Launch the integration job; create and update incidents, including its own alert record | Write enrichment fields; launch any other template, including the enrichment workflow |
 | Trigger | EDA event stream token and AAP `svc-eda-enrichment` | Launch the enrichment workflow | Launch any other template, including the remediation job |
-| Diagnostics | OpenShift service account `aiops-diagnostics` | Read pods, events, logs and metrics in `demo-payments` | Write to any resource; read any other namespace |
+| Diagnostics | OpenShift service account `aiops-diagnostics`, through each diagnostic job pod's own projected token (DD20); the change request lookup uses the ITSM writer's ServiceNow credential to read | Read pods, events, logs, deployments and metrics in `demo-payments`; read change requests | Write to any resource; read any other namespace |
 | ITSM writer | ServiceNow `svc-ai-enrichment` | Write work notes and enrichment fields | Create, reassign or close incidents; create changes |
 | Enrichment service | Service account `aiops-enrichment`, its MaaS API key and a database credential; callers present its own API token | Call the gateway; read the knowledge index | Any ITSM, cluster API or AAP access |
 | Knowledge ingestion | Separate service account and database credential | Write the knowledge index | Call the gateway; read ITSM |
@@ -398,6 +399,7 @@ Scenarios S1 to S5 are presented to the audience. `verify.yml` also checks the f
 | Identity | Local accounts | Enterprise identity provider with MFA |
 | Secrets | Laptop Vault for bootstrap | Enterprise vault through AAP credential lookup |
 | Separation of duties | One operator holds every role | Duties mapped to named groups, with prohibited combinations technically enforced |
+| Diagnostic access | Read-only service account bound to one namespace, used through the diagnostic jobs' own pod tokens; a fixed service map | Read-only access per managed target, with the service map drawn from the CMDB |
 | Service-to-service security | TLS from OpenShift's service CA, a bearer token and a network policy | Mutual TLS through a service mesh, with workload identity in place of a shared token |
 | Event stream token | Held in the REST Message's header, readable by ServiceNow administrators on the PDI | Held in ServiceNow's credential store or replaced by OAuth, rotated by the platform team |
 | ITSM access control | Service identities hold `itil`, narrowed by guard business rules created by the build | Field-level ACLs owned by the ServiceNow platform team and changed through their own change process with `security_admin`, not by an automation pipeline's administrator account |

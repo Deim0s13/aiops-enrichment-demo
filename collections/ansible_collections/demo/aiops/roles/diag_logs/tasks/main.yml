@@ -1,0 +1,65 @@
+---
+- name: Find the service's newest pod
+  ansible.builtin.uri:
+    url: "{{ evidence_api }}/api/v1/namespaces/{{ evidence_target.namespace }}/pods?labelSelector={{ ('app=' ~ evidence_target.app) | urlencode }}"
+    headers:
+      Authorization: "Bearer {{ evidence_token }}"
+    ca_path: "{{ evidence_sa_dir }}/ca.crt"
+    timeout: "{{ evidence_call_timeout }}"
+    status_code: [200, 401, 403, 404]
+  register: diag_logs_pods
+  no_log: true
+
+- name: Stop if the cluster refused
+  ansible.builtin.assert:
+    that: diag_logs_pods.status == 200
+    fail_msg: "The cluster answered HTTP {{ diag_logs_pods.status }} when listing pods in {{ evidence_target.namespace }}."
+    quiet: true
+
+- name: Keep only the newest pod's name
+  ansible.builtin.set_fact:
+    diag_logs_pod: >-
+      {{ diag_logs_pods.json['items'] | sort(attribute='metadata.creationTimestamp') | map(attribute='metadata.name') | last | default('') }}
+
+# The previous container's log is the one that ended, if it restarted. Without a restart there is
+# none (HTTP 400), so the current log is read as well and used instead.
+- name: Read the container's log
+  ansible.builtin.uri:
+    url: >-
+      {{ evidence_api }}/api/v1/namespaces/{{ evidence_target.namespace }}/pods/{{ diag_logs_pod }}/log?container={{ evidence_target.container
+      }}&previous={{ item }}&tailLines={{ diag_logs_tail_lines }}&limitBytes={{ diag_logs_limit_bytes }}
+    headers:
+      Authorization: "Bearer {{ evidence_token }}"
+    ca_path: "{{ evidence_sa_dir }}/ca.crt"
+    timeout: "{{ evidence_call_timeout }}"
+    return_content: true
+    status_code: [200, 400, 401, 403, 404]
+  loop: ["true", "false"]
+  register: diag_logs_read
+  when: diag_logs_pod | length > 0
+  no_log: true
+
+- name: State what the log shows
+  ansible.builtin.set_fact:
+    evidence_items:
+      - id: EV-LOG-01
+        target: "{{ evidence_target.namespace }}/{{ diag_logs_pod or evidence_target.app }}"
+        fact: >-
+          {%- if not diag_logs_pod -%}
+          No pod with label app={{ evidence_target.app }} is running, so there is no log to read.
+          {%- elif diag_logs_used is none -%}
+          The cluster did not return the log of pod {{ diag_logs_pod }} (HTTP {{ diag_logs_read.results | map(attribute='status', default='none') | join(' and ') }}).
+          {%- elif diag_logs_matches | length == 0 -%}
+          No warnings or errors in the last {{ diag_logs_lines | length }} lines of the {{ diag_logs_which }} container log of pod {{ diag_logs_pod }}.
+          {%- else -%}
+          {{ diag_logs_which | capitalize }} container log of pod {{ diag_logs_pod }}: {{ diag_logs_matches | length }} of the last
+          {{ diag_logs_lines | length }} lines are warnings or errors. The last {{ diag_logs_matches[-diag_logs_keep:] | length }}:
+          {{ diag_logs_matches[-diag_logs_keep:] | map('truncate', diag_logs_line_limit) | join(' / ') }}
+          {%- endif -%}
+        ref: "/api/v1/namespaces/{{ evidence_target.namespace }}/pods/{{ diag_logs_pod }}/log"
+  vars:
+    diag_logs_used: >-
+      {{ diag_logs_read.results | default([]) | selectattr('status', 'defined') | selectattr('status', 'equalto', 200) | first | default(none) }}
+    diag_logs_which: "{{ 'previous' if diag_logs_used and diag_logs_used.item == 'true' else 'current' }}"
+    diag_logs_lines: "{{ (diag_logs_used.content | default('')).splitlines() if diag_logs_used else [] }}"
+    diag_logs_matches: "{{ diag_logs_lines | select('search', diag_logs_pattern) | list }}"

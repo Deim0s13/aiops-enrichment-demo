@@ -1,0 +1,23 @@
+---
+argument_specs:
+  main:
+    short_description: "Diagnostic: warnings and errors from the service's container log, within line and byte limits"
+    description:
+      - Read-only. Reads the newest pod's previous container log, which is the one that ended if the container
+        restarted, or else its current log, with the pod's own token. Run through demo.aiops.evidence.
+    options:
+      diag_logs_tail_lines:
+        type: int
+        description: Log lines read from the end of the log.
+      diag_logs_limit_bytes:
+        type: int
+        description: Most bytes read.
+      diag_logs_keep:
+        type: int
+        description: Most matching lines kept.
+      diag_logs_line_limit:
+        type: int
+        description: Longest line kept, in characters.
+      diag_logs_pattern:
+        type: str
+        description: Regular expression a line must match to be kept.

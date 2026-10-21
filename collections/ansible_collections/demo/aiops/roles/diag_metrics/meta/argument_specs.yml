@@ -1,0 +1,14 @@
+---
+argument_specs:
+  main:
+    short_description: "Diagnostic: heap, container memory and restarts over the last 30 minutes"
+    description:
+      - Read-only. Queries the Thanos Querier tenancy endpoint with the pod's own token, which limits it to the
+        target namespace. Run through demo.aiops.evidence.
+    options:
+      diag_metrics_url:
+        type: str
+        description: The Thanos Querier tenancy endpoint inside the cluster.
+      diag_metrics_window:
+        type: str
+        description: How far back to look, as a Prometheus duration.

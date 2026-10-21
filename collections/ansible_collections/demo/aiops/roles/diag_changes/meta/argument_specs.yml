@@ -1,0 +1,14 @@
+---
+argument_specs:
+  main:
+    short_description: "Diagnostic: rollouts, the running configuration and ServiceNow change requests in the last 24 hours"
+    description:
+      - Read-only. Reads the deployment and its ReplicaSets with the pod's own token, and the configuration item's
+        change requests with the job's ServiceNow credential, when it has one. Run through demo.aiops.evidence.
+    options:
+      diag_changes_window_hours:
+        type: int
+        description: How far back to look for rollouts and change requests.
+      diag_changes_env_pattern:
+        type: str
+        description: Regular expression for the environment variable names that may be reported.

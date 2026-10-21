@@ -1,0 +1,13 @@
+---
+# Runs one diagnostic and publishes its evidence in the common format (design 5.2), for the work note
+# step. The diagnostic job runs in the ACME diagnostics container group, so it calls the cluster with
+# its own pod's short-lived service account token (aiops-diagnostics), not a stored credential.
+evidence_cmdb_ci: ""
+# Most items one diagnostic may publish, and the longest fact.
+evidence_max_items: 8
+evidence_fact_limit: 4000
+# Where the pod's identity is mounted.
+evidence_sa_dir: /var/run/secrets/kubernetes.io/serviceaccount
+# Seconds each call to the cluster or the metrics API may take. The job template's own timeout
+# (60 seconds) is the backstop.
+evidence_call_timeout: 15

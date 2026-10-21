@@ -1,6 +1,6 @@
 Raised by the ACME monitoring integration from an Alertmanager alert. Later alerts for the same service and problem are added to this incident as work notes, not raised as new incidents.
 
-Service: {{ itsm_alert_this.service }}
+Service: {{ itsm_alert_this.service }}{{ '' if itsm_alert_ci.record | default([]) | length > 0 else ' (no configuration item of that name)' }}
 Problem: {{ itsm_alert_this.family }}
 {% if itsm_alert_this.team %}Team: {{ itsm_alert_this.team }}
 {% endif %}

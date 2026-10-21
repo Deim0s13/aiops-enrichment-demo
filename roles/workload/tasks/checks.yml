@@ -219,6 +219,19 @@
   failed_when: false
   vars: *correlation
 
+- name: Read the enrichment's work note
+  servicenow.itsm.api_info:
+    instance: *admin
+    resource: sys_journal_field
+    sysparm_query: >-
+      element_id={{ workload_incident.record[0].sys_id }}^element=work_notes^valueLIKEAI-generated enrichment^ORDERBYDESCsys_created_on
+    columns: [value]
+  register: workload_note
+  until: workload_note is not failed
+  retries: 3
+  delay: 5
+  when: workload_incident.record | default([]) | length > 0
+
 - name: Note whether the service is ready again
   ansible.builtin.set_fact:
     workload_ready_again: >-
@@ -258,11 +271,17 @@
       - check: the AI trigger enriches the incident
         passed: "{{ inc.u_ai_enrichment_state | default('') in ['complete', 'insufficient_evidence'] }}"
         detail: "enrichment state {{ inc.u_ai_enrichment_state | default('', true) or 'empty' }}"
+      - check: the work note carries evidence from all four diagnostics
+        passed: "{{ ['EV-POD-01', 'EV-MET-01', 'EV-CHG-01', 'EV-LOG-01'] | reject('in', note) | list | length == 0 }}"
+        detail: >-
+          {{ (['EV-POD-01', 'EV-MET-01', 'EV-CHG-01', 'EV-LOG-01'] | select('in', note) | list | join(', ') or 'none') ~ ' found'
+             ~ ((', gaps ' ~ note | regex_findall('EV-[A-Z]+-GAP') | unique | join(', ')) if 'GAP]' in note else '') }}
   vars:
     workload_correlation: "{{ workload_alert_labels.service }}/{{ workload_alert_labels.incident_family }}"
     inc_count: "{{ workload_incident.record | default([]) | length }}"
     inc: "{{ workload_incident.record | default([]) | first | default({}) }}"
     inc_occurrences: "{{ inc.u_acme_alert_occurrences | default(0, true) | int }}"
+    note: "{{ (workload_note.record | default([]) | first | default({})).value | default('') }}"
 
 - name: Report the checks
   ansible.builtin.set_fact:

@@ -58,6 +58,25 @@
         active: "true"
         include_members: "true"
 
+- name: Create or update the configuration items in the service map
+  ansible.builtin.include_tasks: record.yml
+  loop: "{{ servicenow_configuration_items | dict2items }}"
+  loop_control:
+    loop_var: servicenow_ci
+    label: "{{ servicenow_ci.key }}"
+  vars:
+    servicenow_record:
+      kind: configuration item
+      label: "{{ servicenow_ci.key }}"
+      table: "{{ servicenow_ci_class }}"
+      query: "name={{ servicenow_ci.key }}"
+      data:
+        name: "{{ servicenow_ci.key }}"
+        short_description: "{{ servicenow_ci.value.description | default('') }}"
+        support_group: "{{ servicenow_ids.group }}"
+        operational_status: "1"
+        install_status: "1"
+
 - name: Create or update the custom roles
   ansible.builtin.include_tasks: record.yml
   loop: "{{ servicenow_roles }}"
@@ -220,7 +239,7 @@
   vars:
     servicenow_summary_json: >-
       {%- set ns = namespace(lines=[]) -%}
-      {%- set plural = {'field': 'Fields', 'choice': 'Choices', 'group': 'Groups', 'role': 'Roles',
+      {%- set plural = {'field': 'Fields', 'choice': 'Choices', 'group': 'Groups', 'configuration item': 'Configuration items', 'role': 'Roles',
                         'identity': 'Identities', 'role assignment': 'Role assignments', 'person': 'People',
                         'group membership': 'Group memberships', 'guard': 'Guards',
                         'notification': 'Notifications'} -%}

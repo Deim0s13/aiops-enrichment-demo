@@ -1,0 +1,7 @@
+---
+# The log lines read, the most kept, and how long each may be. Only warnings and errors are kept.
+diag_logs_tail_lines: 500
+diag_logs_limit_bytes: 131072
+diag_logs_keep: 15
+diag_logs_line_limit: 240
+diag_logs_pattern: '(?i)\b(warn|warning|error|exception|severe|fatal|outofmemory|killed)\b'

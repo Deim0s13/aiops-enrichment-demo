@@ -1,0 +1,8 @@
+---
+argument_specs:
+  main:
+    short_description: "Diagnostic: the service's pods, restarts, last terminations and recent warning events"
+    description:
+      - Read-only. Run through demo.aiops.evidence, which supplies evidence_target, evidence_api and evidence_token
+        and publishes evidence_items.
+    options: {}

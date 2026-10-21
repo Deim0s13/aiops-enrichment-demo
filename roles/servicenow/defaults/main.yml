@@ -48,6 +48,11 @@ servicenow_fields:
     max_length: "4000"
     choices: []
 
+# Configuration items (CIs) the service map names, keyed by name with a description. The playbook
+# passes demo_service_map; each CI is an application supported by the on-call group.
+servicenow_configuration_items: {}
+servicenow_ci_class: cmdb_ci_appl
+
 # One custom role per identity. It marks what the identity is for: the guards below apply to
 # whoever holds it. The PDI refuses access rule (ACL) changes over the API, so the roles carry no
 # rights themselves (design section 6.1).

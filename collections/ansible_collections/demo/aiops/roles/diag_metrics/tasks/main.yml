@@ -1,0 +1,91 @@
+---
+- name: Ask the metrics API about the service
+  ansible.builtin.uri:
+    url: "{{ diag_metrics_url }}/api/v1/query?namespace={{ evidence_target.namespace }}&query={{ item.query | urlencode }}"
+    headers:
+      Authorization: "Bearer {{ evidence_token }}"
+    ca_path: "{{ evidence_sa_dir }}/service-ca.crt"
+    timeout: "{{ evidence_call_timeout }}"
+    status_code: [200, 400, 401, 403]
+  loop:
+    - key: heap_used
+      query: max(jvm_memory_used_bytes{area="heap", pod=~"{{ diag_metrics_pods }}"})
+    - key: heap_max
+      query: max(jvm_memory_max_bytes{area="heap", pod=~"{{ diag_metrics_pods }}"})
+    - key: heap_peak
+      query: >-
+        max_over_time((max(jvm_memory_used_bytes{area="heap", pod=~"{{ diag_metrics_pods }}"})
+        / max(jvm_memory_max_bytes{area="heap", pod=~"{{ diag_metrics_pods }}"}))[{{ diag_metrics_window }}:30s])
+    - key: memory_peak
+      query: max_over_time(max(container_memory_working_set_bytes{container="{{ evidence_target.container }}"})[{{ diag_metrics_window }}:30s])
+    - key: memory_limit
+      query: max(kube_pod_container_resource_limits{resource="memory", container="{{ evidence_target.container }}"})
+    - key: restarts
+      query: sum(increase(kube_pod_container_status_restarts_total{container="{{ evidence_target.container }}"}[{{ diag_metrics_window }}]))
+    - key: gc_series
+      query: count({__name__=~"jvm_gc_.+", pod=~"{{ diag_metrics_pods }}"})
+  loop_control:
+    label: "{{ item.key }}"
+  register: diag_metrics_read
+  vars:
+    diag_metrics_pods: "{{ evidence_target.app }}-.*"
+  no_log: true
+
+- name: Stop if the metrics API refused
+  ansible.builtin.assert:
+    that: diag_metrics_read.results | map(attribute='status') | unique == [200]
+    fail_msg: >-
+      The metrics API answered HTTP {{ diag_metrics_read.results | map(attribute='status') | unique | join(' and ') }}
+      for namespace {{ evidence_target.namespace }}.
+    quiet: true
+
+- name: Keep only the values
+  ansible.builtin.set_fact:
+    diag_metrics_values: "{{ diag_metrics_values_json | from_json }}"
+  vars:
+    diag_metrics_values_json: >-
+      {%- set ns = namespace(out={}) -%}
+      {%- for r in diag_metrics_read.results -%}
+      {%- set result = r.json.data.result | default([]) -%}
+      {%- set ns.out = ns.out | combine({r.item.key: (result[0].value[1] | float) if result else none}) -%}
+      {%- endfor -%}
+      {{ ns.out | to_json }}
+
+- name: State what the metrics show
+  ansible.builtin.set_fact:
+    evidence_items: "{{ diag_metrics_json | from_json }}"
+  vars:
+    v: "{{ diag_metrics_values }}"
+    window: "{{ diag_metrics_window | regex_replace('m$', ' minutes') | regex_replace('h$', ' hours') }}"
+    target: "{{ evidence_target.namespace }}/{{ evidence_target.app }}"
+    diag_metrics_json: >-
+      {%- set mib = 1048576 -%}
+      {%- set out = [] -%}
+      {%- if v.heap_max -%}
+      {%- set heap = 'Heap: ' ~ ((v.heap_used / mib) | round(0) | int if v.heap_used is not none else 'unknown') ~ ' MiB used of a '
+            ~ (v.heap_max / mib) | round(0) | int ~ ' MiB maximum'
+            ~ ((' (' ~ (v.heap_used / v.heap_max * 100) | round(1) ~ '%) now') if v.heap_used is not none else ' now')
+            ~ ('; peak ' ~ (v.heap_peak * 100) | round(1) ~ '% of the maximum in the last ' ~ window if v.heap_peak is not none else '') ~ '.' -%}
+      {%- else -%}
+      {%- set heap = 'No heap metrics for ' ~ evidence_target.app ~ ' in the last ' ~ window ~ '.' -%}
+      {%- endif -%}
+      {%- set _ = out.append({'id': 'EV-MET-01', 'target': target, 'fact': heap, 'ref': 'jvm_memory_used_bytes, jvm_memory_max_bytes'}) -%}
+      {%- if v.memory_limit -%}
+      {%- set memory = 'Container memory: working set peaked at '
+            ~ ((v.memory_peak / mib) | round(0) | int if v.memory_peak is not none else 'unknown') ~ ' MiB in the last '
+            ~ window ~ ', against a limit of ' ~ (v.memory_limit / mib) | round(0) | int ~ ' MiB.'
+            ~ ((' The maximum heap is ' ~ (v.heap_max / v.memory_limit * 100) | round(0) | int ~ '% of the container memory limit.') if v.heap_max else '') -%}
+      {%- else -%}
+      {%- set memory = 'No container memory limit is recorded for ' ~ evidence_target.container ~ '.' -%}
+      {%- endif -%}
+      {%- set _ = out.append({'id': 'EV-MET-02', 'target': target, 'fact': memory,
+            'ref': 'container_memory_working_set_bytes, kube_pod_container_resource_limits'}) -%}
+      {%- set _ = out.append({'id': 'EV-MET-03', 'target': target,
+            'fact': 'Container restarts in the last ' ~ window ~ ': '
+                    ~ ((v.restarts | round(0) | int) if v.restarts is not none else 'unknown') ~ '.',
+            'ref': 'kube_pod_container_status_restarts_total'}) -%}
+      {%- if not v.gc_series -%}
+      {%- set _ = out.append({'id': 'EV-MET-04', 'target': target,
+            'fact': 'The service exports no garbage collection metrics, so garbage collection activity is unknown.', 'ref': 'jvm_gc_*'}) -%}
+      {%- endif -%}
+      {{ out | to_json }}

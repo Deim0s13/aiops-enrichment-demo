@@ -1,0 +1,5 @@
+---
+# The Thanos Querier tenancy port: it answers only for the namespace in the request, and only if the
+# caller can view that namespace, so the diagnostic cannot read another team's metrics (design 5.2).
+diag_metrics_url: https://thanos-querier.openshift-monitoring.svc:9092
+diag_metrics_window: 30m

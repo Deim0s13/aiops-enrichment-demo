@@ -1,10 +1,11 @@
 ---
-# Workflow step 2: asks the enrichment service, checks its answer and writes the AI-labelled work note,
-# once per revision (design 5.3 and 5.4). In milestone M2 the service is the skeleton, which returns a
-# fixed, schema-valid answer.
+# Workflow step 3: asks the enrichment service with the diagnostics' evidence, checks its answer and
+# writes the AI-labelled work note, once per revision (design 5.3 and 5.4). Until milestone M4 the
+# service is the skeleton, which reports the evidence it received but draws no conclusions.
 # Vars from the rulebook: incident_sys_id, incident_number, short_description, cmdb_ci, priority,
-# opened_at, event_id. enrichment_simulate_failure: true makes this step fail, to exercise the
-# failure branch.
+# opened_at, event_id. From the diagnostics, as workflow artefacts: diagnostics_evidence_pod_status,
+# _metrics, _changes and _logs; a diagnostic that did not finish is simply absent.
+# enrichment_simulate_failure: true makes this step fail, to exercise the failure branch.
 - name: "AI enrichment | Write the work note"
   hosts: localhost
   gather_facts: false
@@ -29,6 +30,8 @@
           cmdb_ci: "{{ cmdb_ci | default('') | string }}"
           priority: "{{ priority | default('') | string }}"
           opened_at: "{{ opened_at | default('') | string }}"
+        enrichment_call_evidence: >-
+          {{ query('ansible.builtin.vars', *query('ansible.builtin.varnames', '^diagnostics_evidence_')) | flatten | sort(attribute='id') }}
         enrichment_call_references: "workflow job {{ awx_workflow_job_id | default('n/a') }} | event {{ event_id | default('n/a') }}"
 
     - name: Write the work note

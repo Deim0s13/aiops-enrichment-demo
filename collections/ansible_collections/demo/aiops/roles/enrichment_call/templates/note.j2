@@ -3,6 +3,12 @@
 {% set p = a.provenance | default({}) %}
 [AI-generated enrichment | revision {{ enrichment_call_revision }} | not reviewed by an engineer]
 Summary: {{ a.summary }}
+{% if a.symptoms | default([]) %}
+Evidence:
+{% for s in a.symptoms %}
+  - {{ s }}
+{% endfor %}
+{% endif %}
 {% for c in a.likely_causes %}
 Likely cause ({{ c.confidence | default('unknown') }}): {{ c.statement }} [{{ c.citations | join(', ') }}]
 {% endfor %}
@@ -13,6 +19,13 @@ Next steps:
 {% endfor %}
 {% endif %}
 Recommended automation: {{ (a.recommended_job.job_id ~ ': ' ~ a.recommended_job.reason | default('')) if a.recommended_job else 'none' }}
-Gaps: {{ a.gaps | join('; ') if a.gaps else 'none' }}
+{% if a.gaps %}
+Gaps:
+{% for g in a.gaps %}
+  - {{ g }}
+{% endfor %}
+{% else %}
+Gaps: none
+{% endif %}
 Manual review required: {{ 'yes' if a.manual_review_required else 'no' }}
 References: trace {{ p.trace_id | default('n/a') }} | model {{ p.model | default('', true) or 'n/a' }} | prompt {{ p.prompt_version | default('n/a') }} | policy {{ p.policy_version | default('n/a') }} | service {{ p.service_version | default('n/a') }}{{ (' | ' ~ enrichment_call_references) if enrichment_call_references | default('') else '' }}

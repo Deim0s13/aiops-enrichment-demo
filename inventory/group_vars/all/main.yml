@@ -58,6 +58,17 @@ demo_servicenow:
   assignment_group: ACME Payments On-call
   category: software
 
+# The service map (design 5.2): each configuration item the diagnostics may look at, and where it
+# runs. Phase 04 creates the configuration items in ServiceNow, the integration stand-in sets them on
+# its incidents, and phase 07 gives the map to the diagnostic job templates. An incident whose
+# configuration item is not here gets no diagnostics, whatever its text says.
+demo_service_map:
+  payments-notify:
+    description: ACME Bank payments notification service (the demo's sample workload)
+    namespace: "{{ demo_namespaces.workload }}"
+    app: payments-notify
+    container: payments-notify
+
 # Container images (DD12). Pinned; the build never pulls latest.
 demo_images:
   postgresql: registry.redhat.io/rhel9/postgresql-16:1791897894

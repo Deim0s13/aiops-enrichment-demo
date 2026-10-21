@@ -87,6 +87,7 @@
       - >-
         Alert rules: PaymentsNotifyHeapHigh (heap above {{ (workload_heap_alert_ratio * 100) | int }}%{{ (' for ' ~ workload_heap_alert_for)
         if workload_heap_alert_for not in ['0s', '0'] else '' }}), PaymentsNotifyOOMKilled (for {{ workload_oom_alert_window }} after each kill)
+      - "Diagnostics: service account {{ workload_diagnostics_sa }} in {{ workload_caller_namespace }} may view this namespace"
       - >-
         Alert routing: grouped by service and incident family, to the integration stand-in's event stream with
         Basic authentication (Secret {{ workload_alertmanager_secret }})

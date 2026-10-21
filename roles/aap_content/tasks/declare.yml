@@ -59,6 +59,30 @@
         image: "{{ aap_content_ee_image }}"
         pull: missing
 
+    # The diagnostic jobs' pods run as the read-only aiops-diagnostics service account, with its token
+    # mounted, so a job uses its own pod's short-lived token (DD20). AAP replaces the image with the job's
+    # execution environment.
+    aap_content_cfg_controller_instance_groups:
+      - name: "{{ aap_content_diagnostics_group }}"
+        is_container_group: true
+        pod_spec_override: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            namespace: {{ aap_content_namespace }}
+            labels:
+              app.kubernetes.io/part-of: aiops-enrichment-demo
+              app.kubernetes.io/component: diagnostics
+          spec:
+            serviceAccountName: {{ aap_content_diagnostics_sa }}
+            automountServiceAccountToken: true
+            containers:
+              - image: {{ aap_content_ee_image }}
+                name: worker
+                args: ['ansible-runner', 'worker', '--private-data-dir=/runner']
+                resources:
+                  requests: {cpu: 250m, memory: 100Mi}
+
     aap_content_cfg_controller_projects:
       - name: "{{ aap_content_project_name }}"
         description: The demo repository, read with a read-only token (DD16).
@@ -111,6 +135,59 @@
         credentials: ["{{ aap_content_servicenow_credential }}"]
         ask_variables_on_launch: true
 
+      # The four diagnostics (design 5.2). Read-only, bounded, and run in parallel in their own container
+      # group. A diagnostic that fails publishes a gap item instead, and one that runs too long is
+      # stopped, so the note is written either way.
+      - name: "{{ aap_content_diagnostics.pod_status }}"
+        description: "Diagnostic, read-only: pods, restarts, last terminations and recent warning events."
+        playbook: automation/diagnostics/pod_status.yml
+        organization: "{{ aap_content_organisation }}"
+        project: "{{ aap_content_project_name }}"
+        inventory: "{{ aap_content_inventory_name }}"
+        execution_environment: "{{ aap_content_ee_name }}"
+        instance_groups: ["{{ aap_content_diagnostics_group }}"]
+        timeout: "{{ aap_content_diagnostics_timeout }}"
+        extra_vars:
+          diagnostics_service_map: "{{ aap_content_service_map }}"
+        ask_variables_on_launch: true
+      - name: "{{ aap_content_diagnostics.metrics }}"
+        description: "Diagnostic, read-only: heap, container memory and restarts over the last 30 minutes."
+        playbook: automation/diagnostics/metrics.yml
+        organization: "{{ aap_content_organisation }}"
+        project: "{{ aap_content_project_name }}"
+        inventory: "{{ aap_content_inventory_name }}"
+        execution_environment: "{{ aap_content_ee_name }}"
+        instance_groups: ["{{ aap_content_diagnostics_group }}"]
+        timeout: "{{ aap_content_diagnostics_timeout }}"
+        extra_vars:
+          diagnostics_service_map: "{{ aap_content_service_map }}"
+        ask_variables_on_launch: true
+      - name: "{{ aap_content_diagnostics.changes }}"
+        description: "Diagnostic, read-only: rollouts and running configuration, and the configuration item's change requests, in the last 24 hours."
+        playbook: automation/diagnostics/changes.yml
+        organization: "{{ aap_content_organisation }}"
+        project: "{{ aap_content_project_name }}"
+        inventory: "{{ aap_content_inventory_name }}"
+        execution_environment: "{{ aap_content_ee_name }}"
+        instance_groups: ["{{ aap_content_diagnostics_group }}"]
+        timeout: "{{ aap_content_diagnostics_timeout }}"
+        credentials: ["{{ aap_content_servicenow_credential }}"]
+        extra_vars:
+          diagnostics_service_map: "{{ aap_content_service_map }}"
+        ask_variables_on_launch: true
+      - name: "{{ aap_content_diagnostics.logs }}"
+        description: "Diagnostic, read-only: warnings and errors from the container log, within line and byte limits."
+        playbook: automation/diagnostics/logs.yml
+        organization: "{{ aap_content_organisation }}"
+        project: "{{ aap_content_project_name }}"
+        inventory: "{{ aap_content_inventory_name }}"
+        execution_environment: "{{ aap_content_ee_name }}"
+        instance_groups: ["{{ aap_content_diagnostics_group }}"]
+        timeout: "{{ aap_content_diagnostics_timeout }}"
+        extra_vars:
+          diagnostics_service_map: "{{ aap_content_service_map }}"
+        ask_variables_on_launch: true
+
       # The monitoring integration stand-in (DD19). Runs one job at a time, so two notifications
       # about the same problem cannot both find no incident and raise one each.
       - name: "{{ aap_content_integration_template }}"
@@ -150,20 +227,35 @@
               default: single
               required: true
 
-    # Any failed step leads to the failure branch (design 5.5).
+    # Failing to mark the incident pending or to write the note leads to the failure branch (design 5.5).
+    # A failed diagnostic does not: the note is written without its evidence.
     aap_content_cfg_controller_workflows:
       - name: "{{ aap_content_workflow_name }}"
         description: Enriches one incident. Launched by the trigger with the incident's fields only.
         organization: "{{ aap_content_organisation }}"
         ask_variables_on_launch: true
         allow_simultaneous: true
+        # The diagnostics run side by side; the note waits for all four, whatever their outcome.
         simplified_workflow_nodes:
           - identifier: pending
             unified_job_template: "{{ aap_content_templates.pending }}"
-            success_nodes: [note]
+            success_nodes: [pod_status, metrics, changes, logs]
             failure_nodes: [unavailable]
+          - identifier: pod_status
+            unified_job_template: "{{ aap_content_diagnostics.pod_status }}"
+            always_nodes: [note]
+          - identifier: metrics
+            unified_job_template: "{{ aap_content_diagnostics.metrics }}"
+            always_nodes: [note]
+          - identifier: changes
+            unified_job_template: "{{ aap_content_diagnostics.changes }}"
+            always_nodes: [note]
+          - identifier: logs
+            unified_job_template: "{{ aap_content_diagnostics.logs }}"
+            always_nodes: [note]
           - identifier: note
             unified_job_template: "{{ aap_content_templates.note }}"
+            all_parents_must_converge: true
             failure_nodes: [unavailable]
           - identifier: unavailable
             unified_job_template: "{{ aap_content_templates.unavailable }}"

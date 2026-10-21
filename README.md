@@ -4,7 +4,7 @@ A reproducible demonstration of AI-assisted incident enrichment using Red Hat An
 
 The whole environment is built and configured with Ansible playbooks, so it can be rebuilt from an empty cluster whenever a demo environment expires.
 
-> **Status:** milestone M2 (thin end to end) complete: an incident raised in ServiceNow gets an AI-labelled work note from the enrichment service through EDA and AAP, with nobody touching AAP, and `verify.yml` checks it. Build phases 01 to 04, 06 (the enrichment service, a skeleton until M3) and 07 (AAP content and the trigger) are implemented; 05 (knowledge) and 08 (workload) come in M3 and M4.
+> **Status:** milestone M2 (thin end to end) complete, and M3 (real fault and evidence) well under way: a memory fault in the sample service raises an incident through the monitoring integration stand-in, and the AI workflow gathers diagnostics before writing its note, with nobody touching AAP. Build phases 01 to 04 and 06 to 08 are implemented; the enrichment service stays a skeleton, listing the evidence it receives, until knowledge (phase 05) and the model are connected in M4.
 
 ## What the demo shows
 

@@ -34,6 +34,7 @@
       vars:
         servicenow_assignment_group: "{{ demo_servicenow.assignment_group }}"
         servicenow_secret_namespace: "{{ demo_namespaces.aap }}"
+        servicenow_configuration_items: "{{ demo_service_map }}"
 
     - name: Report what phase 04 found and changed
       ansible.builtin.debug:

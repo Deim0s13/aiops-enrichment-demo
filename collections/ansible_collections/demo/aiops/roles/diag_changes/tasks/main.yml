@@ -1,0 +1,83 @@
+---
+- name: Read the service's deployment and its ReplicaSets
+  ansible.builtin.uri:
+    url: "{{ evidence_api }}/apis/apps/v1/namespaces/{{ evidence_target.namespace }}/{{ item }}?labelSelector={{ ('app=' ~ evidence_target.app) | urlencode }}"
+    headers:
+      Authorization: "Bearer {{ evidence_token }}"
+    ca_path: "{{ evidence_sa_dir }}/ca.crt"
+    timeout: "{{ evidence_call_timeout }}"
+    status_code: [200, 401, 403, 404]
+  loop: [deployments, replicasets]
+  register: diag_changes_read
+  no_log: true
+
+- name: Stop if the cluster refused
+  ansible.builtin.assert:
+    that: diag_changes_read.results | map(attribute='status') | unique == [200]
+    fail_msg: >-
+      The cluster answered HTTP {{ diag_changes_read.results | map(attribute='status') | join(' and ') }} when
+      reading deployments and ReplicaSets in {{ evidence_target.namespace }}.
+    quiet: true
+
+# A ServiceNow outage or a missing credential leaves this one fact as a gap, not the whole diagnostic.
+- name: Read the configuration item's change requests
+  servicenow.itsm.api_info:
+    resource: change_request
+    sysparm_query: >-
+      cmdb_ci.name={{ evidence_target.service }}^sys_updated_onRELATIVEGT@hour@ago@{{ diag_changes_window_hours }}^ORDERBYDESCsys_updated_on
+    display_value: "true"
+    columns: [number, short_description, state, start_date, end_date, sys_updated_on]
+  register: diag_changes_crs
+  failed_when: false
+  when: lookup('ansible.builtin.env', 'SN_HOST') | length > 0
+
+- name: State what changed
+  ansible.builtin.set_fact:
+    evidence_items: "{{ diag_changes_json | from_json }}"
+  vars:
+    target: "{{ evidence_target.namespace }}/{{ evidence_target.app }}"
+    since: "{{ '%Y-%m-%dT%H:%M:%SZ' | strftime(now().timestamp() - diag_changes_window_hours * 3600, utc=true) }}"
+    diag_changes_json: >-
+      {%- set out = [] -%}
+      {%- set deployment = diag_changes_read.results[0].json['items'] | first | default({}) -%}
+      {%- set sets = diag_changes_read.results[1].json['items'] | sort(attribute='metadata.creationTimestamp') -%}
+      {%- if deployment -%}
+      {%- set newest = sets | last | default({}) -%}
+      {%- set container = deployment.spec.template.spec.containers | selectattr('name', 'equalto', evidence_target.container) | first | default({}) -%}
+      {%- set recent = sets | selectattr('metadata.creationTimestamp', '>=', since) | list -%}
+      {%- set _ = out.append({'id': 'EV-CHG-01', 'target': target,
+            'fact': 'Deployment ' ~ deployment.metadata.name ~ ': revision '
+                    ~ deployment.metadata.annotations['deployment.kubernetes.io/revision'] | default('unknown')
+                    ~ ', image ' ~ container.image | default('unknown') ~ '; last rolled out at '
+                    ~ (newest.metadata.creationTimestamp | default('unknown')) ~ '; ' ~ recent | length ~ ' rollout(s) in the last '
+                    ~ diag_changes_window_hours ~ ' hours.',
+            'ref': '/apis/apps/v1/namespaces/' ~ evidence_target.namespace ~ '/deployments/' ~ deployment.metadata.name}) -%}
+      {%- set res = container.resources | default({}) -%}
+      {%- set env = container.env | default([]) | selectattr('name', 'match', diag_changes_env_pattern) | selectattr('value', 'defined') -%}
+      {%- set _ = out.append({'id': 'EV-CHG-02', 'target': target,
+            'fact': 'Running configuration of container ' ~ evidence_target.container ~ ': memory request '
+                    ~ (res.requests | default({})).memory | default('none') ~ ', memory limit ' ~ (res.limits | default({})).memory | default('none')
+                    ~ ', CPU limit ' ~ (res.limits | default({})).cpu | default('none') ~ '; JVM settings: '
+                    ~ (env | map(attribute='name') | zip(env | map(attribute='value')) | map('join', '=') | join(', ') or 'none') ~ '.',
+            'ref': '/apis/apps/v1/namespaces/' ~ evidence_target.namespace ~ '/deployments/' ~ deployment.metadata.name}) -%}
+      {%- else -%}
+      {%- set _ = out.append({'id': 'EV-CHG-01', 'target': target,
+            'fact': 'No deployment with label app=' ~ evidence_target.app ~ ' in ' ~ evidence_target.namespace ~ '.', 'ref': ''}) -%}
+      {%- endif -%}
+      {%- if diag_changes_crs is skipped -%}
+      {%- set cr = 'Change requests were not checked: this job has no ServiceNow credential.' -%}
+      {%- elif diag_changes_crs.record is not defined -%}
+      {%- set cr = 'Change requests could not be read from ServiceNow: ' ~ diag_changes_crs.msg | default('unknown error') | string | truncate(200) -%}
+      {%- elif diag_changes_crs.record | length == 0 -%}
+      {%- set cr = 'No change requests for configuration item ' ~ evidence_target.service ~ ' were opened or updated in the last '
+                   ~ diag_changes_window_hours ~ ' hours.' -%}
+      {%- else -%}
+      {%- set cr = 'Change requests for configuration item ' ~ evidence_target.service ~ ' in the last ' ~ diag_changes_window_hours ~ ' hours: '
+                   ~ diag_changes_crs.record[:5] | map(attribute='number') | zip(diag_changes_crs.record[:5] | map(attribute='short_description'),
+                     diag_changes_crs.record[:5] | map(attribute='state'), diag_changes_crs.record[:5] | map(attribute='start_date'))
+                   | map('join', ' | ') | join('; ') -%}
+      {%- endif -%}
+      {%- set read = diag_changes_crs is not skipped and diag_changes_crs.record is defined -%}
+      {%- set _ = out.append({'id': ('EV-CHG-0' ~ (out | length + 1)) if read else 'EV-CHG-GAP', 'target': evidence_target.service,
+            'fact': cr, 'ref': 'change_request'}) -%}
+      {{ out | to_json }}

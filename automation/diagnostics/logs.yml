@@ -1,0 +1,15 @@
+---
+# Diagnostic (flow step 3, design 5.2): log excerpt. Runs in the ACME diagnostics container group, as the
+# read-only aiops-diagnostics service account. Vars from the workflow: cmdb_ci. From the job
+# template: diagnostics_service_map. Publishes diagnostics_evidence_logs for the work note step.
+- name: "AI enrichment | Diagnostics: log excerpt"
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Run the diagnostic and publish its evidence
+      ansible.builtin.include_role:
+        name: demo.aiops.evidence
+      vars:
+        evidence_diagnostic: logs
+        evidence_cmdb_ci: "{{ cmdb_ci | default('') | string }}"
+        evidence_service_map: "{{ diagnostics_service_map }}"

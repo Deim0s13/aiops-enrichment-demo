@@ -98,6 +98,22 @@ spec:
             summary: "payments-notify was terminated for exceeding its memory limit (OOMKilled) and restarted"
             description: "Pod {{ '{{' }} $labels.pod {{ '}}' }} was OOMKilled and restarted in the last {{ workload_oom_alert_window }}."
 ---
+# Lets the diagnostics read this namespace, and only this one (design 6.1, DD20).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ workload_diagnostics_sa }}-view
+  namespace: {{ workload_namespace }}
+  labels: {{ labels | to_json }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: {{ workload_diagnostics_sa }}
+    namespace: {{ workload_caller_namespace }}
+---
 # Routes this namespace's alerts that name an incident family to the monitoring integration stand-in
 # (DD19). The operator adds a namespace matcher, so only this namespace's alerts are routed.
 apiVersion: monitoring.coreos.com/v1beta1

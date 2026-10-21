@@ -1,0 +1,66 @@
+---
+# Read-only: lists the service's pods and the namespace's events with the pod's own token.
+- name: Read the service's pods and the namespace's events
+  ansible.builtin.uri:
+    url: "{{ evidence_api }}{{ item }}"
+    headers:
+      Authorization: "Bearer {{ evidence_token }}"
+    ca_path: "{{ evidence_sa_dir }}/ca.crt"
+    timeout: "{{ evidence_call_timeout }}"
+    status_code: [200, 401, 403, 404]
+  loop:
+    - "/api/v1/namespaces/{{ evidence_target.namespace }}/pods?labelSelector={{ ('app=' ~ evidence_target.app) | urlencode }}"
+    - "/api/v1/namespaces/{{ evidence_target.namespace }}/events?limit=500"
+  register: diag_pod_status_read
+  no_log: true
+
+- name: Stop if the cluster refused
+  ansible.builtin.assert:
+    that: diag_pod_status_read.results | map(attribute='status') | unique == [200]
+    fail_msg: >-
+      The cluster answered HTTP {{ diag_pod_status_read.results | map(attribute='status') | join(' and ') }} when
+      reading pods and events in {{ evidence_target.namespace }}.
+    quiet: true
+
+- name: State what the pods and events show
+  ansible.builtin.set_fact:
+    evidence_items: "{{ diag_pod_status_json | from_json }}"
+  vars:
+    diag_pod_status_pods: "{{ diag_pod_status_read.results[0].json['items'] | sort(attribute='metadata.creationTimestamp', reverse=true) }}"
+    diag_pod_status_names: "{{ diag_pod_status_pods | map(attribute='metadata.name') | list }}"
+    diag_pod_status_since: "{{ '%Y-%m-%dT%H:%M:%SZ' | strftime(now().timestamp() - 1800, utc=true) }}"
+    diag_pod_status_json: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for p in diag_pod_status_pods[:3] -%}
+      {%- set cs = p.status.containerStatuses | default([]) | selectattr('name', 'equalto', evidence_target.container) | first | default({}) -%}
+      {%- set term = (cs.lastState | default({})).terminated | default({}) -%}
+      {%- set limits = ((p.spec.containers | selectattr('name', 'equalto', evidence_target.container) | first | default({})).resources | default({})).limits | default({}) -%}
+      {%- set fact = 'Pod ' ~ p.metadata.name ~ ': phase ' ~ p.status.phase | default('unknown') ~ '; container '
+            ~ evidence_target.container ~ ' ' ~ ('ready' if cs.ready | default(false) else 'not ready') ~ ', restarted '
+            ~ cs.restartCount | default(0) ~ ' time(s) since the pod started at ' ~ p.status.startTime | default('unknown') ~ '.'
+            ~ ((' Last termination: ' ~ term.reason | default('unknown') ~ ', exit code ' ~ term.exitCode | default('unknown')
+                ~ ', at ' ~ term.finishedAt | default('unknown') ~ '.') if term else ' No earlier termination recorded.')
+            ~ ((' Current container running since ' ~ cs.state.running.startedAt ~ '.') if (cs.state | default({})).running is defined else '')
+            ~ ((' Memory limit ' ~ limits.memory ~ '.') if limits.memory is defined else '') -%}
+      {%- set ns.out = ns.out + [{'id': 'EV-POD-0' ~ loop.index, 'target': evidence_target.namespace ~ '/' ~ p.metadata.name,
+            'fact': fact, 'ref': '/api/v1/namespaces/' ~ evidence_target.namespace ~ '/pods/' ~ p.metadata.name}] -%}
+      {%- endfor -%}
+      {%- if not diag_pod_status_pods -%}
+      {%- set ns.out = [{'id': 'EV-POD-01', 'target': evidence_target.namespace ~ '/' ~ evidence_target.app,
+            'fact': 'No pods with label app=' ~ evidence_target.app ~ ' are running in ' ~ evidence_target.namespace ~ '.', 'ref': ''}] -%}
+      {%- endif -%}
+      {%- set ev = namespace(lines=[]) -%}
+      {%- for e in diag_pod_status_read.results[1].json['items']
+            | selectattr('type', 'equalto', 'Warning') | selectattr('involvedObject.name', 'in', diag_pod_status_names)
+            | sort(attribute='metadata.creationTimestamp') -%}
+      {%- set when = e.lastTimestamp or e.eventTime or e.metadata.creationTimestamp -%}
+      {%- if when >= diag_pod_status_since -%}
+      {%- set ev.lines = ev.lines + [e.reason ~ ' on ' ~ e.involvedObject.name ~ ' (' ~ e.count | default(1) ~ ' time(s), last at ' ~ when ~ '): '
+            ~ e.message | default('') | truncate(200)] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- set ns.out = ns.out + [{'id': 'EV-POD-0' ~ (ns.out | length + 1), 'target': evidence_target.namespace ~ '/' ~ evidence_target.app,
+            'fact': ('Warning events for the pods in the last 30 minutes: ' ~ ev.lines[-5:] | join('; ')) if ev.lines
+                    else 'No warning events for the pods in the last 30 minutes.',
+            'ref': '/api/v1/namespaces/' ~ evidence_target.namespace ~ '/events'}] -%}
+      {{ ns.out | to_json }}
