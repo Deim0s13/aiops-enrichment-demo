@@ -13,9 +13,26 @@
       evidence: "{{ enrichment_call_evidence }}"
       catalogue: "{{ enrichment_call_catalogue }}"
     timeout: "{{ enrichment_call_timeout }}"
-    status_code: [200]
+    # Every answer is accepted here and judged below: the call carries the token, so a failure here
+    # would be censored, and the operator would not see why.
+    status_code: [-1, 200, 400, 401, 403, 404, 413, 422, 429, 500, 502, 503, 504]
   register: enrichment_call_response
   no_log: true
+
+# The service's own explanation holds no secrets: for a 422, which field broke the contract and why.
+- name: Stop if the service did not answer, or refused the request
+  ansible.builtin.assert:
+    that: enrichment_call_response.status == 200
+    fail_msg: >-
+      The enrichment service answered
+      {{ ('HTTP ' ~ enrichment_call_response.status) if enrichment_call_response.status > 0 else 'nothing' }}:
+      {% if enrichment_call_response.json.detail is defined and enrichment_call_response.json.detail is not string %}
+      {{ enrichment_call_response.json.detail[:5] | map(attribute='loc') | map('join', '.')
+         | zip(enrichment_call_response.json.detail[:5] | map(attribute='msg')) | map('join', ': ') | join('; ') }}
+      {% else %}
+      {{ (enrichment_call_response.json.detail | default(enrichment_call_response.msg | default('no detail'))) | string | truncate(300) }}
+      {% endif %}
+    quiet: true
 
 - name: Keep only the answer
   ansible.builtin.set_fact:
