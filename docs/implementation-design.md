@@ -139,7 +139,7 @@ flowchart LR
 
 A qualifying incident matches the demonstration's on-call assignment group (ACME Payments On-call), the Software category, priority 2 or 3, and an empty enrichment state. The event carries the incident number and system ID, short description, configuration item, priority, opening time, the alert labels supplied by the integration, and an event ID. The EDA rulebook validates these fields and passes only them to the workflow.
 
-An asynchronous business rule on insert posts qualifying incidents through an Outbound REST Message, which holds the event stream's address and token and records each call in ServiceNow's outbound HTTP log. Phase 07 sets the address and token for each environment. Running after the save means a failed call never affects the incident; it is logged instead.
+An asynchronous business rule on insert posts qualifying incidents through an Outbound REST Message, which holds the event stream's address and token and records each call in ServiceNow's outbound HTTP log. Phase 07 sets the address and token for each environment. Running after the save means a failed call never affects the incident. A call that may pass, with no answer, HTTP 429 or a 5xx, is retried twice, after 2 and 5 seconds, with the same event ID; a call that still fails is logged. The workflow is idempotent, so a post that arrived twice changes nothing.
 
 Recursion is prevented in three ways. The business rule fires on insert only, its condition excludes changes made by the enrichment writer identity, and the workflow sets the enrichment state to `pending` as its first action.
 
@@ -219,7 +219,7 @@ Enrichment uses three custom incident fields:
 
 ### 5.5 Failure handling
 
-A failure to mark the incident pending or to write the note takes the workflow's failure branch. A failed diagnostic does not: the note is written without its evidence, and its gap item says what is missing. This writes an "AI enrichment unavailable" note with the reason and sets the enrichment state to `unavailable`. Initial timeouts are 90 seconds for the enrichment call and 5 minutes for the workflow as a whole. Retries are bounded, and the incident remains with its assigned team throughout.
+A failure to mark the incident pending or to write the note takes the workflow's failure branch. A failed diagnostic does not: the note is written without its evidence, and its gap item says what is missing. This writes an "AI enrichment unavailable" note with the reason and sets the enrichment state to `unavailable`. Initial timeouts are 90 seconds for the enrichment call and 5 minutes for the workflow as a whole. Retries are bounded, and the incident remains with its assigned team throughout. The trigger's own retries cover a brief outage between ServiceNow and AAP, such as the single HTTP 500 from the event stream that `verify.yml` caught on 2026-10-22. A longer outage would still leave an incident unenriched: a reconciliation sweep, a scheduled AAP job that launches the workflow for qualifying incidents left without an enrichment state, is open item OI10.
 
 ### 5.6 Knowledge corpus
 
@@ -418,6 +418,7 @@ Scenarios S1 to S5 are presented to the audience. `verify.yml` also checks the f
 | OI07 | ~~Name the fictional organisation and its services for the corpus and demo data.~~ Closed: the organisation is ACME Bank; service names are chosen with the corpus. | Phase 05 |
 | OI08 | ~~Confirm whether the audience's own highest-volume incident family can be reproduced, as a replacement for DD01.~~ Closed: DD01 (JVM memory exhaustion) stands; a second reproducible family is designed in M5. | Before corpus authoring |
 | OI09 | ~~Confirm licence and publication approval.~~ Closed: a personal learning and demonstration kit, kept private in the author's GitHub under Apache 2.0 and shared with colleagues as collaborators. Making it public is a later decision, once the kit is mature, and follows the review in M6.7. | Not applicable |
+| OI10 | Decide whether to add a reconciliation sweep: a scheduled AAP job, with its own user allowed to launch only the enrichment workflow, that launches it for qualifying incidents left without an enrichment state for more than 2 minutes. It covers outages longer than the trigger's retries; the workflow is already idempotent. | M6 |
 
 ## Related documents and references
 

@@ -131,5 +131,8 @@ servicenow_trigger_secret: eda-event-stream-servicenow
 servicenow_trigger_rest_message: ACME AI enrichment event stream
 servicenow_trigger_rule: "ACME trigger: AI enrichment"
 servicenow_trigger_priorities: ["2", "3"]
+# A post that may pass (no answer, HTTP 429 or 5xx) is retried after these many milliseconds: three
+# attempts over about 7 seconds. The rule runs asynchronously, so waiting holds up nothing else.
+servicenow_trigger_retry_delays_ms: [2000, 5000]
 servicenow_trigger_check_retries: 30
 servicenow_trigger_check_delay: 10

@@ -100,6 +100,10 @@ argument_specs:
       servicenow_trigger_rule:
         type: str
         description: Name of the trigger business rule.
+      servicenow_trigger_retry_delays_ms:
+        type: list
+        elements: int
+        description: Milliseconds before each retry of a post that may pass; one more attempt than there are delays.
       servicenow_trigger_priorities:
         type: list
         elements: str

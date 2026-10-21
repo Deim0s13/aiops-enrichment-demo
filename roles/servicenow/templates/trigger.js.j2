@@ -1,5 +1,8 @@
 // Posts each new incident that qualifies for AI enrichment (design 5.1) to the AAP event stream,
-// through the REST Message the build keeps current. Managed by the aiops-enrichment-demo build.
+// through the REST Message the build keeps current. A failure that may pass (no answer, HTTP 429 or
+// 5xx) is retried a few seconds apart with the same event ID, so a brief outage between ServiceNow
+// and AAP does not lose the incident (design 5.5); the workflow is idempotent, so a post that did
+// arrive twice changes nothing. Managed by the aiops-enrichment-demo build.
 (function executeRule(current, previous) {
     var qualifies = current.getValue('assignment_group') == '{{ servicenow_ids.group }}'
         && current.getValue('category') == '{{ servicenow_trigger_category }}'
@@ -8,25 +11,48 @@
     if (!qualifies) {
         return;
     }
-    try {
-        var request = new sn_ws.RESTMessageV2('{{ servicenow_trigger_rest_message }}', 'post');
-        request.setRequestBody(JSON.stringify({
-            event_id: gs.generateGUID(),
-            incident: {
-                sys_id: current.getUniqueValue(),
-                number: current.getValue('number'),
-                short_description: current.getValue('short_description'),
-                cmdb_ci: current.getDisplayValue('cmdb_ci'),
-                priority: current.getValue('priority'),
-                opened_at: current.getValue('opened_at')
-            }
-        }));
-        var response = request.execute();
-        var status = response.getStatusCode();
-        if (status < 200 || status > 299) {
-            gs.error('ACME AI enrichment trigger: the event stream answered HTTP ' + status + ' for ' + current.getValue('number'));
+    var number = current.getValue('number');
+    var body = JSON.stringify({
+        event_id: gs.generateGUID(),
+        incident: {
+            sys_id: current.getUniqueValue(),
+            number: number,
+            short_description: current.getValue('short_description'),
+            cmdb_ci: current.getDisplayValue('cmdb_ci'),
+            priority: current.getValue('priority'),
+            opened_at: current.getValue('opened_at')
         }
-    } catch (e) {
-        gs.error('ACME AI enrichment trigger: could not post ' + current.getValue('number') + ': ' + e);
+    });
+    // Milliseconds to wait before each retry; one more attempt than there are delays.
+    var delays = {{ servicenow_trigger_retry_delays_ms | to_json }};
+    var attempt = 0;
+    var status = 0;
+    var detail = '';
+    while (true) {
+        attempt++;
+        try {
+            var request = new sn_ws.RESTMessageV2('{{ servicenow_trigger_rest_message }}', 'post');
+            request.setRequestBody(body);
+            var response = request.execute();
+            status = response.getStatusCode();
+            detail = (status >= 200 && status <= 299) ? '' : String(response.getErrorMessage() || '');
+        } catch (e) {
+            status = 0;
+            detail = String(e);
+        }
+        var delivered = status >= 200 && status <= 299;
+        var mayPass = status == 0 || status == 429 || status >= 500;
+        if (delivered || !mayPass || attempt > delays.length) {
+            break;
+        }
+        gs.sleep(delays[attempt - 1]);
+    }
+    if (status >= 200 && status <= 299) {
+        if (attempt > 1) {
+            gs.warn('ACME AI enrichment trigger: posted ' + number + ' on attempt ' + attempt);
+        }
+    } else {
+        gs.error('ACME AI enrichment trigger: could not post ' + number + ' after ' + attempt
+            + ' attempt(s); last answer HTTP ' + status + (detail ? ': ' + detail : ''));
     }
 })(current, previous);
