@@ -54,6 +54,8 @@
       ansible.builtin.include_role:
         name: aap_content
         tasks_from: checks_integration
+      vars:
+        aap_content_organisation: "{{ demo_aap_organisation }}"
       when: aap_content_checks | default(true) | bool
 
     - name: Report what phase 07 found and changed

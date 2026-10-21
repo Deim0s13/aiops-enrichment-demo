@@ -85,8 +85,8 @@
         Service: {{ workload_name }}.{{ workload_namespace }}.svc:{{ workload_port }}, memory limit {{ workload_memory_limit }},
         maximum heap {{ workload_max_heap }}; callers only from {{ workload_caller_namespace }} and user workload monitoring
       - >-
-        Alert rules: PaymentsNotifyHeapHigh (heap above {{ (workload_heap_alert_ratio * 100) | int }}% for
-        {{ workload_heap_alert_for }}), PaymentsNotifyOOMKilled (for {{ workload_oom_alert_window }} after each kill)
+        Alert rules: PaymentsNotifyHeapHigh (heap above {{ (workload_heap_alert_ratio * 100) | int }}%{{ (' for ' ~ workload_heap_alert_for)
+        if workload_heap_alert_for not in ['0s', '0'] else '' }}), PaymentsNotifyOOMKilled (for {{ workload_oom_alert_window }} after each kill)
       - >-
         Alert routing: grouped by service and incident family, to the integration stand-in's event stream with
         Basic authentication (Secret {{ workload_alertmanager_secret }})
