@@ -35,7 +35,7 @@
               priority: "{{ priority | default('') | string }}"
               opened_at: "{{ opened_at | default('') | string }}"
             enrichment_call_evidence: >-
-              {{ query('ansible.builtin.vars', *query('ansible.builtin.varnames', '^diagnostics_evidence_')) | flatten | sort(attribute='id') }}
+              {{ query('ansible.builtin.vars', *query('ansible.builtin.varnames', '^diagnostics_evidence_')) | flatten }}
             enrichment_call_references: "workflow job {{ awx_workflow_job_id | default('n/a') }} | event {{ event_id | default('n/a') }}"
 
         - name: Write the work note

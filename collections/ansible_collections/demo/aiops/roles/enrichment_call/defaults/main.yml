@@ -4,5 +4,8 @@
 # ENRICHMENT_TOKEN and ENRICHMENT_CA_FILE.
 enrichment_call_revision: 1
 enrichment_call_evidence: []
+# The order an engineer reads evidence in: what happened to the service, the numbers, what it logged,
+# then what changed. Items with other prefixes follow, by ID.
+enrichment_call_evidence_order: [EV-POD, EV-MET, EV-LOG, EV-CHG]
 enrichment_call_catalogue: []
 enrichment_call_timeout: 90

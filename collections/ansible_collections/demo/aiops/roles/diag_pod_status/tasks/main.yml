@@ -37,10 +37,10 @@
       {%- set limits = ((p.spec.containers | selectattr('name', 'equalto', evidence_target.container) | first | default({})).resources | default({})).limits | default({}) -%}
       {%- set fact = 'Pod ' ~ p.metadata.name ~ ': phase ' ~ p.status.phase | default('unknown') ~ '; container '
             ~ evidence_target.container ~ ' ' ~ ('ready' if cs.ready | default(false) else 'not ready') ~ ', restarted '
-            ~ cs.restartCount | default(0) ~ ' time(s) since the pod started at ' ~ p.status.startTime | default('unknown') ~ '.'
+            ~ cs.restartCount | default(0) ~ ' time(s) since the pod started at ' ~ (p.status.startTime | default('unknown') | regex_replace('^(\\d{4}-\\d\\d-\\d\\d)T(\\d\\d:\\d\\d:\\d\\d).*$', '\\1 \\2 UTC')) ~ '.'
             ~ ((' Last termination: ' ~ term.reason | default('unknown') ~ ', exit code ' ~ term.exitCode | default('unknown')
-                ~ ', at ' ~ term.finishedAt | default('unknown') ~ '.') if term else ' No earlier termination recorded.')
-            ~ ((' Current container running since ' ~ cs.state.running.startedAt ~ '.') if (cs.state | default({})).running is defined else '')
+                ~ ', at ' ~ (term.finishedAt | default('unknown') | regex_replace('^(\\d{4}-\\d\\d-\\d\\d)T(\\d\\d:\\d\\d:\\d\\d).*$', '\\1 \\2 UTC')) ~ '.') if term else ' No earlier termination recorded.')
+            ~ ((' Current container running since ' ~ (cs.state.running.startedAt | regex_replace('^(\\d{4}-\\d\\d-\\d\\d)T(\\d\\d:\\d\\d:\\d\\d).*$', '\\1 \\2 UTC')) ~ '.') if (cs.state | default({})).running is defined else '')
             ~ ((' Memory limit ' ~ limits.memory ~ '.') if limits.memory is defined else '') -%}
       {%- set ns.out = ns.out + [{'id': 'EV-POD-0' ~ loop.index, 'target': evidence_target.namespace ~ '/' ~ p.metadata.name,
             'fact': fact, 'ref': '/api/v1/namespaces/' ~ evidence_target.namespace ~ '/pods/' ~ p.metadata.name}] -%}
@@ -55,7 +55,7 @@
             | sort(attribute='metadata.creationTimestamp') -%}
       {%- set when = e.lastTimestamp or e.eventTime or e.metadata.creationTimestamp -%}
       {%- if when >= diag_pod_status_since -%}
-      {%- set ev.lines = ev.lines + [e.reason ~ ' on ' ~ e.involvedObject.name ~ ' (' ~ e.count | default(1) ~ ' time(s), last at ' ~ when ~ '): '
+      {%- set ev.lines = ev.lines + [e.reason ~ ' on ' ~ e.involvedObject.name ~ ' (' ~ e.count | default(1) ~ ' time(s), last at ' ~ (when | regex_replace('^(\\d{4}-\\d\\d-\\d\\d)T(\\d\\d:\\d\\d:\\d\\d).*$', '\\1 \\2 UTC')) ~ '): '
             ~ e.message | default('') | truncate(200)] -%}
       {%- endif -%}
       {%- endfor -%}

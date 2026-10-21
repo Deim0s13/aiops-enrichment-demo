@@ -39,6 +39,9 @@
   when: diag_logs_pod | length > 0
   no_log: true
 
+# Repeated messages are collapsed: lines that differ only in their numbers become one entry with a
+# count, a time range and the first and last values, so the excerpt shows what the log says, not how
+# often. A leading timestamp is taken off the message and kept for the time range.
 - name: State what the log shows
   ansible.builtin.set_fact:
     evidence_items:
@@ -53,8 +56,9 @@
           No warnings or errors in the last {{ diag_logs_lines | length }} lines of the {{ diag_logs_which }} container log of pod {{ diag_logs_pod }}.
           {%- else -%}
           {{ diag_logs_which | capitalize }} container log of pod {{ diag_logs_pod }}: {{ diag_logs_matches | length }} of the last
-          {{ diag_logs_lines | length }} lines are warnings or errors. The last {{ diag_logs_matches[-diag_logs_keep:] | length }}:
-          {{ diag_logs_matches[-diag_logs_keep:] | map('truncate', diag_logs_line_limit) | join(' / ') }}
+          {{ diag_logs_lines | length }} lines are warnings or errors, in {{ diag_logs_summary | length }} distinct message(s){{
+          ' (the last ' ~ diag_logs_keep ~ ' shown)' if diag_logs_summary | length > diag_logs_keep else '' }}:
+          {{ diag_logs_summary[-diag_logs_keep:] | join('; ') }}
           {%- endif -%}
         ref: "/api/v1/namespaces/{{ evidence_target.namespace }}/pods/{{ diag_logs_pod }}/log"
   vars:
@@ -63,3 +67,34 @@
     diag_logs_which: "{{ 'previous' if diag_logs_used and diag_logs_used.item == 'true' else 'current' }}"
     diag_logs_lines: "{{ (diag_logs_used.content | default('')).splitlines() if diag_logs_used else [] }}"
     diag_logs_matches: "{{ diag_logs_lines | select('search', diag_logs_pattern) | list }}"
+    diag_logs_summary: "{{ diag_logs_summary_json | from_json }}"
+    diag_logs_summary_json: >-
+      {%- set ns = namespace(keys=[], groups={}) -%}
+      {%- for line in diag_logs_matches -%}
+      {%- set ts = (line | regex_search('^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d')) or '' -%}
+      {%- set msg = line | regex_replace('^\d{4}-\d\d-\d\dT[0-9:.]+Z?\s*', '') | truncate(diag_logs_line_limit) -%}
+      {%- set key = msg | regex_replace('[0-9]+', '#') -%}
+      {%- if key in ns.groups -%}
+      {%- set g = ns.groups[key] -%}
+      {%- set ns.groups = ns.groups | combine({key: {'count': g.count + 1, 'first': g.first, 'first_ts': g.first_ts, 'last': msg, 'last_ts': ts}}) -%}
+      {%- else -%}
+      {%- set ns.keys = ns.keys + [key] -%}
+      {%- set ns.groups = ns.groups | combine({key: {'count': 1, 'first': msg, 'first_ts': ts, 'last': msg, 'last_ts': ts}}) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- set out = namespace(lines=[]) -%}
+      {%- for key in ns.keys -%}
+      {%- set g = ns.groups[key] -%}
+      {%- set first_at = g.first_ts | replace('T', ' ') -%}
+      {%- set last_at = (g.last_ts[11:19] if g.last_ts[:10] == g.first_ts[:10] else g.last_ts | replace('T', ' ')) if g.last_ts else '' -%}
+      {%- if g.count == 1 -%}
+      {%- set text = '"' ~ g.first ~ '"' ~ (' at ' ~ first_at ~ ' UTC' if first_at else '') -%}
+      {%- elif g.first == g.last -%}
+      {%- set text = g.count ~ ' times' ~ ((' from ' ~ first_at ~ ' to ' ~ last_at ~ ' UTC') if first_at else '') ~ ': "' ~ g.first ~ '"' -%}
+      {%- else -%}
+      {%- set text = g.count ~ ' times' ~ ((' from ' ~ first_at ~ ' to ' ~ last_at ~ ' UTC') if first_at else '') ~ ', first "' ~ g.first
+            ~ '", last "' ~ g.last ~ '"' -%}
+      {%- endif -%}
+      {%- set out.lines = out.lines + [text] -%}
+      {%- endfor -%}
+      {{ out.lines | to_json }}

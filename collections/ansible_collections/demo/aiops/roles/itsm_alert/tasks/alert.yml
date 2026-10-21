@@ -30,12 +30,15 @@
         {%- endfor -%}
         {{ parts | join(', ') }}
 
-- name: "Find the open incident for {{ itsm_alert_this.correlation }}"
+# The latest incident for the problem, open or not. Resolved (6), closed (7) and cancelled (8)
+# incidents are finished, so a new firing raises a new incident; but an alert a finished incident
+# already recorded, such as an OOMKilled alert still firing after the reset closed its incident,
+# raises nothing.
+- name: "Find the latest incident for {{ itsm_alert_this.correlation }}"
   servicenow.itsm.api_info:
     resource: incident
-    # Resolved (6), closed (7) and cancelled (8) incidents are finished: a new alert opens a new one.
-    sysparm_query: "correlation_id={{ itsm_alert_this.correlation }}^stateNOT IN6,7,8^ORDERBYsys_created_on"
-    columns: [sys_id, number, priority, u_acme_alert_occurrences, u_acme_alert_state]
+    sysparm_query: "correlation_id={{ itsm_alert_this.correlation }}^ORDERBYDESCsys_created_on"
+    columns: [sys_id, number, state, priority, u_acme_alert_occurrences, u_acme_alert_state]
   register: itsm_alert_found
   until: itsm_alert_found is not failed
   retries: 3
@@ -43,19 +46,21 @@
 
 - name: Read what the incident has recorded
   ansible.builtin.set_fact:
-    itsm_alert_open: "{{ itsm_alert_open_record }}"
+    itsm_alert_latest: "{{ itsm_alert_latest_record }}"
+    itsm_alert_open: "{{ itsm_alert_latest_record if itsm_alert_latest_record.state | default('7') | string not in ['6', '7', '8'] else {} }}"
     itsm_alert_seen: >-
-      {{ (itsm_alert_open_record.u_acme_alert_state | from_json)
-         if itsm_alert_open_record.u_acme_alert_state | default('') is match('^\s*\{') else {} }}
+      {{ (itsm_alert_latest_record.u_acme_alert_state | from_json)
+         if itsm_alert_latest_record.u_acme_alert_state | default('') is match('^\s*\{') else {} }}
   vars:
-    itsm_alert_open_record: "{{ itsm_alert_found.record | first | default({}) }}"
+    itsm_alert_latest_record: "{{ itsm_alert_found.record | first | default({}) }}"
 
 - name: Decide what to do
   ansible.builtin.set_fact:
     itsm_alert_action: >-
       {%- set previous = itsm_alert_seen[itsm_alert_this.name] | default({}) -%}
       {%- if itsm_alert_this.status == 'firing' -%}
-      {{ ('raise' if itsm_alert_this.severity in itsm_alert_raise_severities else 'hold') if not itsm_alert_open
+      {{ ('repeat' if previous.since | default('') == itsm_alert_this.since
+          else ('raise' if itsm_alert_this.severity in itsm_alert_raise_severities else 'hold')) if not itsm_alert_open
          else ('repeat' if previous.since | default('') == itsm_alert_this.since else 'add') }}
       {%- else -%}
       {{ 'none' if not itsm_alert_open else ('repeat' if previous.cleared | default('') == itsm_alert_this.ended else 'clear') }}
@@ -138,7 +143,8 @@
   ansible.builtin.set_fact:
     itsm_alert_outcomes: "{{ itsm_alert_outcomes + [itsm_alert_this.name ~ ' ' ~ itsm_alert_this.status ~ ': ' ~ itsm_alert_outcome] }}"
   vars:
-    itsm_alert_number: "{{ itsm_alert_open.number | default(itsm_alert_raised.record.number | default('')) }}"
+    itsm_alert_number: >-
+      {{ itsm_alert_open.number | default(itsm_alert_raised.record.number | default(itsm_alert_latest.number | default('') ~ ' (closed)'), true) }}
     itsm_alert_outcome: >-
       {{ {'raise': 'raised ' ~ itsm_alert_number ~ ' for ' ~ itsm_alert_this.correlation ~ ', priority ' ~ itsm_alert_target.priority
                    ~ (', configuration item ' ~ itsm_alert_this.service if itsm_alert_ci.record | default([]) | length > 0 else ', no configuration item'),

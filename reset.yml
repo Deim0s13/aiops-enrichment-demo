@@ -1,21 +1,38 @@
 ---
 # Back to a clean demo between runs:
 #   ansible-navigator run reset.yml
-# Resolves and closes the demo's own incidents (raised by svc-monitoring in the on-call group), with a
-# close note, and deletes anything the build checks left behind. Touches nothing else in the PDI.
-# From M3 it will also restart the sample service and clear its heap dumps.
+# Restarts the sample service with a new pod, which clears a recurring fault, then resolves and closes
+# the demo's own incidents (raised by svc-monitoring in the on-call group), with a close note, and
+# deletes anything the build checks left behind. Touches nothing else in the PDI or the cluster.
 
 - name: Reset the demo to a clean state between runs
   hosts: localhost
   gather_facts: false
   tags: [reset]
 
+  # See playbooks/01_platform.yml for why the modules are listed one by one.
+  module_defaults:
+    kubernetes.core.k8s: &cluster_auth
+      host: "{{ secrets_values.cluster_api_url }}"
+      api_key: "{{ secrets_values.cluster_api_token }}"
+      validate_certs: "{{ demo_cluster_validate_certs }}"
+      ca_cert: "{{ secrets_cluster_ca_file | default(omit) }}"
+    kubernetes.core.k8s_info: *cluster_auth
+
   tasks:
-    - name: Resolve the ServiceNow secrets
+    - name: Resolve the cluster and ServiceNow secrets
       ansible.builtin.include_role:
         name: secrets
       vars:
-        secrets_groups: [servicenow]
+        secrets_groups: [cluster, servicenow]
+
+    # First, so the service has stopped failing before its incidents are closed.
+    - name: Restart the sample service, clearing a recurring fault
+      ansible.builtin.include_role:
+        name: workload
+        tasks_from: restart
+      vars:
+        workload_namespace: "{{ demo_namespaces.workload }}"
 
     - name: Close the demo's incidents
       ansible.builtin.include_role:

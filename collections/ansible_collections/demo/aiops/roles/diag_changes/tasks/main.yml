@@ -48,8 +48,8 @@
       {%- set _ = out.append({'id': 'EV-CHG-01', 'target': target,
             'fact': 'Deployment ' ~ deployment.metadata.name ~ ': revision '
                     ~ deployment.metadata.annotations['deployment.kubernetes.io/revision'] | default('unknown')
-                    ~ ', image ' ~ container.image | default('unknown') ~ '; last rolled out at '
-                    ~ (newest.metadata.creationTimestamp | default('unknown')) ~ '; ' ~ recent | length ~ ' rollout(s) in the last '
+                    ~ ', image ' ~ container.image | default('unknown') | regex_replace('@sha256:([0-9a-f]{12})[0-9a-f]+$', '@sha256:\\1') ~ '; last rolled out at '
+                    ~ (newest.metadata.creationTimestamp | default('unknown') | regex_replace('^(\\d{4}-\\d\\d-\\d\\d)T(\\d\\d:\\d\\d:\\d\\d).*$', '\\1 \\2 UTC')) ~ '; ' ~ recent | length ~ ' rollout(s) in the last '
                     ~ diag_changes_window_hours ~ ' hours.',
             'ref': '/apis/apps/v1/namespaces/' ~ evidence_target.namespace ~ '/deployments/' ~ deployment.metadata.name}) -%}
       {%- set res = container.resources | default({}) -%}

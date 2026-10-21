@@ -1,0 +1,60 @@
+---
+# Entry point restart (reset.yml): starts payments-notify afresh between demos. The new pod gets a
+# new emptyDir, so a recurring fault's marker is gone, and the service starts clean.
+
+- name: Read the service's deployment
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ workload_namespace }}"
+    name: "{{ workload_name }}"
+  register: workload_restart_found
+  until: workload_restart_found is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Restart the service with a new pod
+  kubernetes.core.k8s:
+    state: patched
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ workload_namespace }}"
+    name: "{{ workload_name }}"
+    definition:
+      spec:
+        template:
+          metadata:
+            annotations:
+              kubectl.kubernetes.io/restartedAt: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+  register: workload_restart_patch
+  when: workload_restart_found.resources | length > 0
+  no_log: true
+
+- name: Wait for the new pod to be ready and the old one gone
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ workload_namespace }}"
+    name: "{{ workload_name }}"
+  register: workload_restart_state
+  until: >-
+    workload_restart_state is not failed
+    and (workload_restart_state.resources | first).status.observedGeneration | default(0)
+        >= workload_restart_patch.result.metadata.generation
+    and (workload_restart_state.resources | first).status.updatedReplicas | default(0)
+        == (workload_restart_state.resources | first).spec.replicas
+    and (workload_restart_state.resources | first).status.availableReplicas | default(0)
+        == (workload_restart_state.resources | first).spec.replicas
+    and (workload_restart_state.resources | first).status.unavailableReplicas | default(0) == 0
+  retries: "{{ workload_ready_retries }}"
+  delay: "{{ workload_ready_delay }}"
+  when: workload_restart_found.resources | length > 0
+  no_log: true
+
+- name: Report the restart
+  ansible.builtin.debug:
+    msg: >-
+      {{ ('Restarted ' ~ workload_name ~ ' in ' ~ workload_namespace ~ ' with a new pod; it is ready, and any recurring fault is cleared')
+         if workload_restart_found.resources | length > 0
+         else (workload_name ~ ' is not deployed in ' ~ workload_namespace ~ ' (phase 08 has not run); nothing to restart') }}

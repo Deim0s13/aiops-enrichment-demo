@@ -16,6 +16,10 @@ argument_specs:
       enrichment_call_revision:
         type: int
         description: Revision of the enrichment.
+      enrichment_call_evidence_order:
+        type: list
+        elements: str
+        description: Evidence ID prefixes in the order the note lists them.
       enrichment_call_evidence:
         type: list
         elements: dict

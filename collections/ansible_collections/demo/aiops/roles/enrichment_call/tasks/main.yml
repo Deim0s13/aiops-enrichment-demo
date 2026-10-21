@@ -2,7 +2,7 @@
 # Evidence reaches this step as workflow artefacts, and AAP turns empty text into null on the way.
 # The service's contract (design 5.2) wants text in every field, so each item is put back into that
 # shape here, whatever happened in transit.
-- name: Put the evidence into the shape the service's contract expects
+- name: Put the evidence into the shape the service's contract expects, in reading order
   ansible.builtin.set_fact:
     enrichment_call_evidence_sent: "{{ enrichment_call_evidence_json | from_json }}"
   vars:
@@ -12,7 +12,12 @@
       {%- set ns.out = ns.out + [dict(['id', 'source', 'collected_at', 'target', 'fact', 'ref']
             | zip(['id', 'source', 'collected_at', 'target', 'fact', 'ref'] | map('extract', e) | map('default', '', true) | map('string')))] -%}
       {%- endfor -%}
-      {{ ns.out | to_json }}
+      {%- set ordered = namespace(out=[]) -%}
+      {%- for prefix in enrichment_call_evidence_order -%}
+      {%- set ordered.out = ordered.out + (ns.out | selectattr('id', 'match', prefix ~ '-') | sort(attribute='id') | list) -%}
+      {%- endfor -%}
+      {%- set known = ordered.out | map(attribute='id') | list -%}
+      {{ (ordered.out + (ns.out | rejectattr('id', 'in', known) | sort(attribute='id') | list)) | to_json }}
 
 - name: Ask the enrichment service
   ansible.builtin.uri:

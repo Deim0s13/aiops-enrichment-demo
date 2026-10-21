@@ -432,7 +432,9 @@ Before a demo, close the incidents earlier runs left open:
 ansible-navigator run reset.yml
 ```
 
-It resolves and closes every open incident `svc-monitoring` raised in the on-call group, with a close note saying the reset closed it, and deletes anything the build checks left behind. Nothing else in the PDI is touched.
+It first restarts `payments-notify` with a new pod and waits until it is ready. The new pod starts without the recurring scenario's marker, so a recurring fault left running is cleared. Then it resolves and closes every open incident `svc-monitoring` raised in the on-call group, with a close note saying the reset closed it, and deletes anything the build checks left behind. Nothing else in the PDI or the cluster is touched.
+
+An alert can keep firing for a few minutes after the reset, such as the OOMKilled alert, which lasts five minutes after a kill. The integration stand-in recognises it as already recorded on the incident the reset closed, so it does not raise a new one; only a new fault does.
 
 ## Finish your session
 

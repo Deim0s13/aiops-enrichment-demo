@@ -28,3 +28,10 @@ argument_specs:
       workload_checks:
         type: bool
         description: Prove the fault on this build.
+  restart:
+    short_description: Restart payments-notify with a new pod, clearing a recurring fault (reset.yml)
+    options:
+      workload_namespace:
+        type: str
+        required: true
+        description: Namespace the service runs in.
