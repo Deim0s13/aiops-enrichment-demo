@@ -1,7 +1,7 @@
 ---
-# Diagnostic (flow step 3, design 5.2): recent changes. Runs in the ACME diagnostics container group, as the
-# read-only aiops-diagnostics service account. Vars from the workflow: cmdb_ci. From the job
-# template: diagnostics_service_map. Publishes diagnostics_evidence_changes for the work note step.
+# Diagnostic (flow step 3, design 5.2): recent changes. Read-only, as the aiops-diagnostics service account,
+# through the job's time-limited cluster credential (DD20). Vars from the workflow: cmdb_ci. From the
+# job template: diagnostics_service_map. Publishes diagnostics_evidence_changes for the work note step.
 - name: "AI enrichment | Diagnostics: recent changes"
   hosts: localhost
   gather_facts: false

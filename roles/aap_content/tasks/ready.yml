@@ -65,9 +65,9 @@
       - "Demo control: {{ aap_content_fault_template }}, with a survey for the single or recurring scenario"
       - "Workflow: {{ aap_content_workflow_name }} ({{ aap_content_templates.values() | join(', ') }}); launched only by {{ aap_content_eda_user }}"
       - >-
-        Diagnostics: {{ aap_content_diagnostics.values() | join(', ') }}, in parallel in container group
-        {{ aap_content_diagnostics_group }} as service account {{ aap_content_diagnostics_sa }}, for
-        {{ aap_content_service_map.keys() | join(', ') }}
+        Diagnostics: {{ aap_content_diagnostics.values() | join(', ') }}, in parallel as service account
+        {{ aap_content_diagnostics_sa }}, for {{ aap_content_service_map.keys() | join(', ') }}; token
+        {{ 'renewed' if aap_content_diag_token_new else 'reused' }}, expires {{ aap_content_diag_expires_at }}
       - "Trigger: activation {{ aap_content_activation_name }} running; event stream {{ aap_content_stream_url }}"
       - >-
         Integration stand-in: activation {{ aap_content_integration_activation }} running, launching only

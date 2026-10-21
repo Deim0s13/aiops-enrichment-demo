@@ -1,7 +1,7 @@
 ---
-# Diagnostic (flow step 3, design 5.2): heap, memory and restart metrics. Runs in the ACME diagnostics container group, as the
-# read-only aiops-diagnostics service account. Vars from the workflow: cmdb_ci. From the job
-# template: diagnostics_service_map. Publishes diagnostics_evidence_metrics for the work note step.
+# Diagnostic (flow step 3, design 5.2): heap, memory and restart metrics. Read-only, as the aiops-diagnostics service account,
+# through the job's time-limited cluster credential (DD20). Vars from the workflow: cmdb_ci. From the
+# job template: diagnostics_service_map. Publishes diagnostics_evidence_metrics for the work note step.
 - name: "AI enrichment | Diagnostics: heap, memory and restart metrics"
   hosts: localhost
   gather_facts: false

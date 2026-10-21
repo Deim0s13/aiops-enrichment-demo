@@ -1,11 +1,11 @@
 ---
-# Read-only: lists the service's pods and the namespace's events with the pod's own token.
+# Read-only: lists the service's pods and the namespace's events with the job's read-only cluster credential.
 - name: Read the service's pods and the namespace's events
   ansible.builtin.uri:
     url: "{{ evidence_api }}{{ item }}"
     headers:
       Authorization: "Bearer {{ evidence_token }}"
-    ca_path: "{{ evidence_sa_dir }}/ca.crt"
+    ca_path: "{{ evidence_ca_file | default(omit, true) }}"
     timeout: "{{ evidence_call_timeout }}"
     status_code: [200, 401, 403, 404]
   loop:

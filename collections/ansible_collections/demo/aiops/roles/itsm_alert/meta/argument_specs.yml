@@ -4,8 +4,8 @@ argument_specs:
     short_description: Raise or update ServiceNow incidents from Alertmanager alerts
     description:
       - Stands in for the bank's monitoring-to-ITSM integration (design 2.1, step 1; DD19).
-      - One open incident per service and incident family, found by its correlation ID. A firing alert with no open
-        incident raises one; a new firing adds a work note and counts the occurrence, raising the priority for a
+      - One open incident per service and incident family, found by its correlation ID. A firing critical alert with
+        no open incident raises one, while a warning alone raises nothing; a new firing adds a work note and counts the occurrence, raising the priority for a
         more severe alert; a cleared alert adds a work note and leaves the incident open for the engineer.
       - The incident's alert state records the start of each alert already added, so a repeated notification
         changes nothing.
@@ -31,6 +31,10 @@ argument_specs:
       itsm_alert_severity_priority:
         type: dict
         description: For each severity, the priority it calls for and the impact and urgency that give it.
+      itsm_alert_raise_severities:
+        type: list
+        elements: str
+        description: Severities that raise an incident; alerts of other severities are only added to an open one.
       itsm_alert_default_severity:
         type: str
         description: Severity assumed for an alert without a known one.

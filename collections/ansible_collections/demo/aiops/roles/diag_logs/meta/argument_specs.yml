@@ -4,7 +4,7 @@ argument_specs:
     short_description: "Diagnostic: warnings and errors from the service's container log, within line and byte limits"
     description:
       - Read-only. Reads the newest pod's previous container log, which is the one that ended if the container
-        restarted, or else its current log, with the pod's own token. Run through demo.aiops.evidence.
+        restarted, or else its current log, with the job's read-only cluster credential. Run through demo.aiops.evidence.
     options:
       diag_logs_tail_lines:
         type: int

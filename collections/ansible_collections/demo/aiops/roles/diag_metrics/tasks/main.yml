@@ -4,7 +4,7 @@
     url: "{{ diag_metrics_url }}/api/v1/query?namespace={{ evidence_target.namespace }}&query={{ item.query | urlencode }}"
     headers:
       Authorization: "Bearer {{ evidence_token }}"
-    ca_path: "{{ evidence_sa_dir }}/service-ca.crt"
+    ca_path: "{{ evidence_ca_file | default(omit, true) }}"
     timeout: "{{ evidence_call_timeout }}"
     status_code: [200, 400, 401, 403]
   loop:

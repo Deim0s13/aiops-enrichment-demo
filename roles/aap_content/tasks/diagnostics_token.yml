@@ -1,0 +1,94 @@
+---
+# A time-limited token for the aiops-diagnostics service account (DD20), for the diagnostics' AAP
+# credential. AAP refuses to give a job pod a service account token of its own, so the jobs get it
+# through AAP's credential system like any other credential. The token is kept in a Secret and
+# reused until it nears expiry, so a rerun changes nothing.
+
+- name: Read the stored token and the cluster's CA bundle
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: "{{ item.kind }}"
+    namespace: "{{ aap_content_namespace }}"
+    name: "{{ item.name }}"
+  loop:
+    - { kind: Secret, name: "{{ aap_content_diagnostics_token_secret }}" }
+    - { kind: ConfigMap, name: kube-root-ca.crt }
+  loop_control:
+    label: "{{ item.kind }} {{ item.name }}"
+  register: aap_content_diag_read
+  until: aap_content_diag_read is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Decide whether the token needs renewing
+  ansible.builtin.set_fact:
+    aap_content_diag_stored: "{{ aap_content_diag_secret.data | default({}) }}"
+    aap_content_diag_cluster_ca: "{{ ((aap_content_diag_read.results[1].resources | first | default({})).data | default({}))['ca.crt'] | default('') }}"
+    # Timestamps in this form compare correctly as text.
+    aap_content_diag_token_new: >-
+      {{ aap_content_diag_secret | length == 0
+         or (aap_content_diag_secret.data.expires_at | default('') | b64decode)
+            < '%Y-%m-%dT%H:%M:%SZ' | strftime(now().timestamp() + aap_content_diagnostics_token_renew_hours * 3600, utc=true) }}
+  vars:
+    aap_content_diag_secret: "{{ aap_content_diag_read.results[0].resources | first | default({}) }}"
+  no_log: true
+
+- name: Stop if the cluster's CA bundle is missing
+  ansible.builtin.assert:
+    that: aap_content_diag_cluster_ca | length > 0
+    fail_msg: "ConfigMap kube-root-ca.crt in {{ aap_content_namespace }} has no ca.crt."
+    quiet: true
+
+- name: Ask OpenShift for a time-limited token for the diagnostics' service account
+  ansible.builtin.uri:
+    url: >-
+      {{ secrets_values.cluster_api_url | regex_replace('/$', '') }}/api/v1/namespaces/{{ aap_content_namespace
+      }}/serviceaccounts/{{ aap_content_diagnostics_sa }}/token
+    method: POST
+    headers:
+      Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+    body_format: json
+    body:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      spec:
+        expirationSeconds: "{{ aap_content_diagnostics_token_hours * 3600 }}"
+    status_code: [201]
+    validate_certs: "{{ demo_cluster_validate_certs }}"
+    ca_path: "{{ secrets_cluster_ca_file | default(omit) }}"
+  register: aap_content_diag_request
+  when: aap_content_diag_token_new | bool
+  no_log: true
+
+# The API server may shorten the lifetime asked for, so the expiry kept is the one it returned.
+- name: Keep the new token in the cluster
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ aap_content_diagnostics_token_secret }}"
+        namespace: "{{ aap_content_namespace }}"
+        labels:
+          app.kubernetes.io/part-of: aiops-enrichment-demo
+          app.kubernetes.io/component: diagnostics
+      data:
+        token: "{{ aap_content_diag_request.json.status.token | b64encode }}"
+        expires_at: "{{ aap_content_diag_request.json.status.expirationTimestamp | b64encode }}"
+  when: aap_content_diag_token_new | bool
+  no_log: true
+
+# One bundle for both: the cluster CA for the API, the service CA for the Thanos Querier.
+- name: Keep the token, its expiry and the CA bundle for the credential
+  ansible.builtin.set_fact:
+    aap_content_diag_token: >-
+      {{ aap_content_diag_request.json.status.token if aap_content_diag_token_new | bool
+         else aap_content_diag_stored.token | b64decode }}
+    aap_content_diag_expires_at: >-
+      {{ aap_content_diag_request.json.status.expirationTimestamp if aap_content_diag_token_new | bool
+         else aap_content_diag_stored.expires_at | b64decode }}
+    aap_content_diag_ca: "{{ aap_content_diag_cluster_ca | trim }}\n{{ aap_content_service_ca | trim }}\n"
+  no_log: true

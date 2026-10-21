@@ -19,12 +19,18 @@ aap_content_templates:
   note: "AI enrichment | Write work note"
   unavailable: "AI enrichment | Record unavailable"
 
-# The diagnostics (design 5.2, DD20): four job templates that run in parallel, in a container group
-# whose pods use the read-only aiops-diagnostics service account. Each job calls the cluster with its
-# own pod's short-lived token, so AAP holds no cluster credential for them. Phase 08 grants the
-# account view on the workload's namespace.
+# The diagnostics (design 5.2, DD20): four job templates that run in parallel as the read-only
+# aiops-diagnostics service account, through a standard AAP credential holding a time-limited token
+# for it. Phase 08 grants the account view on the workload's namespace.
 aap_content_diagnostics_sa: aiops-diagnostics
-aap_content_diagnostics_group: ACME diagnostics
+aap_content_diagnostics_credential: "OpenShift | aiops-diagnostics (read-only)"
+aap_content_diagnostics_token_secret: aiops-diagnostics-token
+# The token lasts long enough for one demo environment and expires on its own if the environment is
+# forgotten. A phase 07 run renews it once less than aap_content_diagnostics_token_renew_hours remain.
+aap_content_diagnostics_token_hours: 168
+aap_content_diagnostics_token_renew_hours: 48
+# The address the jobs call the cluster API on, from inside the cluster.
+aap_content_diagnostics_api: https://kubernetes.default.svc
 # Seconds a diagnostic job may run; a job that takes longer is stopped and the note is written without it.
 aap_content_diagnostics_timeout: 60
 aap_content_diagnostics:

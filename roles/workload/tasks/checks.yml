@@ -265,7 +265,7 @@
           {{ (inc.number ~ (' raised' if workload_occurrences_before | int == 0 else ' added to') ~ ' by ' ~ inc.sys_created_by
               ~ ', occurrences ' ~ workload_occurrences_before ~ ' before and ' ~ inc_occurrences ~ ' after') if inc
              else 'no open incident for ' ~ workload_correlation ~ '; check the Alertmanager log and the Monitoring integration activation' }}
-      - check: the OOM kill raises the incident to priority 2
+      - check: the incident is at priority 2, for the OOM kill
         passed: "{{ inc.priority | default('') == '2' }}"
         detail: "priority {{ inc.priority | default('none') }}"
       - check: the AI trigger enriches the incident

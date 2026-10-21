@@ -22,6 +22,15 @@
          | selectattr('labels.incident_family', 'match', '^[a-z0-9][a-z0-9-]{0,62}$')
          | sort(attribute='startsAt') | list }}
 
+# Alerts that can raise an incident go first, so the alerts that arrive with them are added to the
+# incident they raise rather than turned away.
+- name: Handle the alerts that can raise an incident first
+  ansible.builtin.set_fact:
+    itsm_alert_valid: >-
+      {{ itsm_alert_valid | selectattr('labels.severity', 'defined') | selectattr('labels.severity', 'in', itsm_alert_raise_severities) | list
+         + itsm_alert_valid | rejectattr('labels.severity', 'defined') | list
+         + itsm_alert_valid | selectattr('labels.severity', 'defined') | rejectattr('labels.severity', 'in', itsm_alert_raise_severities) | list }}
+
 - name: Find the assignment group
   servicenow.itsm.api_info:
     resource: sys_user_group

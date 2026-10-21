@@ -14,4 +14,7 @@ itsm_alert_severity_priority:
   critical: { priority: "2", impact: "2", urgency: "1" }
   warning: { priority: "3", impact: "2", urgency: "2" }
 itsm_alert_default_severity: warning
+# Only these severities raise an incident. Others are added to an open incident for the same problem
+# but never open one: a warning is a monitoring event, a failure is an incident.
+itsm_alert_raise_severities: [critical]
 itsm_alert_correlation_display: ACME monitoring integration

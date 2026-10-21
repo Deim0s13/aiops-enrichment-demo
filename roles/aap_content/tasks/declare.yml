@@ -59,30 +59,6 @@
         image: "{{ aap_content_ee_image }}"
         pull: missing
 
-    # The diagnostic jobs' pods run as the read-only aiops-diagnostics service account, with its token
-    # mounted, so a job uses its own pod's short-lived token (DD20). AAP replaces the image with the job's
-    # execution environment.
-    aap_content_cfg_controller_instance_groups:
-      - name: "{{ aap_content_diagnostics_group }}"
-        is_container_group: true
-        pod_spec_override: |
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            namespace: {{ aap_content_namespace }}
-            labels:
-              app.kubernetes.io/part-of: aiops-enrichment-demo
-              app.kubernetes.io/component: diagnostics
-          spec:
-            serviceAccountName: {{ aap_content_diagnostics_sa }}
-            automountServiceAccountToken: true
-            containers:
-              - image: {{ aap_content_ee_image }}
-                name: worker
-                args: ['ansible-runner', 'worker', '--private-data-dir=/runner']
-                resources:
-                  requests: {cpu: 250m, memory: 100Mi}
-
     aap_content_cfg_controller_projects:
       - name: "{{ aap_content_project_name }}"
         description: The demo repository, read with a read-only token (DD16).
@@ -135,9 +111,9 @@
         credentials: ["{{ aap_content_servicenow_credential }}"]
         ask_variables_on_launch: true
 
-      # The four diagnostics (design 5.2). Read-only, bounded, and run in parallel in their own container
-      # group. A diagnostic that fails publishes a gap item instead, and one that runs too long is
-      # stopped, so the note is written either way.
+      # The four diagnostics (design 5.2). Read-only, bounded, and run in parallel as the aiops-diagnostics
+      # service account. A diagnostic that fails publishes a gap item instead, and one that runs too
+      # long is stopped, so the note is written either way.
       - name: "{{ aap_content_diagnostics.pod_status }}"
         description: "Diagnostic, read-only: pods, restarts, last terminations and recent warning events."
         playbook: automation/diagnostics/pod_status.yml
@@ -145,8 +121,8 @@
         project: "{{ aap_content_project_name }}"
         inventory: "{{ aap_content_inventory_name }}"
         execution_environment: "{{ aap_content_ee_name }}"
-        instance_groups: ["{{ aap_content_diagnostics_group }}"]
         timeout: "{{ aap_content_diagnostics_timeout }}"
+        credentials: ["{{ aap_content_diagnostics_credential }}"]
         extra_vars:
           diagnostics_service_map: "{{ aap_content_service_map }}"
         ask_variables_on_launch: true
@@ -157,8 +133,8 @@
         project: "{{ aap_content_project_name }}"
         inventory: "{{ aap_content_inventory_name }}"
         execution_environment: "{{ aap_content_ee_name }}"
-        instance_groups: ["{{ aap_content_diagnostics_group }}"]
         timeout: "{{ aap_content_diagnostics_timeout }}"
+        credentials: ["{{ aap_content_diagnostics_credential }}"]
         extra_vars:
           diagnostics_service_map: "{{ aap_content_service_map }}"
         ask_variables_on_launch: true
@@ -169,9 +145,8 @@
         project: "{{ aap_content_project_name }}"
         inventory: "{{ aap_content_inventory_name }}"
         execution_environment: "{{ aap_content_ee_name }}"
-        instance_groups: ["{{ aap_content_diagnostics_group }}"]
         timeout: "{{ aap_content_diagnostics_timeout }}"
-        credentials: ["{{ aap_content_servicenow_credential }}"]
+        credentials: ["{{ aap_content_diagnostics_credential }}", "{{ aap_content_servicenow_credential }}"]
         extra_vars:
           diagnostics_service_map: "{{ aap_content_service_map }}"
         ask_variables_on_launch: true
@@ -182,8 +157,8 @@
         project: "{{ aap_content_project_name }}"
         inventory: "{{ aap_content_inventory_name }}"
         execution_environment: "{{ aap_content_ee_name }}"
-        instance_groups: ["{{ aap_content_diagnostics_group }}"]
         timeout: "{{ aap_content_diagnostics_timeout }}"
+        credentials: ["{{ aap_content_diagnostics_credential }}"]
         extra_vars:
           diagnostics_service_map: "{{ aap_content_service_map }}"
         ask_variables_on_launch: true
@@ -306,6 +281,17 @@
           url: "{{ aap_content_enrichment.url }}"
           token: "{{ aap_content_enrichment.token }}"
           ca_bundle: "{{ aap_content_service_ca }}"
+      # Read-only on the workload's namespace; the token expires on its own (DD20). The jobs get it as
+      # K8S_AUTH_HOST, K8S_AUTH_API_KEY and K8S_AUTH_SSL_CA_CERT.
+      - name: "{{ aap_content_diagnostics_credential }}"
+        description: Time-limited token for the aiops-diagnostics service account, which can only view the workload's namespace (DD20).
+        organization: "{{ aap_content_organisation }}"
+        credential_type: OpenShift or Kubernetes API Bearer Token
+        inputs:
+          host: "{{ aap_content_diagnostics_api }}"
+          bearer_token: "{{ aap_content_diag_token }}"
+          verify_ssl: true
+          ssl_ca_cert: "{{ aap_content_diag_ca }}"
       - name: "{{ aap_content_servicenow_credential }}"
         description: The ITSM writer identity. Guard rules in ServiceNow limit it to work notes and enrichment fields.
         organization: "{{ aap_content_organisation }}"

@@ -28,9 +28,6 @@ argument_specs:
       evidence_fact_limit:
         type: int
         description: Longest fact, in characters.
-      evidence_sa_dir:
-        type: str
-        description: Where the pod's service account token and CA bundles are mounted.
       evidence_call_timeout:
         type: int
         description: Seconds each call may take.

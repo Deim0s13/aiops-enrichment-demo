@@ -4,7 +4,7 @@
     url: "{{ evidence_api }}/apis/apps/v1/namespaces/{{ evidence_target.namespace }}/{{ item }}?labelSelector={{ ('app=' ~ evidence_target.app) | urlencode }}"
     headers:
       Authorization: "Bearer {{ evidence_token }}"
-    ca_path: "{{ evidence_sa_dir }}/ca.crt"
+    ca_path: "{{ evidence_ca_file | default(omit, true) }}"
     timeout: "{{ evidence_call_timeout }}"
     status_code: [200, 401, 403, 404]
   loop: [deployments, replicasets]

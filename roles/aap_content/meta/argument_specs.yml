@@ -4,7 +4,7 @@ argument_specs:
     short_description: Declare the demo's AAP content and prove it works
     description:
       - "Controller: organisation, project, execution environment, ServiceNow credential, inventory, the enrichment
-        job templates, the four diagnostic job templates in their own container group (DD20), and the AI incident
+        job templates, the four diagnostic job templates with their time-limited cluster credential (DD20), and the AI incident
         enrichment workflow with its failure branch."
       - "EDA: the AAP user the trigger runs as, a project, a decision environment, the event stream ServiceNow
         posts to, and the rulebook activation."

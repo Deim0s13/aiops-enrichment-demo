@@ -9,16 +9,23 @@
                           'logs': 'openshift.logs'}[evidence_diagnostic] }}"
     evidence_items: []
 
-- name: Connect to the cluster as this pod's service account
+- name: Take the cluster connection from the job's credential
   ansible.builtin.set_fact:
-    evidence_api: "https://{{ lookup('ansible.builtin.env', 'KUBERNETES_SERVICE_HOST') }}:{{ lookup('ansible.builtin.env', 'KUBERNETES_SERVICE_PORT') }}"
-    evidence_token: "{{ lookup('ansible.builtin.file', evidence_sa_dir ~ '/token') }}"
+    evidence_api: "{{ lookup('ansible.builtin.env', 'K8S_AUTH_HOST') | regex_replace('/$', '') }}"
+    evidence_token: "{{ lookup('ansible.builtin.env', 'K8S_AUTH_API_KEY') }}"
+    evidence_ca_file: "{{ lookup('ansible.builtin.env', 'K8S_AUTH_SSL_CA_CERT') }}"
   when: evidence_target | length > 0
   no_log: true
 
 - name: Run the diagnostic
   when: evidence_target | length > 0
   block:
+    - name: Stop if the job has no cluster credential
+      ansible.builtin.assert:
+        that: evidence_api | length > 0 and evidence_token | length > 0
+        fail_msg: The job has no cluster credential (K8S_AUTH_HOST and K8S_AUTH_API_KEY are not set).
+        quiet: true
+
     - name: "Run diag_{{ evidence_diagnostic }}"
       ansible.builtin.include_role:
         name: "demo.aiops.diag_{{ evidence_diagnostic }}"

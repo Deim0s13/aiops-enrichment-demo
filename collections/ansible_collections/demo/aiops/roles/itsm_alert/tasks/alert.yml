@@ -55,7 +55,8 @@
     itsm_alert_action: >-
       {%- set previous = itsm_alert_seen[itsm_alert_this.name] | default({}) -%}
       {%- if itsm_alert_this.status == 'firing' -%}
-      {{ 'raise' if not itsm_alert_open else ('repeat' if previous.since | default('') == itsm_alert_this.since else 'add') }}
+      {{ ('raise' if itsm_alert_this.severity in itsm_alert_raise_severities else 'hold') if not itsm_alert_open
+         else ('repeat' if previous.since | default('') == itsm_alert_this.since else 'add') }}
       {%- else -%}
       {{ 'none' if not itsm_alert_open else ('repeat' if previous.cleared | default('') == itsm_alert_this.ended else 'clear') }}
       {%- endif -%}
@@ -78,7 +79,9 @@
   ansible.builtin.set_fact:
     itsm_alert_note: >-
       {%- if itsm_alert_action == 'clear' -%}
-      Monitoring integration: {{ itsm_alert_this.name }} cleared at {{ itsm_alert_this.ended_text }}.
+      Monitoring integration: {{ itsm_alert_this.name }}
+      {%- if not (itsm_alert_seen[itsm_alert_this.name] | default({})).since | default('') %} ({{ itsm_alert_this.severity }}), which fired at
+      {{ itsm_alert_this.since_text }} before this incident was raised,{% endif %} cleared at {{ itsm_alert_this.ended_text }}.
       The incident stays open for the assigned team to review and close.
       {%- else -%}
       Monitoring integration: {{ itsm_alert_this.name }} ({{ itsm_alert_this.severity }}) firing since
@@ -143,4 +146,6 @@
                  ~ (', priority raised to ' ~ itsm_alert_target.priority if itsm_alert_escalate | bool else ''),
           'clear': 'noted as cleared on ' ~ itsm_alert_number ~ ', which stays open',
           'repeat': 'already recorded on ' ~ itsm_alert_number ~ '; nothing added',
-          'none': 'no open incident for ' ~ itsm_alert_this.correlation ~ '; nothing to do'}[itsm_alert_action] }}
+          'none': 'no open incident for ' ~ itsm_alert_this.correlation ~ '; nothing to do',
+          'hold': 'no open incident for ' ~ itsm_alert_this.correlation ~ ', and a ' ~ itsm_alert_this.severity
+                  ~ ' alert does not raise one; nothing to do'}[itsm_alert_action] }}

@@ -5,7 +5,7 @@
 - name: Gather what the content needs from the cluster
   ansible.builtin.include_tasks: gather.yml
 
-- name: Create the diagnostics' service account, which the diagnostic jobs' pods run as (DD20)
+- name: Create the diagnostics' read-only service account (DD20)
   kubernetes.core.k8s:
     state: present
     definition:
@@ -17,6 +17,9 @@
         labels:
           app.kubernetes.io/part-of: aiops-enrichment-demo
           app.kubernetes.io/component: diagnostics
+
+- name: Give the diagnostics a time-limited token for their service account
+  ansible.builtin.include_tasks: diagnostics_token.yml
 
 - name: Declare the content
   ansible.builtin.include_tasks: declare.yml
@@ -33,7 +36,6 @@
     controller_settings: "{{ aap_content_cfg_controller_settings }}"
     controller_credential_types: "{{ aap_content_cfg_controller_credential_types }}"
     controller_execution_environments: "{{ aap_content_cfg_controller_execution_environments }}"
-    controller_instance_groups: "{{ aap_content_cfg_controller_instance_groups }}"
     controller_projects: "{{ aap_content_cfg_controller_projects }}"
     controller_inventories: "{{ aap_content_cfg_controller_inventories }}"
     controller_hosts: "{{ aap_content_cfg_controller_hosts }}"

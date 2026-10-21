@@ -3,7 +3,7 @@ argument_specs:
   main:
     short_description: "Diagnostic: heap, container memory and restarts over the last 30 minutes"
     description:
-      - Read-only. Queries the Thanos Querier tenancy endpoint with the pod's own token, which limits it to the
+      - Read-only. Queries the Thanos Querier tenancy endpoint with the job's read-only cluster credential, which limits it to the
         target namespace. Run through demo.aiops.evidence.
     options:
       diag_metrics_url:

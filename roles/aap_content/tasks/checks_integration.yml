@@ -1,9 +1,9 @@
 ---
 # Proves the monitoring integration stand-in (DD19) by posting Alertmanager notifications to its
-# event stream, as Alertmanager will, for a test service of its own: one incident for the problem,
-# raised as svc-monitoring; a repeated notification ignored; a critical alert added to the same
-# incident and raising its priority; a cleared alert noted with the incident left open; and the AI
-# trigger enriching the incident it raised. The incident is removed at the end.
+# event stream, as Alertmanager will, for a test service of its own: a warning alone, twice, raises
+# nothing; a critical alert raises one incident at priority 2, as svc-monitoring, and the warning
+# that arrives with it is added to it; the warning clearing is noted with the incident left open;
+# and the AI trigger enriches the incident. The incident is removed at the end.
 # Entry point checks_integration, run by phase 07 after the main entry point and after the ServiceNow
 # trigger exists, since the last check needs it.
 
@@ -78,9 +78,9 @@
     status_code: [200, 201, 202, 400, 401, 403]
     validate_certs: "{{ aap_content_validate_certs }}"
   loop:
-    - label: warning alert fires
+    - label: a warning alert fires alone
       alerts: ["{{ aap_content_icheck_alerts.heap }}"]
-    - label: the same notification again
+    - label: the same warning again
       alerts: ["{{ aap_content_icheck_alerts.heap }}"]
     - label: critical alert fires as well
       alerts: ["{{ aap_content_icheck_alerts.heap }}", "{{ aap_content_icheck_alerts.oom }}"]
@@ -103,7 +103,7 @@
       password: "{{ secrets_values.servicenow_admin_password }}"
     resource: incident
     sysparm_query: "correlation_id={{ aap_content_icheck_correlation }}"
-    columns: [sys_id, number, priority, state, sys_created_by, u_acme_alert_occurrences, u_acme_alert_state, u_ai_enrichment_state]
+    columns: [sys_id, number, short_description, priority, state, sys_created_by, u_acme_alert_occurrences, u_acme_alert_state, u_ai_enrichment_state]
   register: aap_content_icheck_inc
   until: >-
     aap_content_icheck_inc is not failed
@@ -151,12 +151,16 @@
       - check: the event stream accepts Alertmanager's notifications with Basic authentication
         passed: "{{ aap_content_icheck_post_status | select('in', [200, 201, 202]) | list | length == 4 }}"
         detail: "HTTP {{ aap_content_icheck_post_status | join(', ') }}"
-      - check: one incident is raised for the problem, as svc-monitoring
-        passed: "{{ inc_count == 1 and inc.sys_created_by | default('') == 'svc-monitoring' }}"
-        detail: "{{ inc_count }} incident(s){{ ', ' ~ inc.number ~ ' created by ' ~ inc.sys_created_by if inc else '' }}"
-      - check: a repeated notification adds nothing, and the critical alert is added to the same incident at priority 2
-        passed: "{{ inc.u_acme_alert_occurrences | default('') == '2' and inc.priority | default('') == '2' }}"
-        detail: "occurrences {{ inc.u_acme_alert_occurrences | default('none') }}, priority {{ inc.priority | default('none') }}"
+      - check: a warning alone raises no incident; the critical alert raises one, at priority 2, as svc-monitoring
+        passed: >-
+          {{ inc_count == 1 and inc.sys_created_by | default('') == 'svc-monitoring' and inc.priority | default('') == '2'
+             and inc.short_description | default('') is search('critical$') }}
+        detail: >-
+          {{ inc_count }} incident(s){{ (', ' ~ inc.number ~ ' raised by ' ~ inc.sys_created_by ~ ' for "'
+             ~ inc.short_description | default('') | truncate(60) ~ '", priority ' ~ inc.priority) if inc else '' }}
+      - check: the warning that arrives with the critical alert is added to the same incident, once
+        passed: "{{ inc.u_acme_alert_occurrences | default('') == '2' }}"
+        detail: "occurrences {{ inc.u_acme_alert_occurrences | default('none') }}"
       - check: the cleared alert is noted and the incident stays open
         passed: "{{ notes | length == 3 and notes | select('search', 'cleared at') | list | length == 1 and inc.state | default('') not in ['6', '7', '8'] }}"
         detail: "{{ notes | length }} integration note(s), state {{ inc.state | default('none') }}"

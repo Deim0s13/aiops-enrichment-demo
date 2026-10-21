@@ -4,7 +4,7 @@
     url: "{{ evidence_api }}/api/v1/namespaces/{{ evidence_target.namespace }}/pods?labelSelector={{ ('app=' ~ evidence_target.app) | urlencode }}"
     headers:
       Authorization: "Bearer {{ evidence_token }}"
-    ca_path: "{{ evidence_sa_dir }}/ca.crt"
+    ca_path: "{{ evidence_ca_file | default(omit, true) }}"
     timeout: "{{ evidence_call_timeout }}"
     status_code: [200, 401, 403, 404]
   register: diag_logs_pods
@@ -30,7 +30,7 @@
       }}&previous={{ item }}&tailLines={{ diag_logs_tail_lines }}&limitBytes={{ diag_logs_limit_bytes }}
     headers:
       Authorization: "Bearer {{ evidence_token }}"
-    ca_path: "{{ evidence_sa_dir }}/ca.crt"
+    ca_path: "{{ evidence_ca_file | default(omit, true) }}"
     timeout: "{{ evidence_call_timeout }}"
     return_content: true
     status_code: [200, 400, 401, 403, 404]
