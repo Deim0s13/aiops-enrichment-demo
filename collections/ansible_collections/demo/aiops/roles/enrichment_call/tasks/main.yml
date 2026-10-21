@@ -1,4 +1,19 @@
 ---
+# Evidence reaches this step as workflow artefacts, and AAP turns empty text into null on the way.
+# The service's contract (design 5.2) wants text in every field, so each item is put back into that
+# shape here, whatever happened in transit.
+- name: Put the evidence into the shape the service's contract expects
+  ansible.builtin.set_fact:
+    enrichment_call_evidence_sent: "{{ enrichment_call_evidence_json | from_json }}"
+  vars:
+    enrichment_call_evidence_json: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for e in enrichment_call_evidence | select('mapping') -%}
+      {%- set ns.out = ns.out + [dict(['id', 'source', 'collected_at', 'target', 'fact', 'ref']
+            | zip(['id', 'source', 'collected_at', 'target', 'fact', 'ref'] | map('extract', e) | map('default', '', true) | map('string')))] -%}
+      {%- endfor -%}
+      {{ ns.out | to_json }}
+
 - name: Ask the enrichment service
   ansible.builtin.uri:
     url: "{{ lookup('ansible.builtin.env', 'ENRICHMENT_URL') }}/v1/enrich"
@@ -10,7 +25,7 @@
     body:
       incident: "{{ enrichment_call_incident }}"
       revision: "{{ enrichment_call_revision }}"
-      evidence: "{{ enrichment_call_evidence }}"
+      evidence: "{{ enrichment_call_evidence_sent }}"
       catalogue: "{{ enrichment_call_catalogue }}"
     timeout: "{{ enrichment_call_timeout }}"
     # Every answer is accepted here and judged below: the call carries the token, so a failure here
