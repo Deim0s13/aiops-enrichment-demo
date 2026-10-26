@@ -1,0 +1,74 @@
+---
+# The corpus as merged on the repository's branch, read with the read-only GitHub token (DD16) and
+# handed to the ingestion Job in a ConfigMap. A document edited on the laptop but not merged is not
+# loaded: approval is the pull request review (design 5.6).
+
+- name: Find the branch's latest commit
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/{{ knowledge_repository.owner }}/{{ knowledge_repository.name }}/commits/{{ knowledge_repository.branch }}"
+    headers:
+      Accept: application/vnd.github+json
+      Authorization: "Bearer {{ secrets_values.github_token }}"
+    timeout: 20
+  register: knowledge_commit
+  until: knowledge_commit is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: List the repository's files at that commit
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/{{ knowledge_repository.owner }}/{{ knowledge_repository.name }}/git/trees/{{ knowledge_commit.json.sha }}?recursive=1"
+    headers:
+      Accept: application/vnd.github+json
+      Authorization: "Bearer {{ secrets_values.github_token }}"
+    timeout: 20
+  register: knowledge_tree
+  until: knowledge_tree is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Keep the corpus documents
+  ansible.builtin.set_fact:
+    knowledge_source_commit: "{{ knowledge_commit.json.sha }}"
+    knowledge_paths: >-
+      {{ knowledge_tree.json.tree | selectattr('type', 'equalto', 'blob') | map(attribute='path')
+         | select('match', '^' ~ knowledge_corpus_dir ~ '/.+\.md$') | reject('search', '(?i)/readme\.md$') | sort | list }}
+
+- name: Stop if the branch has no corpus
+  ansible.builtin.assert:
+    that: knowledge_paths | length > 0
+    fail_msg: "There are no Markdown documents under {{ knowledge_corpus_dir }}/ on {{ knowledge_repository.branch }}."
+    quiet: true
+
+- name: Read each document at that commit
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/{{ knowledge_repository.owner }}/{{ knowledge_repository.name }}/contents/{{ item }}?ref={{ knowledge_source_commit }}"
+    headers:
+      Accept: application/vnd.github.raw
+      Authorization: "Bearer {{ secrets_values.github_token }}"
+    return_content: true
+    timeout: 20
+  loop: "{{ knowledge_paths }}"
+  register: knowledge_documents
+  until: knowledge_documents is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Hand the corpus to the ingestion Job
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ knowledge_corpus_configmap }}"
+        namespace: "{{ knowledge_namespace }}"
+        labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: knowledge }
+        annotations:
+          aiops-demo/source-commit: "{{ knowledge_source_commit }}"
+      data: >-
+        {{ dict(knowledge_documents.results | map(attribute='item') | map('basename')
+                | zip(knowledge_documents.results | map(attribute='content'))) }}

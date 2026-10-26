@@ -5,8 +5,18 @@ FROM registry.access.redhat.com/ubi9/python-312:9.8-1791998425
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
+# The embedding model (DD21), downloaded once at build time and loaded from disk only at run time,
+# so the service and the ingestion job never download anything. The model file's checksum is
+# written to the build log and kept beside it, so the model in use can be traced.
+ENV KNOWLEDGE_MODEL_DIR=/opt/app-root/models
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5', cache_dir='$KNOWLEDGE_MODEL_DIR')" \
+    && find "$KNOWLEDGE_MODEL_DIR" -name '*.onnx' -exec sha256sum {} \; | tee "$KNOWLEDGE_MODEL_DIR/MODEL_SHA256" \
+    && chmod -R g=u "$KNOWLEDGE_MODEL_DIR"
+ENV HF_HUB_OFFLINE=1
+
 COPY app/ ./app/
 
-# TLS from OpenShift's service CA, mounted at /etc/tls by the deployment (phase 06).
+# TLS from OpenShift's service CA, mounted at /etc/tls by the deployment (phase 06). The same image
+# runs the knowledge ingestion job (python -m app.ingest) and its check (python -m app.knowledge_check).
 EXPOSE 8443
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8443", "--ssl-certfile", "/etc/tls/tls.crt", "--ssl-keyfile", "/etc/tls/tls.key", "--no-server-header"]

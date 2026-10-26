@@ -1,0 +1,65 @@
+---
+# Proves the index as the enrichment service will use it: as the read-only identity, ask the
+# question the memory fault's evidence poses, and check what comes back, what this identity can see
+# at all, and that it cannot change anything.
+
+- name: Search the index as the read-only identity
+  ansible.builtin.include_tasks: job.yml
+  vars:
+    knowledge_job:
+      name: knowledge-check
+      namespace: "{{ knowledge_namespace }}"
+      spec: "{{ knowledge_pod }}"
+    knowledge_pod: "{{ lookup('ansible.builtin.template', 'pod.yml.j2') | from_yaml }}"
+    knowledge_pod_secret: "{{ knowledge_reader_secret }}"
+    knowledge_pod_command: [python, -m, app.knowledge_check]
+
+- name: Keep the check's report
+  ansible.builtin.set_fact:
+    knowledge_check: "{{ knowledge_job_output | from_json if knowledge_job_output is match('^\\{') else {} }}"
+
+- name: Judge each check
+  ansible.builtin.set_fact:
+    knowledge_results:
+      - check: every document is in the index, the superseded and restricted ones included
+        passed: >-
+          {{ knowledge_ingest.documents | default(0) == knowledge_paths | length
+             and knowledge_ingest.by_status.superseded | default(0) > 0 and knowledge_ingest.by_access.restricted | default(0) > 0 }}
+        detail: >-
+          {{ knowledge_ingest.documents | default(0) }} of {{ knowledge_paths | length }} documents,
+          {{ knowledge_ingest.passages | default(0) }} passages; {{ knowledge_ingest.by_status.superseded | default(0) }} superseded,
+          {{ knowledge_ingest.by_access.restricted | default(0) }} restricted
+      - check: the read-only identity sees only approved, internal passages, whatever it asks for
+        passed: >-
+          {{ knowledge_check.visible | default({}) | list == ['approved/internal']
+             and knowledge_check.visible_documents | default([]) | intersect(['KB-RB-009', 'KB-SEC-003']) | length == 0 }}
+        detail: "{{ knowledge_check.visible | default({}) | dict2items | map(attribute='key') | join(', ') or 'nothing' }} visible"
+      - check: the read-only identity cannot change the index
+        passed: "{{ knowledge_check.can_write is defined and not knowledge_check.can_write }}"
+        detail: "{{ ('refused: ' ~ knowledge_check.write_refused) if knowledge_check.write_refused is defined else 'allowed' }}"
+      - check: a search for the memory fault finds the current runbook or a past resolution first, and nothing it must not
+        passed: >-
+          {{ knowledge_found | length > 0 and knowledge_found[0].split('#')[0] in knowledge_check_expected_first
+             and knowledge_found | map('regex_replace', '#.*$', '') | intersect(knowledge_check_never) | length == 0 }}
+        detail: >-
+          {{ knowledge_check.results | default([]) | map(attribute='id')
+             | zip(knowledge_check.results | default([]) | map(attribute='score')) | map('join', ' ') | join(', ') or 'no results' }}
+  vars:
+    knowledge_found: "{{ knowledge_check.results | default([]) | map(attribute='id') | list }}"
+
+- name: Report the checks
+  ansible.builtin.set_fact:
+    knowledge_report: "{{ knowledge_report + (knowledge_check_lines | from_json) }}"
+  vars:
+    knowledge_check_lines: >-
+      {%- set ns = namespace(lines=[]) -%}
+      {%- for c in knowledge_results -%}
+      {%- set ns.lines = ns.lines + [('Check passed: ' if c.passed | bool else 'CHECK FAILED: ') ~ c.check ~ ' (' ~ c.detail | trim ~ ')'] -%}
+      {%- endfor -%}
+      {{ ns.lines | to_json }}
+
+- name: Stop if a check failed
+  ansible.builtin.assert:
+    that: knowledge_results | map(attribute='passed') | map('bool') | reject | list | length == 0
+    fail_msg: "{{ knowledge_report | select('match', 'CHECK FAILED') | join('; ') }}"
+    quiet: true

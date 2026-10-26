@@ -1,0 +1,42 @@
+---
+# Loads the corpus into the index as the ingestion identity, which owns it. The Job runs the
+# enrichment service's image, with the embedding model, and verifies the database's certificate
+# against OpenShift's service CA.
+
+- name: Create the ingestion service account, which has no access to the cluster's API
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: "{{ knowledge_service_account }}"
+        namespace: "{{ knowledge_namespace }}"
+        labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: knowledge }
+      automountServiceAccountToken: false
+
+- name: Load the corpus into the index
+  ansible.builtin.include_tasks: job.yml
+  vars:
+    knowledge_job:
+      name: knowledge-ingest
+      namespace: "{{ knowledge_namespace }}"
+      spec: "{{ knowledge_pod | combine({'serviceAccountName': knowledge_service_account}) }}"
+    knowledge_pod: "{{ lookup('ansible.builtin.template', 'pod.yml.j2') | from_yaml }}"
+    knowledge_pod_secret: "{{ knowledge_ingest_secret }}"
+    knowledge_pod_command: [python, -m, app.ingest, /corpus, --commit, "{{ knowledge_source_commit }}"]
+    knowledge_pod_corpus: true
+
+- name: Keep the ingestion summary
+  ansible.builtin.set_fact:
+    knowledge_ingest: "{{ knowledge_job_output | from_json if knowledge_job_output is match('^\\{') else {} }}"
+
+- name: Stop if the ingestion did not succeed
+  ansible.builtin.assert:
+    that:
+      - knowledge_job_succeeded | bool
+      - knowledge_ingest.documents is defined
+    fail_msg: >-
+      The ingestion did not succeed{{ (': ' ~ knowledge_ingest.error) if knowledge_ingest.error is defined else '' }}.
+      Its log: oc logs job/knowledge-ingest -n {{ knowledge_namespace }}
+    quiet: true

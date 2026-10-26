@@ -14,10 +14,11 @@ Sections are added as each phase is implemented. Phases 01 to 04, 06 and 07 are 
 | 6 | Phase 02: OpenShift AI checked, Connectivity Link installed, PostgreSQL deployed, Models-as-a-Service and MLflow enabled, the model served and published, the enrichment service given governed access, and the access checks passed | About 15 minutes, plus up to 30 for the first model start |
 | 7 | Phase 03: AAP operator installed, the platform running with Controller and Event-Driven Ansible, and its subscription attached | About 20 minutes on the first run |
 | 8 | Phase 04: ServiceNow incident fields, assignment group, custom roles and service identities, with their passwords in the cluster | About 2 minutes |
-| 9 | Phase 06: the enrichment service built in the cluster, deployed behind TLS with its own token, and checked from inside the cluster | About 5 minutes on the first build |
-| 10 | Phase 07, first step: the execution environment published to the cluster's registry | A few minutes the first time, depending on your upload speed |
-| 11 | Phase 07: AAP content, the trigger, the monitoring integration stand-in and the end-to-end checks | About 15 minutes on the first run |
-| 12 | Phase 08: payments-notify, its metrics, alert rules and alert routing, and a check from the fault to the enriched incident | About 10 minutes, five of them the fault check |
+| 9 | Phase 05: the knowledge index in PostgreSQL with pgvector, loaded with the approved corpus from GitHub, and checked as the read-only identity | About 10 minutes on the first run, most of it the image build |
+| 10 | Phase 06: the enrichment service built in the cluster, deployed behind TLS with its own token, and checked from inside the cluster | About 5 minutes on the first build |
+| 11 | Phase 07, first step: the execution environment published to the cluster's registry | A few minutes the first time, depending on your upload speed |
+| 12 | Phase 07: AAP content, the trigger, the monitoring integration stand-in and the end-to-end checks | About 15 minutes on the first run |
+| 13 | Phase 08: payments-notify, its metrics, alert rules and alert routing, and a check from the fault to the enriched incident | About 10 minutes, five of them the fault check |
 
 Run each command on its own line. Pasting several lines at once, or a line containing `read`, can go wrong in zsh.
 
@@ -269,7 +270,27 @@ Each record is found first, created if missing and changed only where it differs
 
 On a rerun, every record line reads `none created; none updated`, each identity's `stored password works`, the checks pass again and the play recap shows `changed=0`.
 
-## 9 Phase 06: enrichment service
+## 9 Phase 05: knowledge index
+
+The cluster reads the corpus and builds the image from GitHub, so **push** any change to `knowledge/` or `services/enrichment` first. What is merged on `main` is what gets loaded: approval of a document is the review of the pull request that adds or changes it (design 5.6).
+
+```bash
+ansible-navigator run playbooks/05_knowledge.yml
+```
+
+What it does (role `knowledge`, DD21):
+
+1. **Creates the `knowledge` database** in the shared PostgreSQL from phase 02, with the pgvector extension, and two identities with generated passwords kept in the cluster: `knowledge_ingest`, which owns the index, and `knowledge_reader`, which the enrichment service will use from M4. Row-level security in the database limits the reader to approved, internal passages, whatever it asks for, so a superseded or restricted document cannot reach the model even if a query forgets a filter.
+2. **Builds the enrichment service's image**, the same build as phase 06, which now carries the embedding model: BGE small (English, v1.5), run on CPU with ONNX Runtime. The model is downloaded once, at build time, and loaded from disk only, so nothing downloads while the demo runs. The first build takes several minutes; later runs reuse it.
+3. **Reads the corpus** from `knowledge/` on `main`, at the latest commit, with the read-only GitHub token, and hands it to the ingestion Job.
+4. **Loads it**: each document's sections become passages, with readable IDs such as `KB-RB-014#diagnosis` that work notes will cite, each with the document's labels (service, versions, status, access) and its embedding. A document whose content has not changed is left alone, and one removed from `main` is removed from the index. The Job verifies the database's certificate against OpenShift's service CA.
+5. **Proves it** as the read-only identity, on every build:
+   - every document is in the index, the superseded and restricted ones included
+   - the read-only identity sees only approved, internal passages, whatever it asks for
+   - it cannot change the index
+   - a search for the memory fault, for `payments-notify` 2.4.1, finds the current runbook or a past resolution first, and never the superseded runbook, the restricted document or another service's resolution
+
+## 10 Phase 06: enrichment service
 
 The cluster builds the service from GitHub, so **push** any change to `services/enrichment` before running this phase.
 
@@ -287,7 +308,7 @@ What it does (role `enrichment_service`):
 
 Until milestone M4 the service is a skeleton: it lists the evidence the diagnostics gathered, citing each item, and the gaps, but draws no conclusions, and the work note says so. Retrieval and the model are connected in M4.
 
-## 10 Phase 07, first step: publish the execution environment
+## 11 Phase 07, first step: publish the execution environment
 
 AAP runs the demo's automation in the execution environment you built on your laptop (DD17). This step pushes it to the cluster's internal registry. It runs with `ansible-playbook`, not `ansible-navigator`, because it uses your laptop's Podman, the same way as `00_secrets.yml`. It reads the cluster secrets from Vault itself, so your laptop needs the Vault collection and its Python library (laptop-setup step 1; on an older setup, run `pip install hvac` and `ansible-galaxy collection install -r collections/requirements-laptop.yml` once):
 
@@ -304,7 +325,7 @@ What it does (role `ee_publish`):
 
 On a rerun, the image is `already in the cluster` and the recap shows `changed=0`. Rerun this step whenever you rebuild the execution environment.
 
-## 11 Phase 07: AAP content
+## 12 Phase 07: AAP content
 
 AAP syncs its project from GitHub, so **commit and push** your changes before running this phase: AAP runs what is on `main`, not what is on your laptop.
 
@@ -315,7 +336,7 @@ ansible-navigator run playbooks/07_aap_content.yml
 What it does (role `aap_content`, the automation team's part). The content is declared as data and applied with `infra.aap_configuration`, the way a central automation team would keep its AAP configuration as code:
 
 1. **Organisation** ACME Bank. Project syncs are set to install no collections: everything the jobs need is in the execution environment.
-2. **Project** from this repository, with the read-only GitHub token (DD16), and the **execution environment** published in step 9, pinned by digest.
+2. **Project** from this repository, with the read-only GitHub token (DD16), and the **execution environment** published in step 11, pinned by digest.
 3. **Enrichment service credential**: its address, its token from phase 06 and OpenShift's service CA bundle, which AAP writes to a file for the job, so the job checks the service's certificate. The work note step asks the service, checks its answer against design 5.3 (shape, citations, catalogue) and only then writes the note.
 4. **ServiceNow credentials** for `svc-ai-enrichment` and, for the integration stand-in only, `svc-monitoring`, through a custom credential type that hands the connection to the `servicenow.itsm` modules as environment variables, so no playbook holds a ServiceNow address or password. The passwords come from the Secrets phase 04 keeps.
 5. **The enrichment job templates and the AI incident enrichment workflow**: mark pending; then four diagnostics side by side; then, once all four have finished, write the work note with their evidence. Failing to mark the incident pending or to write the note leads to the failure branch, which records enrichment as unavailable (design 5.5); a failed diagnostic only leaves a gap in the note.
@@ -346,7 +367,7 @@ What it does (role `aap_content`, the automation team's part). The content is de
 
     The incident is removed afterwards. This step takes a few minutes, because each notification is a short AAP job and the enrichment runs too.
 
-## 12 Phase 08: workload
+## 13 Phase 08: workload
 
 The cluster builds the sample service from GitHub, so **push** any change to `services/payments-notify` first. Run phase 07 first: the alerts are routed to its integration stand-in.
 
@@ -406,7 +427,7 @@ If no incident appears, look at the Alertmanager log first, then the *Monitoring
 oc -n openshift-user-workload-monitoring logs alertmanager-user-workload-0 -c alertmanager --tail=50
 ```
 
-## 13 Verify, and reset between demos
+## 14 Verify, and reset between demos
 
 Check the demo against its M2 acceptance criteria at any time after a build:
 

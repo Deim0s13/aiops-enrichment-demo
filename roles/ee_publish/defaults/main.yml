@@ -8,5 +8,8 @@ ee_publish_validate_certs: true
 # The registry's route is created by the image registry operator once it is enabled.
 ee_publish_route_retries: 30
 ee_publish_route_delay: 10
+# A push that fails, such as with HTTP 500 from a registry that is still settling, is tried again.
+ee_publish_push_retries: 3
+ee_publish_push_delay: 30
 # Records which local image was last pushed, so an unchanged image is not pushed again.
 ee_publish_annotation: aiops-demo/source-image-id

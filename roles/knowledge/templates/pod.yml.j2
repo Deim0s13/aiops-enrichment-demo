@@ -1,0 +1,32 @@
+{# The pod spec for the ingestion and check Jobs: the enrichment image, one identity's database
+   connection, and the service CA to verify the database's certificate. #}
+automountServiceAccountToken: false
+containers:
+  - name: knowledge
+    image: "{{ incluster_build_image }}"
+    command: {{ knowledge_pod_command | to_json }}
+    env:
+{% for key in ['host', 'port', 'name', 'user', 'password'] %}
+      - name: KNOWLEDGE_DB_{{ key | upper }}
+        valueFrom: { secretKeyRef: { name: "{{ knowledge_pod_secret }}", key: {{ key }} } }
+{% endfor %}
+      - { name: KNOWLEDGE_DB_SSLROOTCERT, value: /etc/pki/service-ca/service-ca.crt }
+      - { name: KNOWLEDGE_READER_ROLE, value: "{{ knowledge_reader_role }}" }
+    resources: {{ knowledge_job_resources | to_json }}
+    securityContext:
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      capabilities: { drop: [ALL] }
+      seccompProfile: { type: RuntimeDefault }
+    volumeMounts:
+      - { name: service-ca, mountPath: /etc/pki/service-ca, readOnly: true }
+{% if knowledge_pod_corpus | default(false) %}
+      - { name: corpus, mountPath: /corpus, readOnly: true }
+{% endif %}
+volumes:
+  - name: service-ca
+    configMap: { name: openshift-service-ca.crt }
+{% if knowledge_pod_corpus | default(false) %}
+  - name: corpus
+    configMap: { name: "{{ knowledge_corpus_configmap }}" }
+{% endif %}

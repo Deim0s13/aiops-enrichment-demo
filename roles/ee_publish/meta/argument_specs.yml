@@ -32,6 +32,12 @@ argument_specs:
       ee_publish_route_retries:
         type: int
         description: How many times to check for the registry's route.
+      ee_publish_push_retries:
+        type: int
+        description: How many more times to try a push that fails.
+      ee_publish_push_delay:
+        type: int
+        description: Seconds between push attempts.
       ee_publish_route_delay:
         type: int
         description: Seconds between those checks.

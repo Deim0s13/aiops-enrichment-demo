@@ -155,9 +155,9 @@ Lessons from the first real run, now reflected in the code and the setup guide:
 
 | ID | Task | Closes |
 |---|---|---|
-| M4.1 | Write the corpus: current runbooks and resolutions, near-miss runbooks, a superseded runbook, a restricted document, and a deliberate gap | |
-| M4.2 | Confirm pgvector is available in the chosen PostgreSQL image | OI05 |
-| M4.3 | Phase 05: knowledge index and ingestion job, storing labels with each passage | |
+| M4.1 | Write the corpus: current runbooks and resolutions, near-miss runbooks, a superseded runbook, a restricted document, and a deliberate gap. Done (2026-10-22): eight documents in `knowledge/`, reviewed; the gap is the MessageHub throttling fault (S2) | |
+| M4.2 | Confirm pgvector is available in the chosen PostgreSQL image. Done (2026-10-27): pgvector 0.6.2 | OI05 |
+| M4.3 | Phase 05: knowledge index and ingestion job, storing labels with each passage. Written (2026-10-27, DD21): its own database and two identities, row-level security for the reader, the corpus from `main`, BGE small embeddings baked into the image; tested locally against PostgreSQL 16 with pgvector 0.6.2 | |
 | M4.4 | Enrichment service: sanitisation, filtered retrieval, the prompt, the gateway call, schema and citation validation, the insufficient-evidence path and provenance | |
 | M4.5 | Tracing of every model call, with the trace ID written into the work note | |
 | M4.6 | Extend `verify.yml` with the wrong-version, access filtering, prompt injection, sensitive data, and latency and cost checks | |

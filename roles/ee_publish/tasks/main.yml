@@ -80,6 +80,25 @@
   delay: "{{ ee_publish_route_delay }}"
   no_log: true
 
+# Enabling the route makes the operator roll out the registry again. A push during that rollout can
+# reach a registry pod that is starting or stopping and fail with HTTP 500, so wait for it to settle.
+- name: Wait for the image registry to be available and settled
+  ansible.builtin.uri:
+    url: "{{ ee_publish_api }}/apis/config.openshift.io/v1/clusteroperators/image-registry"
+    headers:
+      Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+    validate_certs: "{{ demo_cluster_validate_certs }}"
+    ca_path: "{{ secrets_cluster_ca_file | default(omit) }}"
+    timeout: 20
+  register: ee_publish_operator
+  until: >-
+    ee_publish_operator is not failed
+    and (ee_publish_operator.json.status.conditions | selectattr('type', 'equalto', 'Available') | map(attribute='status') | first | default('')) == 'True'
+    and (ee_publish_operator.json.status.conditions | selectattr('type', 'equalto', 'Progressing') | map(attribute='status') | first | default('')) == 'False'
+  retries: "{{ ee_publish_route_retries }}"
+  delay: "{{ ee_publish_route_delay }}"
+  no_log: true
+
 - name: Read the image stream
   ansible.builtin.uri:
     url: "{{ ee_publish_api }}{{ ee_publish_stream_path }}"
@@ -133,6 +152,12 @@
         validate_certs: "{{ ee_publish_validate_certs }}"
         push_args:
           dest: "{{ ee_publish_route_host }}/{{ ee_publish_namespace }}/{{ ee_publish_name }}:{{ ee_publish_tag }}"
+      # A registry that has just been rolled out, or is briefly overloaded, can answer HTTP 500. The
+      # layers it already has are not sent again, so a retry is cheap.
+      register: ee_publish_push
+      until: ee_publish_push is not failed
+      retries: "{{ ee_publish_push_retries }}"
+      delay: "{{ ee_publish_push_delay }}"
 
     - name: Record which local image was pushed
       ansible.builtin.uri:

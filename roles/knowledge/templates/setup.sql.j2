@@ -1,0 +1,15 @@
+-- The knowledge database and its identities (phase 05, DD21). Idempotent. Passwords arrive as psql
+-- variables from the Job's environment, so none appears here or in the command that runs this.
+SELECT format('CREATE ROLE %I LOGIN', '{{ knowledge_ingest_role }}') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ knowledge_ingest_role }}')\gexec
+ALTER ROLE "{{ knowledge_ingest_role }}" WITH LOGIN PASSWORD :'ingest_pw';
+SELECT format('CREATE ROLE %I LOGIN', '{{ knowledge_reader_role }}') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ knowledge_reader_role }}')\gexec
+ALTER ROLE "{{ knowledge_reader_role }}" WITH LOGIN PASSWORD :'reader_pw';
+SELECT format('CREATE DATABASE %I OWNER %I', '{{ knowledge_database }}', '{{ knowledge_ingest_role }}') WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{{ knowledge_database }}')\gexec
+REVOKE ALL ON DATABASE "{{ knowledge_database }}" FROM PUBLIC;
+GRANT CONNECT ON DATABASE "{{ knowledge_database }}" TO "{{ knowledge_ingest_role }}", "{{ knowledge_reader_role }}";
+\connect {{ knowledge_database }}
+-- Only the administrator can add the extension; the ingestion identity then uses it.
+CREATE EXTENSION IF NOT EXISTS vector;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE, CREATE ON SCHEMA public TO "{{ knowledge_ingest_role }}";
+GRANT USAGE ON SCHEMA public TO "{{ knowledge_reader_role }}";

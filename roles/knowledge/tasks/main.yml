@@ -1,0 +1,38 @@
+---
+- name: Create the knowledge database and its identities
+  ansible.builtin.include_tasks: database.yml
+
+- name: Build the enrichment image, which carries the embedding model, if its source has changed
+  ansible.builtin.include_role:
+    name: incluster_build
+  vars:
+    incluster_build_name: "{{ knowledge_image_name }}"
+    incluster_build_namespace: "{{ knowledge_namespace }}"
+    incluster_build_context_dir: "{{ knowledge_image_context_dir }}"
+    incluster_build_repository: "{{ knowledge_repository }}"
+    incluster_build_git_secret: "{{ knowledge_image_git_secret }}"
+
+- name: Read the corpus from the repository
+  ansible.builtin.include_tasks: corpus.yml
+
+- name: Load it into the index
+  ansible.builtin.include_tasks: ingest.yml
+
+- name: Report the index
+  ansible.builtin.set_fact:
+    knowledge_report:
+      - >-
+        Index: database {{ knowledge_database }} on {{ knowledge_postgres_name }}.{{ knowledge_data_namespace }}.svc, owned by
+        {{ knowledge_ingest_role }}; {{ knowledge_reader_role }} reads approved, internal passages only (row-level security)
+      - >-
+        Image: {{ 'built from commit ' ~ incluster_build_commit[:12] if incluster_build_built else
+                  'already built for commit ' ~ incluster_build_commit[:12] }}, with the embedding model
+      - >-
+        Corpus: {{ knowledge_paths | length }} documents from {{ knowledge_repository.branch }} at {{ knowledge_source_commit[:12] }};
+        {{ knowledge_ingest.passages }} passages. Added {{ knowledge_ingest.added | join(', ') or 'none' }};
+        updated {{ knowledge_ingest.updated | join(', ') or 'none' }}; removed {{ knowledge_ingest.removed | join(', ') or 'none' }};
+        {{ knowledge_ingest.unchanged | length }} unchanged
+
+- name: Prove the index as the read-only identity
+  ansible.builtin.include_tasks: checks.yml
+  when: knowledge_checks | bool

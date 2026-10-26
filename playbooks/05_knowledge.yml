@@ -1,9 +1,44 @@
 ---
-- name: "Phase 05 | Knowledge: index and ingestion of the approved corpus"
+# Phase 05: the knowledge index (design 5.6, DD21). A database with pgvector in the shared PostgreSQL,
+# loaded with the corpus as merged on the repository's main branch, and proved as the read-only
+# identity the enrichment service will use.
+#   ansible-navigator run playbooks/05_knowledge.yml
+#
+# Run phase 02 (PostgreSQL) first, and push changes to knowledge/ and services/enrichment: the
+# corpus and the image are read from GitHub, not from the laptop. Safe to rerun; unchanged documents
+# are left as they are.
+
+- name: "Phase 05 | Knowledge: the index and the approved corpus"
   hosts: localhost
   gather_facts: false
   tags: [knowledge]
+
+  # See playbooks/01_platform.yml for why the modules are listed one by one.
+  module_defaults:
+    kubernetes.core.k8s: &cluster_auth
+      host: "{{ secrets_values.cluster_api_url }}"
+      api_key: "{{ secrets_values.cluster_api_token }}"
+      validate_certs: "{{ demo_cluster_validate_certs }}"
+      ca_cert: "{{ secrets_cluster_ca_file | default(omit) }}"
+    kubernetes.core.k8s_info: *cluster_auth
+    kubernetes.core.k8s_log: *cluster_auth
+
   tasks:
-    - name: Report that phase 05 is not implemented yet
+    - name: Resolve the cluster and source secrets
+      ansible.builtin.include_role:
+        name: secrets
+      vars:
+        secrets_groups: [cluster, source]
+
+    - name: Build the index and load the corpus
+      ansible.builtin.include_role:
+        name: knowledge
+      vars:
+        knowledge_namespace: "{{ demo_namespaces.enrichment }}"
+        knowledge_data_namespace: "{{ demo_namespaces.data }}"
+        knowledge_postgres_image: "{{ demo_images.postgresql }}"
+        knowledge_repository: "{{ demo_repository }}"
+
+    - name: Report what phase 05 found and changed
       ansible.builtin.debug:
-        msg: "Phase 05 (knowledge) is a stub. See docs/implementation-design.md section 5.6 and DD06."
+        msg: "{{ knowledge_report }}"

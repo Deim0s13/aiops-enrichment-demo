@@ -1,0 +1,39 @@
+---
+# Phase 05: the knowledge index (design 5.6, DD21) in the shared PostgreSQL (DD06), loaded from the
+# corpus on the repository's main branch: what has been reviewed and merged, not what is on the laptop.
+
+# The database and its two identities. The ingestion identity owns the index; the reader, which the
+# enrichment service uses from M4, can only read approved, internal passages.
+knowledge_database: knowledge
+knowledge_ingest_role: knowledge_ingest
+knowledge_reader_role: knowledge_reader
+# Generated once and kept in the data namespace; copied to the enrichment namespace for each identity.
+knowledge_credentials_secret: knowledge-credentials
+knowledge_ingest_secret: knowledge-ingest-db
+knowledge_reader_secret: knowledge-reader-db
+knowledge_password_length: 32
+
+# The shared PostgreSQL (phase 02).
+knowledge_postgres_name: postgres
+knowledge_postgres_credentials_secret: postgres-credentials
+
+# The corpus: Markdown documents under this directory on the repository's branch, README files excepted.
+knowledge_corpus_dir: knowledge
+knowledge_corpus_configmap: knowledge-corpus
+
+# The same image as the enrichment service (phase 06), which carries the embedding model.
+knowledge_image_name: enrichment
+knowledge_image_context_dir: services/enrichment
+knowledge_image_git_secret: enrichment-git-source
+knowledge_service_account: knowledge-ingest
+knowledge_job_resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: "1", memory: 1Gi }
+knowledge_job_retries: 60
+knowledge_job_delay: 5
+
+# Prove the index on every build, as the read-only identity (checks.yml).
+knowledge_checks: true
+# Documents a search for the memory fault should find first, and documents it must never return.
+knowledge_check_expected_first: [KB-RB-014, KB-RS-044, KB-RS-031]
+knowledge_check_never: [KB-RB-009, KB-SEC-003, KB-RS-029]

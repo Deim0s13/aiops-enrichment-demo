@@ -1,0 +1,133 @@
+---
+# The knowledge database in the shared PostgreSQL, and its two identities (DD21).
+
+- name: Read the PostgreSQL administrator and the knowledge identities' credentials
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ knowledge_data_namespace }}"
+    name: "{{ item }}"
+  loop: ["{{ knowledge_postgres_credentials_secret }}", "{{ knowledge_credentials_secret }}"]
+  register: knowledge_secrets_read
+  until: knowledge_secrets_read is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Work out which identities need a password
+  ansible.builtin.set_fact:
+    knowledge_admin_found: >-
+      {{ 'admin' in ((knowledge_secrets_read.results[0].resources | first | default({})).data | default({})) }}
+    knowledge_stored: "{{ (knowledge_secrets_read.results[1].resources | first | default({})).data | default({}) }}"
+  no_log: true
+
+- name: Stop if the shared PostgreSQL is missing
+  ansible.builtin.assert:
+    that: knowledge_admin_found | bool
+    fail_msg: >-
+      There is no PostgreSQL administrator password in {{ knowledge_postgres_credentials_secret }} in
+      {{ knowledge_data_namespace }}. Run phase 02 first.
+    quiet: true
+
+# Generated once and kept for the life of the environment, so a rerun changes nothing.
+- name: Generate and keep the passwords that are missing
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ knowledge_credentials_secret }}"
+        namespace: "{{ knowledge_data_namespace }}"
+        labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: knowledge }
+      stringData: >-
+        {{ dict(knowledge_missing | zip(knowledge_missing | map('extract', knowledge_generated))) }}
+  vars:
+    knowledge_missing: "{{ ['ingest', 'reader'] | reject('in', knowledge_stored.keys() | list) | list }}"
+    knowledge_generated:
+      ingest: "{{ lookup('ansible.builtin.password', '/dev/null', length=knowledge_password_length, chars=['ascii_letters', 'digits']) }}"
+      reader: "{{ lookup('ansible.builtin.password', '/dev/null', length=knowledge_password_length, chars=['ascii_letters', 'digits']) }}"
+  when: knowledge_missing | length > 0
+  no_log: true
+
+- name: Create the database setup script
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: knowledge-setup
+        namespace: "{{ knowledge_data_namespace }}"
+        labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: knowledge }
+      data:
+        setup.sql: "{{ lookup('ansible.builtin.template', 'setup.sql.j2') }}"
+
+# As the administrator, over TLS. The passwords reach psql as variables from the environment.
+- name: Create the database and its identities
+  ansible.builtin.include_tasks: job.yml
+  vars:
+    knowledge_job:
+      name: knowledge-setup
+      namespace: "{{ knowledge_data_namespace }}"
+      spec:
+        automountServiceAccountToken: false
+        containers:
+          - name: setup
+            image: "{{ knowledge_postgres_image }}"
+            command:
+              - bash
+              - -c
+              - >-
+                psql "host={{ knowledge_postgres_name }}.{{ knowledge_data_namespace }}.svc sslmode=require user=postgres dbname=postgres"
+                -v ON_ERROR_STOP=1 -v ingest_pw="$INGEST_PW" -v reader_pw="$READER_PW" -f /setup/setup.sql
+            env:
+              - { name: PGPASSWORD, valueFrom: { secretKeyRef: { name: "{{ knowledge_postgres_credentials_secret }}", key: admin } } }
+              - { name: INGEST_PW, valueFrom: { secretKeyRef: { name: "{{ knowledge_credentials_secret }}", key: ingest } } }
+              - { name: READER_PW, valueFrom: { secretKeyRef: { name: "{{ knowledge_credentials_secret }}", key: reader } } }
+            resources: { requests: { cpu: 50m, memory: 64Mi } }
+            volumeMounts: [{ name: setup, mountPath: /setup }]
+        volumes: [{ name: setup, configMap: { name: knowledge-setup } }]
+
+- name: Stop if the database setup did not succeed
+  ansible.builtin.assert:
+    that: knowledge_job_succeeded | bool
+    fail_msg: >-
+      The knowledge database setup did not succeed. Its log:
+      oc logs job/knowledge-setup -n {{ knowledge_data_namespace }}
+    quiet: true
+
+- name: Read the identities' passwords
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ knowledge_data_namespace }}"
+    name: "{{ knowledge_credentials_secret }}"
+  register: knowledge_credentials
+  no_log: true
+
+# Each identity's connection, in the namespace that uses it: the ingestion Job now, the service in M4.
+- name: Give each identity its connection in the enrichment namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ item.secret }}"
+        namespace: "{{ knowledge_namespace }}"
+        labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: knowledge }
+      stringData:
+        host: "{{ knowledge_postgres_name }}.{{ knowledge_data_namespace }}.svc"
+        port: "5432"
+        name: "{{ knowledge_database }}"
+        user: "{{ item.role }}"
+        password: "{{ (knowledge_credentials.resources | first).data[item.key] | b64decode }}"
+  loop:
+    - { secret: "{{ knowledge_ingest_secret }}", role: "{{ knowledge_ingest_role }}", key: ingest }
+    - { secret: "{{ knowledge_reader_secret }}", role: "{{ knowledge_reader_role }}", key: reader }
+  loop_control:
+    label: "{{ item.secret }}"
+  no_log: true

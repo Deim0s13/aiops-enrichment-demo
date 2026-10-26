@@ -1,3 +1,9 @@
 # Pinned. The image is built in the cluster from this directory (DD08).
 fastapi==0.115.6
 uvicorn==0.34.0
+# The knowledge index (phase 05, DD21): embeddings on CPU with ONNX Runtime, no PyTorch, and
+# PostgreSQL with pgvector.
+fastembed==0.9.1
+psycopg[binary]==3.3.6
+pgvector==0.5.1
+PyYAML==6.0.3
