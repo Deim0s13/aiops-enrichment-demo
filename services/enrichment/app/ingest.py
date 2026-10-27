@@ -47,7 +47,9 @@ DROP POLICY IF EXISTS reader_sees_approved_internal ON passages;
 def load_corpus(corpus: Path) -> dict[str, tuple[dict, str, str]]:
     documents: dict[str, tuple[dict, str, str]] = {}
     for path in sorted(corpus.rglob("*.md")):
-        if path.name.lower() == "readme.md":
+        # A ConfigMap mounted as files keeps the real files in hidden, timestamped folders such as
+        # "..2026_10_27_00_03_12.123" and links to them from the top level: read each document once.
+        if any(part.startswith(".") for part in path.relative_to(corpus).parts[:-1]) or path.name.lower() == "readme.md":
             continue
         text = path.read_text(encoding="utf-8")
         meta, body = knowledge.parse_document(text, path.name)
