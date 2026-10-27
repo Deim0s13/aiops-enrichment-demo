@@ -47,6 +47,7 @@ Set `demo_secrets_backend: local` and copy `secrets.example.yml` to `~/.config/a
 - **`no_log: true`** is set on every task that handles a secret, so values stay out of console output and AAP job logs. Where `no_log` would also hide a useful error, the playbooks run a separate check that involves no secret, so the error can be shown safely. Secret handling is tested at maximum verbosity (`-vvv`), with throwaway values, to confirm no value appears in the output.
 - **No secrets at `-vvv` and above.** Ansible prints each module's arguments at that verbosity, and `kubernetes.core` prints the cluster token among them, even when the task succeeds. The cluster phases pass the token to every Kubernetes task through `module_defaults`, so hiding each task with `no_log` would also hide every error. Instead, the `secrets` role refuses to resolve secrets at verbosity 3 or higher. Debug with `-vv`. `secrets_allow_debug_verbosity=true` overrides this, for throwaway credentials only. At `-vv`, a task that loops over a Kubernetes task's registered results would print the token too, so the playbooks never do that.
 - **The enrichment service's MaaS API key** is minted by the build with a 10-minute token for the service's own service account, stored only in the `maas-api-key` Secret in `aiops-enrichment`, and never printed: the access checks report status codes only. A rebuild tests the stored key and mints a new one only if it no longer works.
+- **The enrichment service's MLflow token** is not stored anywhere: OpenShift mounts a one-hour token for the service's service account into its pod and renews it, and the account may only create and read MLflow experiments and traces in its own namespace. Traces hold sanitised evidence and prompts only, and the MLflow client's telemetry is switched off, so nothing is reported outside the cluster.
 - **ansible-navigator playbook artefacts are disabled** in the committed configuration, because they record every variable, including secrets.
 - **The execution environment and container images contain no secrets.** Credentials are supplied at run time.
 - **The cluster API certificate is always verified**, against the cluster's own CA bundle when one is loaded, so the cluster token is only sent to the real cluster. Turning verification off (`demo_cluster_validate_certs=false`) is a last resort.
@@ -56,7 +57,7 @@ Set `demo_secrets_backend: local` and copy `secrets.example.yml` to `~/.config/a
 
 - Use the fictional organisation (ACME Bank) and its services only. No customer names, data, runbooks or screenshots.
 - Keep your PDI instance name and cluster URLs in your own configuration, not in the repository, issues or pull requests.
-- Diagnostic output is sanitised before it reaches the model or a work note. Treat log lines and ticket text as untrusted input.
+- Diagnostic output is sanitised before it reaches the model, a trace or a work note. Treat log lines and ticket text as untrusted input.
 - Check screen recordings and screenshots for tokens, URLs and instance names before sharing them.
 
 ## If a secret is committed

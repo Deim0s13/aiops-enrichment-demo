@@ -22,6 +22,14 @@ enrichment_service_relevance_threshold: 0.80
 enrichment_service_max_passages: 6
 enrichment_service_temperature: 0.2
 enrichment_service_max_tokens: 1200
+# Tracing (M4.5, DD23): every request is traced in OpenShift AI's MLflow, in this experiment in the
+# workspace of the service's namespace. Best effort: if MLflow is down, enrichment carries on and the
+# note says the trace was not recorded.
+enrichment_service_tracing: true
+enrichment_service_mlflow_experiment: aiops-enrichment
+# The lifetime of the service account token MLflow sign-in uses; OpenShift renews it before it expires.
+enrichment_service_token_seconds: 3600
+enrichment_service_validate_certs: true
 # Model-specific fields added to every model request, such as Qwen3's switch for its thinking mode.
 enrichment_service_request_extra: {}
 enrichment_service_ready_retries: 30

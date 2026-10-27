@@ -7,6 +7,9 @@
     namespace: "{{ enrichment_service_namespace }}"
     name: "{{ enrichment_service_knowledge_secret }}"
   register: enrichment_service_knowledge
+  until: enrichment_service_knowledge is not failed
+  retries: 3
+  delay: 5
   no_log: true
 
 - name: Stop if the knowledge index has not been built
@@ -16,6 +19,72 @@
       There is no {{ enrichment_service_knowledge_secret }} Secret in {{ enrichment_service_namespace }}, so the
       service could not search the knowledge index. Run phase 05 first.
     quiet: true
+
+# Every request is traced in OpenShift AI's MLflow (M4.5, DD23), which phase 02 runs. The service
+# writes to its own workspace, its namespace, through the in-cluster address.
+- name: Find the MLflow server
+  kubernetes.core.k8s_info:
+    api_version: mlflow.opendatahub.io/v1
+    kind: MLflow
+    name: mlflow
+  register: enrichment_service_mlflow_read
+  until: enrichment_service_mlflow_read is not failed
+  retries: 3
+  delay: 5
+
+- name: Keep the MLflow addresses
+  ansible.builtin.set_fact:
+    enrichment_service_mlflow: >-
+      {{ {'internal': ((enrichment_service_mlflow_read.resources | first | default({})).status | default({})).address.url | default(''),
+          'external': ((enrichment_service_mlflow_read.resources | first | default({})).status | default({})).url | default(''),
+          'version': ((enrichment_service_mlflow_read.resources | first | default({})).status | default({})).version | default('')} }}
+
+- name: Stop if MLflow is not running
+  ansible.builtin.assert:
+    that: enrichment_service_mlflow.internal | length > 0
+    fail_msg: There is no MLflow server with an address, so the service could not trace its requests. Run phase 02 first.
+    quiet: true
+
+# MLflow checks each call against Kubernetes RBAC on pseudo-resources in the mlflow.kubeflow.org group,
+# in the namespace that names the workspace. OpenShift AI's own integration role also allows datasets,
+# registered models and its AI gateway, so the service gets a role of its own instead: experiments
+# (which cover traces) only, in this namespace only, and no delete.
+- name: Let the service write traces to its own MLflow workspace, and nothing else
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: Role
+        metadata:
+          name: "{{ enrichment_service_name }}-mlflow-traces"
+          namespace: "{{ enrichment_service_namespace }}"
+          labels: { app.kubernetes.io/part-of: aiops-enrichment-demo }
+        rules:
+          - apiGroups: [mlflow.kubeflow.org]
+            resources: [experiments]
+            verbs: [get, list, create, update]
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        metadata:
+          name: "{{ enrichment_service_name }}-mlflow-traces"
+          namespace: "{{ enrichment_service_namespace }}"
+          labels: { app.kubernetes.io/part-of: aiops-enrichment-demo }
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: Role
+          name: "{{ enrichment_service_name }}-mlflow-traces"
+        subjects:
+          - kind: ServiceAccount
+            name: "{{ enrichment_service_service_account }}"
+            namespace: "{{ enrichment_service_namespace }}"
+
+- name: Remove the binding to OpenShift AI's broader integration role, if an earlier run made it
+  kubernetes.core.k8s:
+    state: absent
+    api_version: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    namespace: "{{ enrichment_service_namespace }}"
+    name: "{{ enrichment_service_name }}-mlflow"
 
 - name: Deploy the service, its TLS-serving address and its network policies
   kubernetes.core.k8s:
@@ -52,7 +121,7 @@
               labels: { app: "{{ enrichment_service_name }}" }
             spec:
               serviceAccountName: "{{ enrichment_service_service_account }}"
-              # The service needs no access to the cluster API.
+              # No standing token: the only token the service holds is the short-lived one below, for MLflow.
               automountServiceAccountToken: false
               containers:
                 - name: "{{ enrichment_service_name }}"
@@ -94,12 +163,28 @@
                       valueFrom: { secretKeyRef: { name: "{{ enrichment_service_knowledge_secret }}", key: password } }
                     - name: KNOWLEDGE_DB_SSLROOTCERT
                       value: /etc/pki/service-ca/service-ca.crt
+                    # Tracing (DD23): MLflow's in-cluster address, verified against the service CA, signed in
+                    # as the service account, in the workspace of the service's namespace.
+                    - name: MLFLOW_TRACKING_URI
+                      value: "{{ enrichment_service_mlflow.internal }}"
+                    - name: MLFLOW_TRACKING_AUTH
+                      value: kubernetes-namespaced
+                    - name: MLFLOW_TRACKING_SERVER_CERT_PATH
+                      value: /etc/pki/service-ca/service-ca.crt
+                    - name: MLFLOW_EXPERIMENT_NAME
+                      value: "{{ enrichment_service_mlflow_experiment }}"
+                    - name: ENRICHMENT_TRACING
+                      value: "{{ 'on' if enrichment_service_tracing | bool else 'off' }}"
                   volumeMounts:
                     - name: tls
                       mountPath: /etc/tls
                       readOnly: true
                     - name: service-ca
                       mountPath: /etc/pki/service-ca
+                      readOnly: true
+                    # Where MLflow's Kubernetes sign-in looks for the token and the namespace.
+                    - name: mlflow-token
+                      mountPath: /var/run/secrets/kubernetes.io/serviceaccount
                       readOnly: true
                   readinessProbe: &probe
                     httpGet: { path: /healthz, port: "{{ enrichment_service_port }}", scheme: HTTPS }
@@ -116,6 +201,19 @@
                   secret: { secretName: "{{ enrichment_service_tls_secret }}" }
                 - name: service-ca
                   configMap: { name: openshift-service-ca.crt }
+                # A token for the service account that lasts an hour and is renewed by OpenShift, and the
+                # namespace, which names the MLflow workspace. Not the cluster CA: the service does not
+                # call the cluster API.
+                - name: mlflow-token
+                  projected:
+                    sources:
+                      - serviceAccountToken:
+                          path: token
+                          expirationSeconds: "{{ enrichment_service_token_seconds }}"
+                      - downwardAPI:
+                          items:
+                            - path: namespace
+                              fieldRef: { fieldPath: metadata.namespace }
 
       # Nothing reaches the namespace unless a policy allows it, and only AAP's jobs may reach the service.
       - apiVersion: networking.k8s.io/v1

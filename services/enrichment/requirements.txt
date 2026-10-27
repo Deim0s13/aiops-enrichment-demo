@@ -7,3 +7,7 @@ fastembed==0.9.1
 psycopg[binary]==3.3.6
 pgvector==0.5.1
 PyYAML==6.0.3
+# Tracing to OpenShift AI's MLflow (M4.5, DD23): the lightweight tracing client, and the Kubernetes
+# client its service account sign-in needs. The server runs MLflow 3.14.
+mlflow-tracing==3.14.0
+kubernetes==37.0.1

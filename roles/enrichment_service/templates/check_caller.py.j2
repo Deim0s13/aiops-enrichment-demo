@@ -21,6 +21,7 @@ incident = {
          "fact": "WARN NotificationTemplateCache size growing, entries are never evicted. "
                  "Notification sent for card 4111 1111 1111 1111."},
     ],
+    "context": {"event_id": "phase 06 build check"},
     "catalogue": [{"id": "payments-heapdump-restart",
                    "description": "Capture a heap dump from one payments-notify pod, then restart that pod."}],
 }
@@ -61,5 +62,7 @@ print(json.dumps({
     "tokens": provenance.get("tokens", {}),
     "redactions": provenance.get("redactions", {}),
     "card_returned": "4111" in json.dumps(with_token[1]),
+    "trace_id": provenance.get("trace_id"),
+    "trace_recorded": provenance.get("trace_recorded", False),
     "error": health[1].get("error") or with_token[1].get("error"),
 }))

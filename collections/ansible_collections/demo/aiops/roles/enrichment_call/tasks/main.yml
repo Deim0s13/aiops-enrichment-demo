@@ -33,6 +33,10 @@
       service_version: "{{ enrichment_call_service_version }}"
       evidence: "{{ enrichment_call_evidence_sent }}"
       catalogue: "{{ enrichment_call_catalogue }}"
+      # Tags for the trace (scenario S5), reduced to the characters the service accepts.
+      context:
+        workflow_job: "{{ enrichment_call_context.workflow_job | default('') | string | regex_replace('[^0-9]', '') | truncate(20, end='') }}"
+        event_id: "{{ enrichment_call_context.event_id | default('') | string | regex_replace('[^A-Za-z0-9 ._:-]', '') | truncate(100, end='') }}"
     timeout: "{{ enrichment_call_timeout }}"
     # Every answer is accepted here and judged below: the call carries the token, so a failure here
     # would be censored, and the operator would not see why.

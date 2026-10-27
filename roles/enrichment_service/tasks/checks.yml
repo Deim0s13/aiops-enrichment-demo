@@ -110,6 +110,39 @@
     label: "{{ item.key }}"
   changed_when: false
 
+# Proved from MLflow itself, not from the service's answer: the trace is read back through MLflow's
+# external address as the build's own identity, its tags checked, and its spans searched for the card
+# number the request carried.
+- name: Read the check's trace back from MLflow
+  ansible.builtin.uri:
+    url: "{{ enrichment_service_mlflow.external }}/{{ item }}"
+    headers:
+      Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+      X-MLFLOW-WORKSPACE: "{{ enrichment_service_namespace }}"
+    validate_certs: "{{ enrichment_service_validate_certs }}"
+    return_content: true
+    status_code: [200, 400, 401, 403, 404, 500, 502, 503]
+  loop:
+    - "api/3.0/mlflow/traces/{{ enrichment_service_caller.trace_id }}"
+    - "ajax-api/3.0/mlflow/get-trace-artifact?request_id={{ enrichment_service_caller.trace_id }}"
+  register: enrichment_service_trace_read
+  when: enrichment_service_caller.trace_recorded | default(false) | bool
+  no_log: true
+
+- name: Keep only what the checks need from the trace
+  ansible.builtin.set_fact:
+    enrichment_service_trace:
+      read: "{{ enrichment_service_trace_read.results | default([]) | map(attribute='status', default=-1) | list }}"
+      tags: "{{ (((enrichment_service_trace_read.results | default([{}]))[0].json | default({})).trace | default({})).trace_info.tags | default({}) }}"
+      # MLflow serves the spans as a file, not as JSON.
+      spans: >-
+        {{ (enrichment_service_trace_spans | from_json).spans | default([]) | map(attribute='name') | list
+           if (enrichment_service_trace_spans | trim).startswith('{') else [] }}
+      card: "{{ '4111' in enrichment_service_trace_spans }}"
+  vars:
+    enrichment_service_trace_spans: "{{ (enrichment_service_trace_read.results | default([{}, {}]))[1].content | default('', true) }}"
+  no_log: true
+
 - name: Judge each check
   ansible.builtin.set_fact:
     enrichment_service_results:
@@ -147,6 +180,22 @@
                        | map(attribute='key') | zip(enrichment_service_caller.redactions | default({}) | dict2items | map(attribute='value'))
                        | map('join', ' ') | join(', ') or 'nothing' }};
           returned: {{ 'yes' if enrichment_service_caller.card_returned | default(true) else 'no' }}
+      - check: the call is traced in MLflow, step by step, with no card number in the trace
+        passed: >-
+          {{ enrichment_service_caller.trace_recorded | default(false) | bool
+             and enrichment_service_trace.read == [200, 200]
+             and enrichment_service_trace.tags.incident | default('') == 'INC0000000'
+             and enrichment_service_trace.tags.prompt_version | default('') == enrichment_service_caller.prompt_version | default('none')
+             and ['sanitise', 'retrieve', 'model', 'check'] | difference(enrichment_service_trace.spans) | length == 0
+             and not enrichment_service_trace.card | bool }}
+        detail: >-
+          {{ ('trace ' ~ enrichment_service_caller.trace_id ~ ' in experiment ' ~ enrichment_service_mlflow_experiment
+              ~ ', read back HTTP ' ~ enrichment_service_trace.read | join(' and ') ~ '; steps '
+              ~ (enrichment_service_trace.spans | join(', ') or 'none') ~ '; card number in trace: '
+              ~ ('yes' if enrichment_service_trace.card | bool else 'no'))
+             if enrichment_service_caller.trace_recorded | default(false) | bool
+             else 'not recorded: the service could not write to MLflow; see oc logs -n ' ~ enrichment_service_namespace
+                  ~ ' deploy/' ~ enrichment_service_name ~ ' | grep -i mlflow' }}
       - check: "a namespace other than {{ enrichment_service_caller_namespace }} cannot reach the service"
         passed: "{{ enrichment_service_refused.connect | default('open') != 'open' }}"
         detail: "from {{ enrichment_service_refused_namespace }}: {{ enrichment_service_refused.connect | default('no result') }}"

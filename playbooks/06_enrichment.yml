@@ -2,7 +2,8 @@
 # Phase 06: the enrichment service (design sections 5.3 and 6.2), built in the cluster from this
 # repository (DD08), deployed behind TLS from the service CA with its own API token, and reachable only
 # from AAP's jobs. The service retrieves from the knowledge index (phase 05) and asks the model through
-# the gateway (phase 02), then checks the answer before returning it (M4.4).
+# the gateway (phase 02), then checks the answer before returning it (M4.4), tracing every request in
+# MLflow (M4.5).
 #   ansible-navigator run playbooks/06_enrichment.yml
 #
 # Run phases 02, 03 and 05 first: phase 02 creates the namespace, service account and MaaS key, phase
@@ -43,6 +44,7 @@
         enrichment_service_refused_namespace: "{{ demo_namespaces.data }}"
         enrichment_service_repository: "{{ demo_repository }}"
         enrichment_service_request_extra: "{{ demo_model.request_extra | default({}) }}"
+        enrichment_service_validate_certs: "{{ demo_cluster_validate_certs }}"
 
     - name: Report what phase 06 found and changed
       ansible.builtin.debug:

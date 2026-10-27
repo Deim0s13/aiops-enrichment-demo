@@ -31,6 +31,9 @@ argument_specs:
       enrichment_call_service_version:
         type: str
         description: The affected service's running version, from the diagnostics, such as 2.4.1.
+      enrichment_call_context:
+        type: dict
+        description: Where the request came from, as workflow_job and event_id, which the service tags its trace with.
       enrichment_call_references:
         type: str
         description: Extra references for the note's last line, such as the workflow job and event.

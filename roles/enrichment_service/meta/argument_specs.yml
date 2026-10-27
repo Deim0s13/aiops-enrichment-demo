@@ -52,6 +52,18 @@ argument_specs:
       enrichment_service_request_extra:
         type: dict
         description: Model-specific fields added to every model request, such as Qwen3's thinking switch.
+      enrichment_service_tracing:
+        type: bool
+        description: Trace every request in MLflow (best effort).
+      enrichment_service_mlflow_experiment:
+        type: str
+        description: The MLflow experiment traces are written to, in the workspace of the service's namespace.
+      enrichment_service_token_seconds:
+        type: int
+        description: Lifetime of the service account token used to sign in to MLflow; OpenShift renews it.
+      enrichment_service_validate_certs:
+        type: bool
+        description: Verify the certificate of MLflow's external address when the checks read a trace back.
       enrichment_service_checks:
         type: bool
         description: Check the service from inside the cluster.

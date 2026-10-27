@@ -13,6 +13,8 @@ RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-smal
     && find "$KNOWLEDGE_MODEL_DIR" -name '*.onnx' -exec sha256sum {} \; | tee "$KNOWLEDGE_MODEL_DIR/MODEL_SHA256" \
     && chmod -R g=u "$KNOWLEDGE_MODEL_DIR"
 ENV HF_HUB_OFFLINE=1
+# MLflow's client reports usage to an external telemetry service unless told not to (DD23).
+ENV MLFLOW_DISABLE_TELEMETRY=true DO_NOT_TRACK=true
 
 COPY app/ ./app/
 

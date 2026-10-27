@@ -176,7 +176,7 @@
       - check: the event stream refuses an event with the wrong token
         passed: "{{ aap_content_check_wrong_token.status | default(-1) in [401, 403] }}"
         detail: "HTTP {{ aap_content_check_wrong_token.status | default(-1) }}"
-      - check: an event with the token launches the workflow, which writes the work note and completes
+      - check: an event with the token launches the workflow, which writes the work note and finishes
         passed: "{{ aap_content_check_event_status | int in [200, 201, 202] and aap_content_check_state.trigger in ['complete', 'insufficient_evidence'] }}"
         detail: >-
           event HTTP {{ aap_content_check_event_status }}, state {{ aap_content_check_state.trigger or 'empty' }}{{

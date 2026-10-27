@@ -43,6 +43,9 @@
               {{ enrichment_catalogue | selectattr('services', 'contains', cmdb_ci | default('') | string)
                  | items2dict(key_name='id', value_name='description') | dict2items(key_name='id', value_name='description') }}
             enrichment_call_references: "workflow job {{ awx_workflow_job_id | default('n/a') }} | event {{ event_id | default('n/a') }}"
+            enrichment_call_context:
+              workflow_job: "{{ awx_workflow_job_id | default('') }}"
+              event_id: "{{ event_id | default('') }}"
 
         - name: Write the work note
           ansible.builtin.include_role:
