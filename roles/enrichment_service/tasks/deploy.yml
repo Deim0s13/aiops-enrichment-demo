@@ -145,20 +145,55 @@
                 - protocol: TCP
                   port: "{{ enrichment_service_port }}"
 
-- name: Wait for the service to be ready
+# The rollout is finished only when every pod runs the new version: a new pod that never becomes
+# ready leaves the old one serving, which would otherwise pass for the new service.
+- name: Wait for the rollout to finish
   kubernetes.core.k8s_info:
     api_version: apps/v1
     kind: Deployment
     namespace: "{{ enrichment_service_namespace }}"
     name: "{{ enrichment_service_name }}"
   register: enrichment_service_deployment
-  until: >-
-    enrichment_service_deployment is not failed
-    and (enrichment_service_deployment.resources | map(attribute='status') | first | default({})).availableReplicas | default(0) >= 1
-    and (enrichment_service_deployment.resources | map(attribute='status') | first | default({})).updatedReplicas | default(0) >= 1
+  until: enrichment_service_deployment is not failed and enrichment_service_rolled_out | bool
   retries: "{{ enrichment_service_ready_retries }}"
   delay: "{{ enrichment_service_ready_delay }}"
-  no_log: true
+  failed_when: false
+  vars: &rolled_out
+    enrichment_service_dep: "{{ enrichment_service_deployment.resources | default([]) | first | default({}) }}"
+    enrichment_service_rolled_out: >-
+      {{ enrichment_service_dep | length > 0
+         and enrichment_service_dep.status.observedGeneration | default(0) >= enrichment_service_dep.metadata.generation
+         and enrichment_service_dep.status.updatedReplicas | default(0) == enrichment_service_dep.spec.replicas
+         and enrichment_service_dep.status.availableReplicas | default(0) == enrichment_service_dep.spec.replicas
+         and enrichment_service_dep.status.replicas | default(0) == enrichment_service_dep.spec.replicas }}
+
+- name: Explain a rollout that did not finish
+  when: not (enrichment_service_rolled_out | bool)
+  vars: *rolled_out
+  block:
+    - name: Read the service's pods
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ enrichment_service_namespace }}"
+        label_selectors: ["app={{ enrichment_service_name }}"]
+      register: enrichment_service_pods
+
+    - name: Stop, saying what the newest pod is doing
+      ansible.builtin.fail:
+        msg: >-
+          The new version of the service did not become ready, so the previous version may still be serving.
+          Newest pod {{ newest.metadata.name | default('none') }}: phase {{ newest.status.phase | default('unknown') }}
+          {%- if waiting %}, waiting: {{ waiting.reason | default('') }} {{ waiting.message | default('') | truncate(200) }}{% endif %}
+          {%- if last %}, last ended: {{ last.reason | default('') }} (exit {{ last.exitCode | default('?') }}){% endif %}
+          {%- if newest.status.conditions is defined %}, {{ newest.status.conditions | selectattr('status', 'equalto', 'False')
+              | map(attribute='message') | select | first | default('') | truncate(200) }}{% endif %}.
+          Its log: oc logs -n {{ enrichment_service_namespace }} {{ newest.metadata.name | default('') }}
+      vars:
+        newest: "{{ enrichment_service_pods.resources | sort(attribute='metadata.creationTimestamp') | last | default({}) }}"
+        container: "{{ newest.status.containerStatuses | default([]) | first | default({}) }}"
+        waiting: "{{ (container.state | default({})).waiting | default({}) }}"
+        last: "{{ (container.lastState | default({})).terminated | default({}) }}"
 
 - name: Report the service
   ansible.builtin.set_fact:
