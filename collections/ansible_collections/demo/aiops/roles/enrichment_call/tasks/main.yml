@@ -30,6 +30,7 @@
     body:
       incident: "{{ enrichment_call_incident }}"
       revision: "{{ enrichment_call_revision }}"
+      service_version: "{{ enrichment_call_service_version }}"
       evidence: "{{ enrichment_call_evidence_sent }}"
       catalogue: "{{ enrichment_call_catalogue }}"
     timeout: "{{ enrichment_call_timeout }}"

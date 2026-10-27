@@ -95,6 +95,7 @@ These decisions apply to the demonstration only. They do not change the referenc
 | DD19 | The monitoring integration stand-in keeps one open incident per problem, identified by the alert labels `service` and `incident_family` and stored in the incident's correlation ID. Only a critical alert raises an incident, at priority 2; a warning is added to an open incident for the same problem but never opens one. Later alerts are added as work notes with an occurrence count; a critical alert raises an incident still at priority 3 to 2; a cleared alert is noted and the incident stays open for the engineer to close. The stand-in records each alert's start and clear times on the incident (`u_acme_alert_state`), so a repeated notification changes nothing, and an alert already recorded on the problem's latest incident raises no new one even after that incident is closed, as when an OOMKilled alert outlasts the reset, and sets the incident's configuration item from the `service` label. Alertmanager reaches it through an EDA event stream with Basic authentication, through the platform gateway, and its job runs one at a time. | One incident per problem, with alerts rolled up into it, is what a well-run integration does, and it is what makes the recurring scenario visible: the occurrence count climbs on the same incident. Raising only on critical alerts follows common practice, where a warning is a monitoring event and a failure is an incident, and it means the enrichment runs once the service has actually failed: raising on the heap warning had the diagnostics run a minute before the OOM kill, missing the strongest evidence. A real integration keeps its alert state in its own store; keeping it on the incident avoids another component. Alertmanager cannot send a custom header, so Basic authentication replaces the header token the ServiceNow trigger uses. Running one job at a time stops two notifications both raising an incident for the same problem. |
 | DD20 | The diagnostics run as four job templates through a standard AAP credential (OpenShift or Kubernetes API Bearer Token) holding a token for the `aiops-diagnostics` service account, which has `view` on the workload's namespace only, granted by phase 08. Phase 07 requests the token from OpenShift with a set lifetime (7 days, enough for one demo environment), keeps it in a Secret and renews it when less than 2 days remain. Which namespace and app to look at comes from a service map held in AAP, keyed by the incident's configuration item, never from the incident's text. | The first design gave each job its own pod's token through a container group (workload identity). AAP refuses both an automounted and a projected service account token in a container group's pod spec, deliberately: a job must not quietly inherit cluster identity, and every credential a job uses goes through AAP's credential system, where it is managed and audited. Within that model, a time-limited token keeps the exposure bounded: it is read-only on one namespace and expires on its own if an environment is forgotten. Having each job mint a 10-minute token was considered and rejected: the minting credential would itself be a long-lived secret able to obtain the same access, for little real gain. The service map stops an incident's content from pointing the diagnostics at another namespace, and RBAC enforces the same boundary underneath it. |
 | DD21 | The knowledge index is its own database, `knowledge`, in the shared PostgreSQL, with pgvector 0.6.2. Each document section is one passage, with a readable ID (`KB-RB-014#diagnosis`) and the document's labels. Embeddings come from BGE small (English, v1.5), run on CPU with ONNX Runtime through `fastembed`, baked into the enrichment service's image at build time. Phase 05 loads the corpus as merged on `main`, read with the read-only GitHub token, as the `knowledge_ingest` identity, which owns the index. The service reads it as `knowledge_reader`, which row-level security limits to approved, internal passages. Every document is loaded, superseded and restricted ones included, and search filters on service and version before ranking, with an exact scan. | Loading from `main` makes the pull request review the approval step, so an unreviewed local edit cannot reach the demo. Enforcing status and access in the database, not only in the query, means a bug in the service cannot leak a restricted or superseded passage, and loading those documents anyway lets the demo prove the control works. A small CPU model keeps the GPU for the language model and avoids PyTorch in the image; baking it in means nothing is downloaded at run time. One passage per section gives the model whole procedures and gives engineers citations they can follow. At this corpus size an exact scan is fast and, unlike an approximate index, never loses a match to the filter. |
+| DD22 | The enrichment service answers in six steps: sanitise, retrieve, prompt, model, check, return. Evidence and the incident description are sanitised on arrival, before anything else reads them. Retrieval asks one question per evidence item, each with the incident description, and a passage keeps its best score; only passages at or above the relevance threshold (provisionally 0.80, tuned in M4.7) are sent, at most six. The prompt and schema are those the model was selected with (`enrichment-v1`); the schema is built for each request, so citations can only be supplied IDs and the job only a catalogue entry, and when no passage meets the threshold it allows only `insufficient_evidence`, with no next steps and no job. The service then checks the answer itself (`policy-v1`) and returns it with the sanitised evidence it considered and the passages it used. The service's running version comes from its deployment's `app.kubernetes.io/version` label, read by the changes diagnostic. | Each evidence item points at a different part of a runbook, and one long query blurs them and is truncated at 512 tokens. Enforcing insufficient evidence in the schema makes rule 5 a property of the decoder, not of the model's judgement, while the model still writes a useful summary and gaps. Checking the answer again in the service covers a decoder that ignores a schema keyword. Returning the evidence and passages lets the engineer see what the answer rests on without opening a trace. |
 
 ## 4 Component view
 
@@ -169,7 +170,7 @@ Limits are 60 seconds runtime per job (the job template's timeout), 15 seconds p
 
 ### 5.3 Enrichment request and response
 
-The request contains the incident fields, the evidence list, the enrichment revision, and the level 2 catalogue: the IDs and descriptions of the jobs that enrichment is permitted to recommend.
+The request contains the incident fields, the affected service's running version, the evidence list, the enrichment revision, and the level 2 catalogue: the IDs and descriptions of the jobs that enrichment is permitted to recommend for the incident's configuration item. The version comes from the changes diagnostic, which reads the deployment's `app.kubernetes.io/version` label; the catalogue is held in the inventory and passed to the work note job by its template (DD22).
 
 The response has the following structure:
 
@@ -183,7 +184,9 @@ The response has the following structure:
 | `recommended_job` | One catalogue ID with a reason and suggested inputs, or null |
 | `gaps` | Missing or conflicting evidence |
 | `manual_review_required` | True where evidence is missing or conflicting |
-| `provenance` | Gateway consumer, model, prompt and policy versions, retrieval configuration version, source IDs, trace ID, token usage and service version |
+| `evidence_considered` | The evidence as the model saw it, after sanitisation, with each item's ID |
+| `knowledge_used` | The passages sent to the model, each with its title and relevance score |
+| `provenance` | Gateway consumer, model, prompt and policy versions, retrieval configuration version, the service and version retrieval was filtered on, source IDs, the best candidate passages and their scores, what sanitisation removed, trace ID, token usage, model time and service version |
 
 Before returning a response, the service applies five rules:
 
@@ -193,22 +196,36 @@ Before returning a response, the service applies five rules:
 4. Every citation must refer to an evidence ID or a retrieved passage ID, and the recommended job must appear in the catalogue supplied with the request.
 5. Where no retrieved passage meets the relevance threshold, or the output contains no valid citations, the status is `insufficient_evidence` and no next steps are given.
 
+How each rule is applied is decision DD22. In short: rule 1 runs on arrival, over the evidence and the incident description, and again over the model's answer; rule 3 is the gateway's constrained decoding against a schema built for the request; rules 4 and 5 are enforced twice, by that schema and by the service's own checks, which drop a cause or step with an unknown citation, drop a job not in the catalogue, turn an answer that cites no passage into `insufficient_evidence`, and require manual review whenever a diagnostic left a gap. A service whose version is unknown gets no passages, and the gap says why. If the knowledge index cannot be searched the service answers 503, and if the model cannot be reached, refuses the key, reaches the token limit or breaks the schema it answers 502, each with a reason that is safe to show, which the workflow's failure branch writes into the "AI enrichment unavailable" note.
+
 ### 5.4 Work note
 
 The work note is labelled as AI-generated and unreviewed, and carries the references needed to reconstruct it.
 
 ```text
 [AI-generated enrichment | revision 1 | not reviewed by an engineer]
-Summary: payments-notify is repeatedly terminated for exceeding its memory limit.
-Evidence: EV-POD-01 restarts and OOMKilled; EV-MET-02 heap at 97% before each restart
-Likely cause (high): heap growth from unbounded notification cache [KB-RB-014, EV-MET-02]
+Outcome: enriched | Manual review required: no
+Summary: payments-notify is repeatedly OOMKilled because its maximum heap equals its container limit.
+Symptoms:
+  - Container restarted with OOMKilled, exit code 137, with the heap at 70% of its maximum
+Likely cause (high): maximum heap equal to the container limit leaves no room for JVM memory [KB-RB-014#diagnosis, EV-CHG-02]
 Next steps:
-  1. Capture a heap dump before the next restart. Verify: dump present in the support volume [KB-RB-014]
+  1. Capture a heap dump and restart the pod. Prerequisites: ... Risk: ... Verify: no OOMKilled restarts for 30 minutes. [KB-RB-014#actions-level-1]
   2. ...
-Recommended automation: Capture heap dump and restart (payments-heapdump-restart) <launch link>
-Gaps: no change recorded in the last 24 hours
-References: trace <id> | model <name> | prompt v3 | policy v1 | workflow job <id>
+Recommended automation: payments-heapdump-restart: preserve the evidence before recovery (inputs: pod=...)
+Gaps:
+  - ...
+Evidence considered:
+  - Pod payments-notify-...: restarted 1 time; last termination OOMKilled, exit code 137 ... [EV-POD-01]
+  - ...
+Knowledge used:
+  - KB-RB-014#diagnosis: payments-notify: memory exhaustion and OOMKilled restarts (2.x on OpenShift): Diagnosis (relevance 0.87)
+  - ...
+Removed from the evidence before analysis: 1 card number
+References: trace <id> | model qwen3-8b | prompt enrichment-v1 | policy policy-v1 | retrieval <version> | service 0.3.0 | tokens <n> | workflow job <id> | event <id>
 ```
+
+The model's analysis comes first, then what it rests on: the evidence as the model saw it and the passages it was given. The "removed" line appears only when sanitisation removed something, and says what kind, never what.
 
 Enrichment uses three custom incident fields:
 
@@ -394,7 +411,8 @@ Scenarios S1 to S5 are presented to the audience. `verify.yml` also checks the f
 | Knowledge approval | Pull request review | Named knowledge source approver, separate from the ingestion identity |
 | Knowledge readiness | Corpus authored to fit the fault, so quality is higher than most real runbooks | Readiness assessed before build (technical architecture section 7); real results depend on runbook currency and CMDB accuracy |
 | Diagnostic targets | OpenShift API, metrics and ServiceNow only | Monitoring APIs, CMDB and managed targets over HTTPS, SSH or WinRM, with read-only credentials |
-| Guardrails | Input sanitisation and output validation in the enrichment service | Gateway guardrails in addition to service-level validation |
+| Guardrails | Input sanitisation by pattern (tokens, keys, secrets, email addresses, Luhn-valid card numbers) and output validation in the enrichment service (DD22) | Gateway guardrails in addition to service-level validation |
+| Recommended jobs | A catalogue of three jobs in the inventory, passed to the work note job; a recommendation is advice only until M5 | Catalogue owned by the automation team in AAP, with each job's risk and approval route |
 | Evaluation | Fixed checks in `verify.yml` | Evaluation against human-reviewed historical incidents before each release |
 | Audit | Traces in MLflow only | Correlated records forwarded to SIEM and a protected archive |
 | Identity | Local accounts | Enterprise identity provider with MFA |

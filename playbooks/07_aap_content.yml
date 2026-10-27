@@ -38,6 +38,7 @@
         aap_content_ee_stream: "{{ demo_execution_environment.name }}"
         aap_content_de_image_override: "{{ demo_aap_decision_environment }}"
         aap_content_service_map: "{{ demo_service_map }}"
+        aap_content_catalogue: "{{ demo_enrichment_catalogue }}"
         aap_content_integration_assignment_group: "{{ demo_servicenow.assignment_group }}"
         aap_content_integration_category: "{{ demo_servicenow.category }}"
         aap_content_workload_url: "http://payments-notify.{{ demo_namespaces.workload }}.svc:8080"

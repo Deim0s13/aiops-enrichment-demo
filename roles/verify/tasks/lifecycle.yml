@@ -26,7 +26,7 @@
   ansible.builtin.set_fact:
     verify_results: >-
       {{ verify_results + [{'id': 'V1', 'check': 'a qualifying incident gets its AI note within ' ~ verify_note_target_seconds ~ ' seconds',
-         'passed': verify_incidents.lifecycle.u_ai_enrichment_state | default('') == 'complete'
+         'passed': verify_incidents.lifecycle.u_ai_enrichment_state | default('') in ['complete', 'insufficient_evidence']
                    and verify_lifecycle_ai_notes | length >= 1
                    and verify_lifecycle_seconds | int <= verify_note_target_seconds,
          'detail': verify_incidents.lifecycle.number ~ ', state ' ~ (verify_incidents.lifecycle.u_ai_enrichment_state | default('') or 'empty')
@@ -101,7 +101,7 @@
       {{ verify_results + [{'id': 'V3', 'check': 'a retried workflow adds no second note',
          'passed': verify_retry.status | default('') == 'successful'
                    and verify_notes | selectattr('value', 'search', 'AI-generated enrichment') | list | length == 1
-                   and verify_incidents.lifecycle.u_ai_enrichment_state | default('') == 'complete',
+                   and verify_incidents.lifecycle.u_ai_enrichment_state | default('') in ['complete', 'insufficient_evidence'],
          'detail': 'workflow ' ~ verify_retry.status | default('not run') ~ ', '
                    ~ verify_notes | selectattr('value', 'search', 'AI-generated enrichment') | list | length ~ ' AI note(s), state '
                    ~ (verify_incidents.lifecycle.u_ai_enrichment_state | default('') or 'empty')}] }}

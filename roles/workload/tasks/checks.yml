@@ -296,6 +296,15 @@
         detail: >-
           {{ (['EV-POD-01', 'EV-MET-01', 'EV-CHG-01', 'EV-LOG-01'] | select('in', note) | list | join(', ') or 'none') ~ ' found'
              ~ ((', gaps ' ~ note | regex_findall('EV-[A-Z]+-GAP') | unique | join(', ')) if 'GAP]' in note else '') }}
+      - check: the enrichment is grounded in approved knowledge for the running version, and nothing it must not cite
+        passed: >-
+          {{ 'Outcome: enriched' in note and 'version ' ~ workload_version in note
+             and note | regex_findall('KB-[A-Z]+-[0-9]+') | intersect(workload_expected_sources) | length > 0
+             and note | regex_findall('KB-[A-Z]+-[0-9]+') | intersect(workload_forbidden_sources) | length == 0 }}
+        detail: >-
+          {{ (note | regex_search('Outcome: [^|]*') | default('no outcome', true) | trim) }};
+          knowledge {{ note | regex_findall('KB-[A-Z]+-[0-9]+#[a-z0-9-]+') | unique | join(', ') or 'none' }};
+          {{ note | regex_search('trace [0-9a-f-]+') | default('no trace', true) }}
   vars:
     workload_correlation: "{{ workload_alert_labels.service }}/{{ workload_alert_labels.incident_family }}"
     inc_count: "{{ workload_incident.record | default([]) | length }}"

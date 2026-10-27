@@ -47,9 +47,9 @@
   vars:
     knowledge_found: "{{ knowledge_check.results | default([]) | map(attribute='id') | list }}"
 
-- name: Report the checks
+- name: Report the checks, and the calibration measurement
   ansible.builtin.set_fact:
-    knowledge_report: "{{ knowledge_report + (knowledge_check_lines | from_json) }}"
+    knowledge_report: "{{ knowledge_report + (knowledge_check_lines | from_json) + [knowledge_calibration_line] }}"
   vars:
     knowledge_check_lines: >-
       {%- set ns = namespace(lines=[]) -%}
@@ -57,6 +57,13 @@
       {%- set ns.lines = ns.lines + [('Check passed: ' if c.passed | bool else 'CHECK FAILED: ') ~ c.check ~ ' (' ~ c.detail | trim ~ ')'] -%}
       {%- endfor -%}
       {{ ns.lines | to_json }}
+    # Report only, never judged: how close a question no document answers comes, against the memory
+    # fault's best match. The enrichment service's relevance threshold belongs between the two (M4.7).
+    knowledge_calibration_line: >-
+      Calibration (report only): a provider throttling question, which no document answers, scores best
+      {{ (knowledge_check.calibration | default([]) | first | default({})).score | default('n/a') }}
+      ({{ knowledge_check.calibration | default([]) | map(attribute='id') | join(', ') or 'no results' }});
+      the memory fault scores best {{ (knowledge_check.results | default([]) | first | default({})).score | default('n/a') }}
 
 - name: Stop if a check failed
   ansible.builtin.assert:

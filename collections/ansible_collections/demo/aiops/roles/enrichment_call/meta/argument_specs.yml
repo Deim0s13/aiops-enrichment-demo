@@ -3,7 +3,7 @@ argument_specs:
   main:
     short_description: Call the enrichment service and validate its answer
     description:
-      - Sends the incident's fields, the evidence and the catalogue to the enrichment service, over TLS checked
+      - Sends the incident's fields, the service's version, the evidence and the catalogue to the enrichment service, over TLS checked
         against the service CA, with the service's token.
       - Fails, and so sends the workflow down its failure branch, unless the answer follows design 5.3, every cause
         and step is cited, and any recommended job is in the catalogue.
@@ -27,7 +27,10 @@ argument_specs:
       enrichment_call_catalogue:
         type: list
         elements: dict
-        description: The jobs enrichment may recommend, each with id and description (M3).
+        description: The jobs enrichment may recommend for this incident, each with id and description.
+      enrichment_call_service_version:
+        type: str
+        description: The affected service's running version, from the diagnostics, such as 2.4.1.
       enrichment_call_references:
         type: str
         description: Extra references for the note's last line, such as the workflow job and event.

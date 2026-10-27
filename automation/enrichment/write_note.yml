@@ -1,16 +1,18 @@
 ---
 # Workflow step 3: asks the enrichment service with the diagnostics' evidence, checks its answer and
-# writes the AI-labelled work note, once per revision (design 5.3 and 5.4). Until milestone M4 the
-# service is the skeleton, which reports the evidence it received but draws no conclusions.
+# writes the AI-labelled work note, once per revision (design 5.3 and 5.4).
 # Vars from the rulebook: incident_sys_id, incident_number, short_description, cmdb_ci, priority,
 # opened_at, event_id. From the diagnostics, as workflow artefacts: diagnostics_evidence_pod_status,
-# _metrics, _changes and _logs; a diagnostic that did not finish is simply absent.
+# _metrics, _changes and _logs, and diagnostics_service_version; a diagnostic that did not finish is
+# simply absent. From the job template: enrichment_catalogue, the jobs enrichment may recommend, each
+# with the configuration items it applies to; only those for the incident's item are offered.
 # enrichment_simulate_failure: true makes this step fail, to exercise the failure branch.
 - name: "AI enrichment | Write the work note"
   hosts: localhost
   gather_facts: false
   vars:
     enrichment_simulate_failure: false
+    enrichment_catalogue: []
   tasks:
     # A failure hands its reason to the failure branch as a workflow artefact, so the "AI enrichment
     # unavailable" note can say why. The reason never contains the service's token.
@@ -36,6 +38,10 @@
               opened_at: "{{ opened_at | default('') | string }}"
             enrichment_call_evidence: >-
               {{ query('ansible.builtin.vars', *query('ansible.builtin.varnames', '^diagnostics_evidence_')) | flatten }}
+            enrichment_call_service_version: "{{ diagnostics_service_version | default('', true) | string | trim }}"
+            enrichment_call_catalogue: >-
+              {{ enrichment_catalogue | selectattr('services', 'contains', cmdb_ci | default('') | string)
+                 | items2dict(key_name='id', value_name='description') | dict2items(key_name='id', value_name='description') }}
             enrichment_call_references: "workflow job {{ awx_workflow_job_id | default('n/a') }} | event {{ event_id | default('n/a') }}"
 
         - name: Write the work note

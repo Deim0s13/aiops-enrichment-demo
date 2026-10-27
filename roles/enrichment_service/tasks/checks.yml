@@ -72,7 +72,8 @@
     enrichment_service_jobs is not failed
     and ((enrichment_service_jobs.resources | first | default({})).status | default({})).succeeded | default(0)
         + ((enrichment_service_jobs.resources | first | default({})).status | default({})).failed | default(0) >= 1
-  retries: 30
+  # The call with the token waits for the model, up to 100 seconds.
+  retries: 40
   delay: 5
   no_log: true
 
@@ -120,13 +121,32 @@
       - check: a call without the token is refused
         passed: "{{ enrichment_service_caller.no_token | default(-1) == 401 }}"
         detail: "HTTP {{ enrichment_service_caller.no_token | default('none') }}"
-      - check: a call with the token gets a response in the design 5.3 shape
+      - check: a call with the token gets a response in the design 5.3 shape, from the knowledge index and the model
         passed: >-
           {{ enrichment_service_caller.with_token | default(-1) == 200
              and enrichment_service_caller.status | default('') in ['enriched', 'insufficient_evidence']
              and ['gaps', 'likely_causes', 'manual_review_required', 'next_steps', 'provenance', 'recommended_job', 'status', 'summary']
-                 | difference(enrichment_service_caller['keys'] | default([])) | length == 0 }}
-        detail: "HTTP {{ enrichment_service_caller.with_token | default('none') }}, status {{ enrichment_service_caller.status | default('none') }}"
+                 | difference(enrichment_service_caller['keys'] | default([])) | length == 0
+             and enrichment_service_caller.candidates | default([]) | length > 0
+             and enrichment_service_caller.tokens.completion | default(0) > 0 }}
+        detail: >-
+          HTTP {{ enrichment_service_caller.with_token | default('none') }}, status {{ enrichment_service_caller.status | default('none') }},
+          prompt {{ enrichment_service_caller.prompt_version | default('none') }};
+          best matches {{ enrichment_service_caller.candidates | default([]) | map(attribute='id')
+                          | zip(enrichment_service_caller.candidates | default([]) | map(attribute='score')) | map('join', ' ') | join(', ') or 'none' }};
+          {{ enrichment_service_caller.source_ids | default([]) | length }} passage(s) above the threshold sent to the model;
+          {{ enrichment_service_caller.tokens.prompt | default(0) }}+{{ enrichment_service_caller.tokens.completion | default(0) }} tokens
+          {{- ('; ' ~ enrichment_service_caller.detail) if enrichment_service_caller.detail | default('') else '' }}
+      - check: a card number in the evidence is redacted, and never comes back
+        passed: >-
+          {{ enrichment_service_caller.with_token | default(-1) == 200
+             and enrichment_service_caller.redactions.card | default(0) == 1
+             and not enrichment_service_caller.card_returned | default(true) }}
+        detail: >-
+          redacted: {{ enrichment_service_caller.redactions | default({}) | dict2items
+                       | map(attribute='key') | zip(enrichment_service_caller.redactions | default({}) | dict2items | map(attribute='value'))
+                       | map('join', ' ') | join(', ') or 'nothing' }};
+          returned: {{ 'yes' if enrichment_service_caller.card_returned | default(true) else 'no' }}
       - check: "a namespace other than {{ enrichment_service_caller_namespace }} cannot reach the service"
         passed: "{{ enrichment_service_refused.connect | default('open') != 'open' }}"
         detail: "from {{ enrichment_service_refused_namespace }}: {{ enrichment_service_refused.connect | default('no result') }}"

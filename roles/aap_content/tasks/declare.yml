@@ -100,6 +100,8 @@
         inventory: "{{ aap_content_inventory_name }}"
         execution_environment: "{{ aap_content_ee_name }}"
         credentials: ["{{ aap_content_servicenow_credential }}", "{{ aap_content_enrichment_credential }}"]
+        extra_vars:
+          enrichment_catalogue: "{{ aap_content_catalogue }}"
         ask_variables_on_launch: true
       - name: "{{ aap_content_templates.unavailable }}"
         description: "Failure branch: records that enrichment is unavailable; the incident stays with its team."

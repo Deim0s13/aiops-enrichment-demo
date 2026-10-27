@@ -69,6 +69,26 @@ demo_service_map:
     app: payments-notify
     container: payments-notify
 
+# The level 2 catalogue (design 5.3): the only jobs enrichment may recommend, each for the configuration
+# items it applies to. The model selection evaluated with the same three. The jobs themselves arrive in
+# M5; until then a recommendation is advice only, and nothing is launched.
+demo_enrichment_catalogue:
+  - id: payments-heapdump-restart
+    services: [payments-notify]
+    description: >-
+      Capture a heap dump from one payments-notify pod to the support volume, then restart that pod.
+      Use when the JVM heap is exhausted, to preserve evidence before recovery.
+  - id: payments-scale-out
+    services: [payments-notify]
+    description: >-
+      Add one replica to payments-notify, up to a maximum of six. Use to absorb load while a cause is
+      investigated.
+  - id: payments-db-failover
+    services: [payments-notify]
+    description: >-
+      Fail the payments database over to its standby. High risk: interrupts every payments service for
+      up to two minutes. Use only for a confirmed primary database failure.
+
 # Container images (DD12). Pinned; the build never pulls latest.
 demo_images:
   postgresql: registry.redhat.io/rhel9/postgresql-16:1791897894

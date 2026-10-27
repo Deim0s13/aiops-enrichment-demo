@@ -1,11 +1,13 @@
 ---
 # Phase 06: the enrichment service (design sections 5.3 and 6.2), built in the cluster from this
 # repository (DD08), deployed behind TLS from the service CA with its own API token, and reachable only
-# from AAP's jobs. Milestone M2 deploys the skeleton, which returns a fixed, schema-valid response.
+# from AAP's jobs. The service retrieves from the knowledge index (phase 05) and asks the model through
+# the gateway (phase 02), then checks the answer before returning it (M4.4).
 #   ansible-navigator run playbooks/06_enrichment.yml
 #
-# Run phases 02 and 03 first: phase 02 creates the namespace, service account and MaaS key, and phase
-# 03 the AAP namespace the service admits. AAP builds from GitHub, so push changes to the service first.
+# Run phases 02, 03 and 05 first: phase 02 creates the namespace, service account and MaaS key, phase
+# 03 the AAP namespace the service admits, and phase 05 the knowledge index and its read-only identity.
+# AAP builds from GitHub, so push changes to the service first.
 # Safe to rerun: the image is rebuilt only when services/enrichment has changed.
 
 - name: "Phase 06 | Enrichment service: build, deployment, TLS, token and network policies"
@@ -40,6 +42,7 @@
         enrichment_service_caller_namespace: "{{ demo_namespaces.aap }}"
         enrichment_service_refused_namespace: "{{ demo_namespaces.data }}"
         enrichment_service_repository: "{{ demo_repository }}"
+        enrichment_service_request_extra: "{{ demo_model.request_extra | default({}) }}"
 
     - name: Report what phase 06 found and changed
       ansible.builtin.debug:

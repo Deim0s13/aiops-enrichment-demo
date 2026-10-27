@@ -14,6 +14,9 @@ aap_content_inventory_name: ACME automation host
 aap_content_workflow_name: AI incident enrichment
 # Demo control: starts the payments-notify memory fault (phase 08), single or recurring.
 aap_content_fault_template: "Demo | Trigger memory fault"
+# The jobs enrichment may recommend (design 5.3), each with the configuration items it applies to. The
+# work note step offers the service only those for the incident's item.
+aap_content_catalogue: []
 aap_content_templates:
   pending: "AI enrichment | Mark pending"
   note: "AI enrichment | Write work note"

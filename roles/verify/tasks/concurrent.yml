@@ -42,7 +42,7 @@
   ansible.builtin.set_fact:
     verify_results: >-
       {{ verify_results + [{'id': 'V4', 'check': "an engineer's edit during enrichment is preserved",
-         'passed': verify_incidents.concurrent.u_ai_enrichment_state | default('') == 'complete'
+         'passed': verify_incidents.concurrent.u_ai_enrichment_state | default('') in ['complete', 'insufficient_evidence']
                    and verify_incidents.concurrent.priority | default('') | string == '2'
                    and verify_comments.record | length == 1
                    and verify_notes | selectattr('value', 'search', 'AI-generated enrichment') | list | length == 1,

@@ -46,7 +46,8 @@
       {%- set container = deployment.spec.template.spec.containers | selectattr('name', 'equalto', evidence_target.container) | first | default({}) -%}
       {%- set recent = sets | selectattr('metadata.creationTimestamp', '>=', since) | list -%}
       {%- set _ = out.append({'id': 'EV-CHG-01', 'target': target,
-            'fact': 'Deployment ' ~ deployment.metadata.name ~ ': revision '
+            'fact': 'Deployment ' ~ deployment.metadata.name ~ ': version '
+                    ~ (deployment.metadata.labels | default({}))['app.kubernetes.io/version'] | default('not labelled') ~ ', revision '
                     ~ deployment.metadata.annotations['deployment.kubernetes.io/revision'] | default('unknown')
                     ~ ', image ' ~ container.image | default('unknown') | regex_replace('@sha256:([0-9a-f]{12})[0-9a-f]+$', '@sha256:\\1') ~ '; last rolled out at '
                     ~ (newest.metadata.creationTimestamp | default('unknown') | regex_replace('^(\\d{4}-\\d\\d-\\d\\d)T(\\d\\d:\\d\\d:\\d\\d).*$', '\\1 \\2 UTC')) ~ '; ' ~ recent | length ~ ' rollout(s) in the last '
@@ -81,3 +82,15 @@
       {%- set _ = out.append({'id': ('EV-CHG-0' ~ (out | length + 1)) if read else 'EV-CHG-GAP', 'target': evidence_target.service,
             'fact': cr, 'ref': 'change_request'}) -%}
       {{ out | to_json }}
+
+# The service's running version, from its deployment's app.kubernetes.io/version label: the enrichment
+# service retrieves only documents for that version (design 5.3, rule 2). Unlabelled, it is empty, and
+# enrichment says it could not match a runbook to an unknown version.
+- name: Publish the service's running version for the work note step
+  ansible.builtin.set_stats:
+    data:
+      diagnostics_service_version: >-
+        {{ ((diag_changes_read.results[0].json['items'] | first | default({})).metadata | default({})).labels
+           | default({}) | dict2items | selectattr('key', 'equalto', 'app.kubernetes.io/version')
+           | map(attribute='value') | first | default('') }}
+    per_host: false

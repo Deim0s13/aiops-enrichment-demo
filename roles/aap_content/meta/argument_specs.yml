@@ -37,6 +37,10 @@ argument_specs:
         type: dict
         required: true
         description: Configuration items the diagnostics may look at, each with namespace, app and container (design 5.2).
+      aap_content_catalogue:
+        type: list
+        elements: dict
+        description: The jobs enrichment may recommend, each with id, description and the services it applies to.
       aap_content_workload_url:
         type: str
         required: true

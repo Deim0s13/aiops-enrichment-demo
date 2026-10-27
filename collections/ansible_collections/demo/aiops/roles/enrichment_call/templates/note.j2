@@ -1,10 +1,15 @@
-{# The work note (design 5.4): labelled as AI-generated and unreviewed, with the references needed to reconstruct it. #}
+{# The work note (design 5.4): labelled as AI-generated and unreviewed, the model's analysis first, then
+   what it was based on (the sanitised evidence and the passages used), then the references needed to
+   reconstruct it. #}
 {% set a = enrichment_call_answer %}
 {% set p = a.provenance | default({}) %}
+{% set nouns = {'card': 'card number', 'email': 'email address', 'token': 'token', 'key': 'key', 'secret': 'secret value',
+                'private_key': 'private key'} %}
 [AI-generated enrichment | revision {{ enrichment_call_revision }} | not reviewed by an engineer]
+Outcome: {{ 'enriched' if a.status == 'enriched' else 'insufficient evidence, so no next steps are given' }} | Manual review required: {{ 'yes' if a.manual_review_required else 'no' }}
 Summary: {{ a.summary }}
 {% if a.symptoms | default([]) %}
-Evidence:
+Symptoms:
 {% for s in a.symptoms %}
   - {{ s }}
 {% endfor %}
@@ -15,10 +20,15 @@ Likely cause ({{ c.confidence | default('unknown') }}): {{ c.statement }} [{{ c.
 {% if a.next_steps %}
 Next steps:
 {% for s in a.next_steps %}
-  {{ loop.index }}. {{ s.step }} Verify: {{ s.verify | default('n/a') }} [{{ s.citations | join(', ') }}]
+{% set stop = '\\.?$' %}
+  {{ loop.index }}. {{ s.step | regex_replace(stop, '.') }}{{ (' Prerequisites: ' ~ s.prerequisites | regex_replace(stop, '.')) if s.prerequisites | default('') else '' }}{{ (' Risk: ' ~ s.risk | regex_replace(stop, '.')) if s.risk | default('') else '' }} Verify: {{ s.verify | default('n/a', true) | regex_replace(stop, '.') }} [{{ s.citations | join(', ') }}]
 {% endfor %}
 {% endif %}
-Recommended automation: {{ (a.recommended_job.job_id ~ ': ' ~ a.recommended_job.reason | default('')) if a.recommended_job else 'none' }}
+{% if a.recommended_job %}
+Recommended automation: {{ a.recommended_job.job_id }}: {{ a.recommended_job.reason | default('') }}{{ (' (inputs: ' ~ (a.recommended_job.inputs | dict2items | map(attribute='key') | zip(a.recommended_job.inputs | dict2items | map(attribute='value')) | map('join', '=') | join(', ')) ~ ')') if a.recommended_job.inputs | default({}) else '' }}
+{% else %}
+Recommended automation: none
+{% endif %}
 {% if a.gaps %}
 Gaps:
 {% for g in a.gaps %}
@@ -27,5 +37,22 @@ Gaps:
 {% else %}
 Gaps: none
 {% endif %}
-Manual review required: {{ 'yes' if a.manual_review_required else 'no' }}
-References: trace {{ p.trace_id | default('n/a') }} | model {{ p.model | default('', true) or 'n/a' }} | prompt {{ p.prompt_version | default('n/a') }} | policy {{ p.policy_version | default('n/a') }} | service {{ p.service_version | default('n/a') }}{{ (' | ' ~ enrichment_call_references) if enrichment_call_references | default('') else '' }}
+{% if a.evidence_considered | default([]) %}
+Evidence considered:
+{% for e in a.evidence_considered %}
+  - {{ e.fact }} [{{ e.id }}]
+{% endfor %}
+{% endif %}
+{% if a.knowledge_used | default([]) %}
+Knowledge used:
+{% for k in a.knowledge_used %}
+  - {{ k.id }}: {{ k.title }} (relevance {{ '%.2f' | format(k.score | float) }})
+{% endfor %}
+{% else %}
+Knowledge used: none (see gaps)
+{% endif %}
+{% if p.redactions | default({}) %}
+Removed from the evidence before analysis: {% for kind, count in p.redactions | dictsort %}{{ count }} {{ nouns[kind] | default(kind) }}{{ 's' if count | int > 1 else '' }}{{ ', ' if not loop.last else '' }}{% endfor %}
+
+{% endif %}
+References: trace {{ p.trace_id | default('n/a') }} | model {{ p.model | default('', true) or 'n/a' }} | prompt {{ p.prompt_version | default('n/a') }} | policy {{ p.policy_version | default('n/a') }} | retrieval {{ p.retrieval_version | default('n/a') }} | service {{ p.service_version | default('n/a') }} | tokens {{ (p.tokens.prompt | default(0)) + (p.tokens.completion | default(0)) if p.tokens is defined else 'n/a' }}{{ (' | ' ~ enrichment_call_references) if enrichment_call_references | default('') else '' }}

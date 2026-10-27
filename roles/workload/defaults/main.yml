@@ -4,6 +4,9 @@ workload_name: payments-notify
 workload_context_dir: services/payments-notify
 workload_git_secret: payments-notify-git-source
 workload_port: 8080
+# The release the demo runs, as its deployment's app.kubernetes.io/version label. The diagnostics read
+# it, and the enrichment service retrieves only documents for its major version (2.x).
+workload_version: 2.4.1
 
 # The misconfiguration the fault relies on: the maximum heap equals the container's memory limit, so
 # the JVM's own memory pushes the container over the limit before the heap is full, and the kernel
@@ -55,3 +58,7 @@ workload_check_delay: 10
 # After the alerts fire: how long to wait for the integration's incident and its enrichment.
 workload_incident_retries: 30
 workload_incident_delay: 10
+# The memory fault's enrichment must cite the current runbook or a past resolution (design 9), and never
+# the superseded 1.x runbook, the restricted break-glass procedure or another service's resolution.
+workload_expected_sources: [KB-RB-014, KB-RS-044, KB-RS-031]
+workload_forbidden_sources: [KB-RB-009, KB-SEC-003, KB-RS-029]

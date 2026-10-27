@@ -5,14 +5,14 @@ kind: Deployment
 metadata:
   name: {{ workload_name }}
   namespace: {{ workload_namespace }}
-  labels: {{ labels | to_json }}
+  labels: {{ labels | combine({'app.kubernetes.io/version': workload_version}) | to_json }}
 spec:
   replicas: 1
   selector:
     matchLabels: {app: {{ workload_name }}}
   template:
     metadata:
-      labels: {app: {{ workload_name }}}
+      labels: {app: {{ workload_name }}, app.kubernetes.io/version: "{{ workload_version }}"}
     spec:
       automountServiceAccountToken: false
       containers:

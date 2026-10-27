@@ -1,4 +1,22 @@
 ---
+# The service searches the knowledge index as its read-only identity, which phase 05 creates.
+- name: Find the read-only knowledge identity's connection
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ enrichment_service_namespace }}"
+    name: "{{ enrichment_service_knowledge_secret }}"
+  register: enrichment_service_knowledge
+  no_log: true
+
+- name: Stop if the knowledge index has not been built
+  ansible.builtin.assert:
+    that: enrichment_service_knowledge.resources | length > 0
+    fail_msg: >-
+      There is no {{ enrichment_service_knowledge_secret }} Secret in {{ enrichment_service_namespace }}, so the
+      service could not search the knowledge index. Run phase 05 first.
+    quiet: true
+
 - name: Deploy the service, its TLS-serving address and its network policies
   kubernetes.core.k8s:
     state: present
@@ -53,9 +71,35 @@
                       valueFrom: { secretKeyRef: { name: "{{ enrichment_service_maas_secret }}", key: url } }
                     - name: MAAS_API_KEY
                       valueFrom: { secretKeyRef: { name: "{{ enrichment_service_maas_secret }}", key: api-key } }
+                    - name: MAAS_REQUEST_EXTRA
+                      value: "{{ enrichment_service_request_extra | to_json }}"
+                    - name: ENRICHMENT_RELEVANCE_THRESHOLD
+                      value: "{{ enrichment_service_relevance_threshold | string }}"
+                    - name: ENRICHMENT_MAX_PASSAGES
+                      value: "{{ enrichment_service_max_passages | string }}"
+                    - name: ENRICHMENT_TEMPERATURE
+                      value: "{{ enrichment_service_temperature | string }}"
+                    - name: ENRICHMENT_MAX_TOKENS
+                      value: "{{ enrichment_service_max_tokens | string }}"
+                    # The read-only knowledge identity (phase 05), and the service CA to verify the database.
+                    - name: KNOWLEDGE_DB_HOST
+                      valueFrom: { secretKeyRef: { name: "{{ enrichment_service_knowledge_secret }}", key: host } }
+                    - name: KNOWLEDGE_DB_PORT
+                      valueFrom: { secretKeyRef: { name: "{{ enrichment_service_knowledge_secret }}", key: port } }
+                    - name: KNOWLEDGE_DB_NAME
+                      valueFrom: { secretKeyRef: { name: "{{ enrichment_service_knowledge_secret }}", key: name } }
+                    - name: KNOWLEDGE_DB_USER
+                      valueFrom: { secretKeyRef: { name: "{{ enrichment_service_knowledge_secret }}", key: user } }
+                    - name: KNOWLEDGE_DB_PASSWORD
+                      valueFrom: { secretKeyRef: { name: "{{ enrichment_service_knowledge_secret }}", key: password } }
+                    - name: KNOWLEDGE_DB_SSLROOTCERT
+                      value: /etc/pki/service-ca/service-ca.crt
                   volumeMounts:
                     - name: tls
                       mountPath: /etc/tls
+                      readOnly: true
+                    - name: service-ca
+                      mountPath: /etc/pki/service-ca
                       readOnly: true
                   readinessProbe: &probe
                     httpGet: { path: /healthz, port: "{{ enrichment_service_port }}", scheme: HTTPS }
@@ -70,6 +114,8 @@
               volumes:
                 - name: tls
                   secret: { secretName: "{{ enrichment_service_tls_secret }}" }
+                - name: service-ca
+                  configMap: { name: openshift-service-ca.crt }
 
       # Nothing reaches the namespace unless a policy allows it, and only AAP's jobs may reach the service.
       - apiVersion: networking.k8s.io/v1

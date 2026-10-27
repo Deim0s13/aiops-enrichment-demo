@@ -34,6 +34,24 @@ argument_specs:
         type: dict
         required: true
         description: The repository to build from, with url, owner, name and branch.
+      enrichment_service_knowledge_secret:
+        type: str
+        description: Secret holding the read-only knowledge identity's connection, from phase 05.
+      enrichment_service_relevance_threshold:
+        type: float
+        description: Passages scoring below this are not sent to the model (design 5.3, rule 5).
+      enrichment_service_max_passages:
+        type: int
+        description: The most passages sent to the model for one incident.
+      enrichment_service_temperature:
+        type: float
+        description: The model's sampling temperature.
+      enrichment_service_max_tokens:
+        type: int
+        description: The most tokens the model may write in its answer.
+      enrichment_service_request_extra:
+        type: dict
+        description: Model-specific fields added to every model request, such as Qwen3's thinking switch.
       enrichment_service_checks:
         type: bool
         description: Check the service from inside the cluster.

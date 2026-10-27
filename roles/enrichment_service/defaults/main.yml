@@ -8,9 +8,22 @@ enrichment_service_token_secret: enrichment-api-token
 enrichment_service_tls_secret: enrichment-tls
 enrichment_service_git_secret: enrichment-git-source
 enrichment_service_token_length: 40
+# The embedding model runs in the process (DD21), so the service needs more memory than the skeleton did.
 enrichment_service_resources:
-  requests: { cpu: 50m, memory: 128Mi }
-  limits: { cpu: 500m, memory: 256Mi }
+  requests: { cpu: 100m, memory: 512Mi }
+  limits: { cpu: "1", memory: 1Gi }
+
+# Enrichment (M4.4). The read-only knowledge identity's connection, from phase 05.
+enrichment_service_knowledge_secret: knowledge-reader-db
+# Passages scoring below this are not sent to the model; with none above it, the answer can only be
+# insufficient_evidence (design 5.3, rule 5). Provisional until M4.7: phase 05 reports the scores of a
+# question no document answers, and the threshold belongs between that and the memory fault's.
+enrichment_service_relevance_threshold: 0.80
+enrichment_service_max_passages: 6
+enrichment_service_temperature: 0.2
+enrichment_service_max_tokens: 1200
+# Model-specific fields added to every model request, such as Qwen3's switch for its thinking mode.
+enrichment_service_request_extra: {}
 enrichment_service_ready_retries: 30
 enrichment_service_ready_delay: 10
 # The image the in-cluster checks run in: the same base as the service, so it is already on the node.

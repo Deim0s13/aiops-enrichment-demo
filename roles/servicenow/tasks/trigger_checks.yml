@@ -64,7 +64,7 @@
   register: servicenow_trigger_wait
   until: >-
     servicenow_trigger_wait is not failed
-    and (servicenow_trigger_wait.record | map(attribute='u_ai_enrichment_state') | first | default('')) in ['complete', 'unavailable']
+    and (servicenow_trigger_wait.record | map(attribute='u_ai_enrichment_state') | first | default('')) in ['complete', 'insufficient_evidence', 'unavailable']
   retries: "{{ servicenow_trigger_check_retries }}"
   delay: "{{ servicenow_trigger_check_delay }}"
   failed_when: false
@@ -105,7 +105,9 @@
   ansible.builtin.set_fact:
     servicenow_trigger_results:
       - check: a qualifying incident raised by svc-monitoring is enriched with no other action
-        passed: "{{ servicenow_trigger_state.qualifying == 'complete' and servicenow_trigger_read_back.results[1].record | length == 1 }}"
+        passed: >-
+          {{ servicenow_trigger_state.qualifying in ['complete', 'insufficient_evidence']
+             and servicenow_trigger_read_back.results[1].record | length == 1 }}
         detail: >-
           {{ servicenow_trigger_inc.qualifying.number }}, priority {{ servicenow_trigger_inc.qualifying.priority }},
           state {{ servicenow_trigger_state.qualifying or 'empty' }}, {{ servicenow_trigger_read_back.results[1].record | length }} note(s)

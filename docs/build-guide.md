@@ -280,7 +280,7 @@ ansible-navigator run playbooks/05_knowledge.yml
 
 What it does (role `knowledge`, DD21):
 
-1. **Creates the `knowledge` database** in the shared PostgreSQL from phase 02, with the pgvector extension, and two identities with generated passwords kept in the cluster: `knowledge_ingest`, which owns the index, and `knowledge_reader`, which the enrichment service will use from M4. Row-level security in the database limits the reader to approved, internal passages, whatever it asks for, so a superseded or restricted document cannot reach the model even if a query forgets a filter.
+1. **Creates the `knowledge` database** in the shared PostgreSQL from phase 02, with the pgvector extension, and two identities with generated passwords kept in the cluster: `knowledge_ingest`, which owns the index, and `knowledge_reader`, which the enrichment service uses. Row-level security in the database limits the reader to approved, internal passages, whatever it asks for, so a superseded or restricted document cannot reach the model even if a query forgets a filter.
 2. **Builds the enrichment service's image**, the same build as phase 06, which now carries the embedding model: BGE small (English, v1.5), run on CPU with ONNX Runtime. The model is downloaded once, at build time, and loaded from disk only, so nothing downloads while the demo runs. The first build takes several minutes; later runs reuse it.
 3. **Reads the corpus** from `knowledge/` on `main`, at the latest commit, with the read-only GitHub token, and hands it to the ingestion Job.
 4. **Loads it**: each document's sections become passages, with readable IDs such as `KB-RB-014#diagnosis` that work notes will cite, each with the document's labels (service, versions, status, access) and its embedding. A document whose content has not changed is left alone, and one removed from `main` is removed from the index. The Job verifies the database's certificate against OpenShift's service CA.
@@ -289,6 +289,11 @@ What it does (role `knowledge`, DD21):
    - the read-only identity sees only approved, internal passages, whatever it asks for
    - it cannot change the index
    - a search for the memory fault, for `payments-notify` 2.4.1, finds the current runbook or a past resolution first, and never the superseded runbook, the restricted document or another service's resolution
+6. **Reports a calibration measurement**, which is never judged: the best score of a provider throttling question, which no document answers (scenario S2), beside the memory fault's best score. The enrichment service's relevance threshold belongs between the two, and is set from this line in M4.7:
+
+   ```text
+   Calibration (report only): a provider throttling question, which no document answers, scores best 0.78 (KB-RB-014#service-overview, ...); the memory fault scores best 0.87
+   ```
 
 ## 10 Phase 06: enrichment service
 
@@ -302,11 +307,19 @@ What it does (role `enrichment_service`):
 
 1. **Generates the service's API token** once and keeps it in the cluster: in `aiops-enrichment`, where the service reads it, and in `aap`, where phase 07 gives it to AAP.
 2. **Builds the image in the cluster** with OpenShift Builds from `services/enrichment` (DD08), reading the private repository with the read-only GitHub token. It builds only when that directory has changed since the last successful build, and deploys the image pinned by digest.
-3. **Deploys the service** behind a certificate that OpenShift's service CA issues for its in-cluster name, so callers can check who they are talking to. It runs as its own service account, with its Models-as-a-Service key from phase 02, and no access to the cluster API.
+3. **Deploys the service** behind a certificate that OpenShift's service CA issues for its in-cluster name, so callers can check who they are talking to. It runs as its own service account, with its Models-as-a-Service key from phase 02, the read-only knowledge identity from phase 05 (the phase stops if phase 05 has not run), and no access to the cluster API. The relevance threshold, temperature and answer length are set here, from the role's defaults.
 4. **Applies network policies:** nothing reaches the `aiops-enrichment` namespace unless a policy allows it, and only the `aap` namespace, where AAP runs its jobs, may reach the service.
-5. **Checks it from inside the cluster**, because it has no route: a short-lived Job in `aap` confirms that the service answers over TLS, refuses a call without the token and answers a call with it in the design 5.3 shape; a Job in `aiops-data` confirms it cannot connect at all. The Jobs are removed afterwards.
+5. **Checks it from inside the cluster**, because it has no route: a short-lived Job in `aap` confirms that the service answers over TLS and refuses a call without the token, then sends a small memory-fault request the whole way through: retrieval from the knowledge index, the model through the gateway, and the service's checks. Its evidence carries a test card number, which must be redacted and must not come back. A Job in `aiops-data` confirms it cannot connect at all. The Jobs are removed afterwards.
 
-Until milestone M4 the service is a skeleton: it lists the evidence the diagnostics gathered, citing each item, and the gaps, but draws no conclusions, and the work note says so. Retrieval and the model are connected in M4.
+What the service does with each request is decision DD22 and design section 5.3: sanitise the evidence, retrieve passages for the service and its version, ask the model with a schema built for the request, check the answer, and return it with the evidence and passages it rests on. The check's line for the full request shows the best matches and their scores, how many passages met the threshold, and the tokens used:
+
+```text
+Check passed: a call with the token gets a response in the design 5.3 shape, from the knowledge index and the model
+  (HTTP 200, status enriched, prompt enrichment-v1; best matches KB-RB-014#symptoms 0.88, ...; 4 passage(s) above the threshold sent to the model; 2650+410 tokens)
+Check passed: a card number in the evidence is redacted, and never comes back (redacted: card 1; returned: no)
+```
+
+If no passage meets the threshold the status is `insufficient_evidence`, which still passes: the threshold is provisional until M4.7. A failure names the reason, for example `HTTP 502 ... The model gateway answered HTTP 429: the consumer's token limit is reached`.
 
 ## 11 Phase 07, first step: publish the execution environment
 
@@ -378,12 +391,12 @@ ansible-navigator run playbooks/08_workload.yml
 What it does (role `workload`):
 
 1. **Builds `payments-notify`** in the cluster, in `demo-payments`, with the same build role as the enrichment service: only when its directory has changed, deployed pinned by digest.
-2. **Deploys it deliberately misconfigured**, as many real JVM services are: its maximum heap equals its container's 256 MiB memory limit. When its notification template cache grows, the JVM's own memory pushes the container over the limit before the heap is full, so the kernel kills it (OOMKilled) rather than Java raising an error (DD18).
+2. **Deploys it deliberately misconfigured**, as many real JVM services are: its maximum heap equals its container's 256 MiB memory limit. Its deployment is labelled with its release, `app.kubernetes.io/version: 2.4.1`, which the diagnostics read so enrichment retrieves only documents for 2.x. When its notification template cache grows, the JVM's own memory pushes the container over the limit before the heap is full, so the kernel kills it (OOMKilled) rather than Java raising an error (DD18).
 3. **Publishes its heap metrics** to user workload monitoring, and adds two alert rules: `PaymentsNotifyHeapHigh` (heap above 50%, firing as soon as a rule evaluation sees it, because the heap is only above that for about 90 seconds before the kill) and `PaymentsNotifyOOMKilled`, which fires for five minutes after a kill. Both carry the labels `service`, `incident_family` and `team`.
 4. **Routes the alerts to the integration stand-in** with an `AlertmanagerConfig`: alerts that name an incident family go, grouped by service and incident family, to phase 07's *Alertmanager alerts* event stream, signed in with the user name and password phase 07 generated (copied to the `alertmanager-integration` Secret). The stand-in keeps one open incident per service and problem (DD19). Only a critical alert raises one, at priority 2: the heap warning on its own is a monitoring event, not an incident. Alerts for the same problem, warnings included, are then added as work notes with an occurrence count, and a cleared alert is noted while the incident stays open for the engineer.
 5. **Applies network policies**: only the `aap` namespace (where the fault trigger runs) and user workload monitoring (which scrapes it) can reach the service.
 6. **Lets the diagnostics read this namespace**: a RoleBinding gives the `aiops-diagnostics` service account from phase 07 `view` here, and nowhere else (DD20).
-7. **Proves the fault, end to end**: it triggers the single scenario from the `aap` namespace, waits for the OOM kill and the recovery, and confirms through the metrics API that the heap peak was recorded and both alerts fired. Then it confirms in ServiceNow that the alerts raised one incident, or added to the one already open, as `svc-monitoring`; that the OOM kill raised it to priority 2; that the AI trigger enriched it; and that the work note carries evidence from all four diagnostics. If an earlier run left the problem's incident open, the check closes it first, with a note saying why, because enrichment runs once, when an incident is raised. This takes about five minutes on every run, and leaves a real incident behind: `reset.yml` closes it.
+7. **Proves the fault, end to end**: it triggers the single scenario from the `aap` namespace, waits for the OOM kill and the recovery, and confirms through the metrics API that the heap peak was recorded and both alerts fired. Then it confirms in ServiceNow that the alerts raised one incident, or added to the one already open, as `svc-monitoring`; that the OOM kill raised it to priority 2; that the AI trigger enriched it; that the work note carries evidence from all four diagnostics; and that the enrichment is grounded: its outcome is `enriched`, the running version reached the note, and its knowledge includes the current runbook or a past resolution and nothing it must never use. If an earlier run left the problem's incident open, the check closes it first, with a note saying why, because enrichment runs once, when an incident is raised. This takes about five minutes on every run, and leaves a real incident behind: `reset.yml` closes it.
 
 ### Triggering the fault in a demo
 

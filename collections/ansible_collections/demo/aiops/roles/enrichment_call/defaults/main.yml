@@ -8,4 +8,6 @@ enrichment_call_evidence: []
 # then what changed. Items with other prefixes follow, by ID.
 enrichment_call_evidence_order: [EV-POD, EV-MET, EV-LOG, EV-CHG]
 enrichment_call_catalogue: []
+# The affected service's running version, from the diagnostics; retrieval is filtered on it.
+enrichment_call_service_version: ""
 enrichment_call_timeout: 90
