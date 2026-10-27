@@ -146,6 +146,10 @@
                       value: "{{ enrichment_service_relevance_threshold | string }}"
                     - name: ENRICHMENT_MAX_PASSAGES
                       value: "{{ enrichment_service_max_passages | string }}"
+                    - name: ENRICHMENT_EXPAND_DOCUMENTS
+                      value: "{{ enrichment_service_expand_documents | string }}"
+                    - name: ENRICHMENT_SKIP_SECTIONS
+                      value: "{{ enrichment_service_skip_sections | join(',') }}"
                     - name: ENRICHMENT_TEMPERATURE
                       value: "{{ enrichment_service_temperature | string }}"
                     - name: ENRICHMENT_MAX_TOKENS

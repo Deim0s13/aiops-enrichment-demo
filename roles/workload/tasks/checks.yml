@@ -304,13 +304,25 @@
         detail: >-
           {{ (note | regex_search('Outcome: [^|]*') | default('no outcome', true) | trim) }};
           knowledge {{ note | regex_findall('KB-[A-Z]+-[0-9]+#[a-z0-9-]+') | unique | join(', ') or 'none' }};
-          {{ note | regex_search('trace [0-9a-f-]+') | default('no trace', true) }}
+          {{ note | regex_search('trace (tr-[0-9a-f]+|not recorded)') | default('no trace', true) }}
+      - check: the documented fix comes from the runbook's or a past resolution's actions
+        passed: "{{ fix | regex_findall('KB-[A-Z]+-[0-9]+#(?:actions|resolution|root-cause)[a-z0-9-]*') | length > 0 }}"
+        detail: >-
+          next steps cite {{ fix | regex_findall('KB-[A-Z]+-[0-9]+#[a-z0-9-]+') | unique | join(', ') or 'no knowledge' }};
+          {{ note.count('[Investigate]') + note.count('[Possible fix]') }} low-trust suggestion(s)
+      - check: the work note leads to its trace in MLflow
+        passed: "{{ note is search('trace tr-[0-9a-f]+ [(]MLflow[)]') }}"
+        detail: "{{ note | regex_search('References: [^|]*') | default('no References line', true) | trim }}"
   vars:
     workload_correlation: "{{ workload_alert_labels.service }}/{{ workload_alert_labels.incident_family }}"
     inc_count: "{{ workload_incident.record | default([]) | length }}"
     inc: "{{ workload_incident.record | default([]) | first | default({}) }}"
     inc_occurrences: "{{ inc.u_acme_alert_occurrences | default(0, true) | int }}"
     note: "{{ (workload_note.record | default([]) | first | default({})).value | default('') }}"
+    # The documented fix: the note's next steps, up to the next heading.
+    fix: >-
+      {{ note.split('Next steps (documented fix')[1].split('Suggestions from the model')[0].split('Recommended automation')[0]
+         if 'Next steps (documented fix' in note else '' }}
 
 - name: Report the checks
   ansible.builtin.set_fact:

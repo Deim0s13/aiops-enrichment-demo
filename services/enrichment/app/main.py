@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from app import knowledge, model, policy, prompt, retrieval, tracing
 from app.sanitise import sanitise, sanitise_tree
 
-SERVICE_VERSION = "0.4.0"
+SERVICE_VERSION = "0.5.0"
 API_TOKEN = os.environ["ENRICHMENT_API_TOKEN"]
 MAAS_CONSUMER = os.environ.get("MAAS_CONSUMER", "")
 
@@ -175,7 +175,10 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
                 raise HTTPException(status_code=503,
                                     detail=f"The knowledge index could not be searched ({type(error).__name__}).") from None
         chosen = {p["id"] for p in passages}
-        tracing.safe_attributes(step, {"threshold": retrieval.THRESHOLD, "max_passages": retrieval.MAX_PASSAGES})
+        tracing.safe_attributes(step, {"threshold": retrieval.THRESHOLD, "max_passages": retrieval.MAX_PASSAGES,
+                                       "skip_sections": ",".join(retrieval.SKIP_SECTIONS),
+                                       "expand_documents": retrieval.EXPAND_DOCUMENTS,
+                                       "added_with_document": ",".join(p["id"] for p in passages if p.get("added_with"))})
         # In MLflow's document format, so its interface shows each passage with its score.
         tracing.safe_outputs(step, [{"id": c["id"], "page_content": c["content"],
                                      "metadata": {"doc_uri": c["id"], "score": c["score"], "sent_to_model": c["id"] in chosen}}
@@ -221,8 +224,8 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
         **checked,
         # What the answer was based on, as the model saw it: sanitised evidence and the passages used.
         "evidence_considered": [{"id": e["id"], "source": e["source"], "fact": e["fact"]} for e in evidence],
-        "knowledge_used": [{"id": p["id"], "title": f"{p['doc_title']}: {p['section']}", "score": p["score"]}
-                           for p in passages],
+        "knowledge_used": [{"id": p["id"], "title": f"{p['doc_title']}: {p['section']}", "score": p["score"],
+                            "added_with": p.get("added_with")} for p in passages],
         "provenance": {
             "service_version": SERVICE_VERSION,
             "consumer": MAAS_CONSUMER,
@@ -241,6 +244,7 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
             "revision": request.revision,
         },
     }
-    tracing.tag({"outcome": checked["status"], "manual_review_required": checked["manual_review_required"]})
+    tracing.tag({"outcome": checked["status"], "manual_review_required": checked["manual_review_required"],
+                 "suggestions": len(checked["suggestions"])})
     tracing.safe_outputs(root, {k: v for k, v in checked.items()})
     return response

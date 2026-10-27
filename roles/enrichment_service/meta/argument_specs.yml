@@ -43,6 +43,13 @@ argument_specs:
       enrichment_service_max_passages:
         type: int
         description: The most passages sent to the model for one incident.
+      enrichment_service_expand_documents:
+        type: int
+        description: How many of the best-matching documents bring their actionable sections with them.
+      enrichment_service_skip_sections:
+        type: list
+        elements: str
+        description: Section headings, by prefix, that are not searched because they describe a document rather than say what to do.
       enrichment_service_temperature:
         type: float
         description: The model's sampling temperature.

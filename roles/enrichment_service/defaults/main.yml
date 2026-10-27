@@ -19,9 +19,15 @@ enrichment_service_knowledge_secret: knowledge-reader-db
 # insufficient_evidence (design 5.3, rule 5). Provisional until M4.7: phase 05 reports the scores of a
 # question no document answers, and the threshold belongs between that and the memory fault's.
 enrichment_service_relevance_threshold: 0.80
-enrichment_service_max_passages: 6
+# The best-matching passages sent, and how many of the best documents bring their actionable sections
+# (a runbook's Diagnosis and Actions, a resolution's Root cause and Resolution) with them (DD24).
+enrichment_service_max_passages: 5
+enrichment_service_expand_documents: 2
+# Sections that describe a document rather than say what to do are not searched (DD24).
+enrichment_service_skip_sections: [Purpose, Scope, Related documents, Change history, Timeline]
 enrichment_service_temperature: 0.2
-enrichment_service_max_tokens: 1200
+# Room for the documented fix and the model's suggestions; an answer cut off at the limit is refused.
+enrichment_service_max_tokens: 1600
 # Tracing (M4.5, DD23): every request is traced in OpenShift AI's MLflow, in this experiment in the
 # workspace of the service's namespace. Best effort: if MLflow is down, enrichment carries on and the
 # note says the trace was not recorded.

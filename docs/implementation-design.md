@@ -97,6 +97,7 @@ These decisions apply to the demonstration only. They do not change the referenc
 | DD21 | The knowledge index is its own database, `knowledge`, in the shared PostgreSQL, with pgvector 0.6.2. Each document section is one passage, with a readable ID (`KB-RB-014#diagnosis`) and the document's labels. Embeddings come from BGE small (English, v1.5), run on CPU with ONNX Runtime through `fastembed`, baked into the enrichment service's image at build time. Phase 05 loads the corpus as merged on `main`, read with the read-only GitHub token, as the `knowledge_ingest` identity, which owns the index. The service reads it as `knowledge_reader`, which row-level security limits to approved, internal passages. Every document is loaded, superseded and restricted ones included, and search filters on service and version before ranking, with an exact scan. | Loading from `main` makes the pull request review the approval step, so an unreviewed local edit cannot reach the demo. Enforcing status and access in the database, not only in the query, means a bug in the service cannot leak a restricted or superseded passage, and loading those documents anyway lets the demo prove the control works. A small CPU model keeps the GPU for the language model and avoids PyTorch in the image; baking it in means nothing is downloaded at run time. One passage per section gives the model whole procedures and gives engineers citations they can follow. At this corpus size an exact scan is fast and, unlike an approximate index, never loses a match to the filter. |
 | DD22 | The enrichment service answers in six steps: sanitise, retrieve, prompt, model, check, return. Evidence and the incident description are sanitised on arrival, before anything else reads them. Retrieval asks one question per evidence item, each with the incident description, and a passage keeps its best score; only passages at or above the relevance threshold (provisionally 0.80, tuned in M4.7) are sent, at most six. The prompt and schema are those the model was selected with (`enrichment-v1`); the schema is built for each request, so citations can only be supplied IDs and the job only a catalogue entry, and when no passage meets the threshold it allows only `insufficient_evidence`, with no next steps and no job. The service then checks the answer itself (`policy-v1`) and returns it with the sanitised evidence it considered and the passages it used. The service's running version comes from its deployment's `app.kubernetes.io/version` label, read by the changes diagnostic. | Each evidence item points at a different part of a runbook, and one long query blurs them and is truncated at 512 tokens. Enforcing insufficient evidence in the schema makes rule 5 a property of the decoder, not of the model's judgement, while the model still writes a useful summary and gaps. Checking the answer again in the service covers a decoder that ignores a schema keyword. Returning the evidence and passages lets the engineer see what the answer rests on without opening a trace. |
 | DD23 | Every enrichment request is one MLflow trace, in the experiment `aiops-enrichment` in the workspace of the service's namespace, with a span for each step: sanitise, retrieve (every candidate passage and its score), model (the sanitised prompt, the schema and the answer, with token counts) and check. The trace is tagged with the incident, service and version, the prompt, policy and retrieval versions, the model, the outcome, and the AAP workflow job and event, and its ID goes into the work note. The model's answer is sanitised before it is traced. The service signs in as its service account, through a token OpenShift mounts for one hour and renews, holding a role of its own in its own namespace only: experiments (which cover traces) in MLflow's `mlflow.kubeflow.org` permission group, to get, list, create and update, and nothing else. OpenShift AI's own `mlflow-operator-mlflow-integration` role also allows datasets, registered models and its AI gateway, which the service does not need. It has no standing token and no other cluster permission. Tracing is best effort: if MLflow cannot be reached, enrichment goes ahead and the note says the trace was not recorded, and a trace counts as recorded only once it has been read back. The MLflow client's telemetry is switched off. | Scenario S5 needs the note to lead to exactly what the model saw and why the answer was accepted. Tracing the sanitised prompt answers the auditor's question "what did the model see?", and the read-back makes "recorded" a fact rather than an assumption. Best effort keeps a demo independent of MLflow's availability; production would weigh failing closed (section 10). A projected, one-hour token with a role limited to experiments is the narrowest credential MLflow's Kubernetes sign-in accepts. |
+| DD24 | Enrichment gives two kinds of advice, kept apart. Next steps are the documented fix: each comes from an approved runbook or resolution and cites it, and only they can come with a recommended job. Suggestions are the model's own ideas, to investigate or to fix what approved knowledge does not cover: each cites the observed evidence it rests on, the work note labels them low trust, they never carry a job, and they always require manual review. With no documented fix, the note says so and gives suggestions (at most four); with one, the model adds suggestions only for what the passages do not explain (at most two). A next step that cites no approved passage is turned into a suggestion by the service's checks, so model-made advice can never pass as documented. Retrieval leaves out sections that describe a document rather than say what to do (Purpose, Scope, Related documents, Change history, Timeline), and the two best-matching documents bring their actionable sections with them: a runbook's Diagnosis and Actions, a resolution's Root cause and Resolution. Prompt `enrichment-v2`, policy `policy-v2`. | Pointing to an article an engineer could have found is not worth an AIOps platform; the value is in shortening the time to a fix, which most often matters when there is no runbook. Kept apart and labelled, model-made advice helps without being mistaken for approved procedure, and a fix that works becomes a new resolution through the normal review, closing the knowledge gap. The retrieval change follows the first cluster runs, where short overview sections outranked the runbook's Diagnosis and Actions and the model had no documented fix to cite. |
 
 ## 4 Component view
 
@@ -181,9 +182,11 @@ The response has the following structure:
 | `summary` | Short description of what is happening |
 | `symptoms` | Observed symptoms and impact |
 | `likely_causes` | Each with a statement, a confidence of high, medium or low, and citations |
-| `next_steps` | Each with the step, prerequisites, risk, how to verify the outcome, and citations |
+| `next_steps` | The documented fix: each with the step, prerequisites, risk, how to verify the outcome, and citations that include an approved passage |
+| `suggestions` | The model's own low-trust ideas (DD24): each an investigation or a possible fix, with the reason, the risk and citations of observed evidence only |
 | `recommended_job` | One catalogue ID with a reason and suggested inputs, or null |
-| `gaps` | Missing or conflicting evidence |
+| `gaps` | Missing or conflicting evidence, and the absence of a documented fix |
+| `checks_removed` | What the service's checks removed from the model's answer, and why |
 | `manual_review_required` | True where evidence is missing or conflicting |
 | `evidence_considered` | The evidence as the model saw it, after sanitisation, with each item's ID |
 | `knowledge_used` | The passages sent to the model, each with its title and relevance score |
@@ -195,7 +198,7 @@ Before returning a response, the service applies five rules:
 2. Retrieval filters on approval status, service, product version and access label before any passage reaches the model.
 3. The model output must match the schema.
 4. Every citation must refer to an evidence ID or a retrieved passage ID, and the recommended job must appear in the catalogue supplied with the request.
-5. Where no retrieved passage meets the relevance threshold, or the output contains no valid citations, the status is `insufficient_evidence` and no next steps are given.
+5. Where no retrieved passage meets the relevance threshold, or the output contains no valid citations, the status is `insufficient_evidence` and no next steps are given. The model's own low-trust suggestions may still be given, labelled as such (DD24).
 
 How each rule is applied is decision DD22. In short: rule 1 runs on arrival, over the evidence and the incident description, and again over the model's answer; rule 3 is the gateway's constrained decoding against a schema built for the request; rules 4 and 5 are enforced twice, by that schema and by the service's own checks, which drop a cause or step with an unknown citation, drop a job not in the catalogue, turn an answer that cites no passage into `insufficient_evidence`, and require manual review whenever a diagnostic left a gap. A service whose version is unknown gets no passages, and the gap says why. If the knowledge index cannot be searched the service answers 503, and if the model cannot be reached, refuses the key, reaches the token limit or breaks the schema it answers 502, each with a reason that is safe to show, which the workflow's failure branch writes into the "AI enrichment unavailable" note.
 
@@ -205,14 +208,16 @@ The work note is labelled as AI-generated and unreviewed, and carries the refere
 
 ```text
 [AI-generated enrichment | revision 1 | not reviewed by an engineer]
-Outcome: enriched | Manual review required: no
+Outcome: enriched, with a documented fix | Manual review required: yes
 Summary: payments-notify is repeatedly OOMKilled because its maximum heap equals its container limit.
 Symptoms:
   - Container restarted with OOMKilled, exit code 137, with the heap at 70% of its maximum
 Likely cause (high): maximum heap equal to the container limit leaves no room for JVM memory [KB-RB-014#diagnosis, EV-CHG-02]
-Next steps:
+Next steps (documented fix, from approved knowledge):
   1. Capture a heap dump and restart the pod. Prerequisites: ... Risk: ... Verify: no OOMKilled restarts for 30 minutes. [KB-RB-014#actions-level-1]
-  2. ...
+  2. Set the maximum heap to about 75% of the limit through a change request. ... [KB-RB-014#actions-level-2, EV-CHG-02]
+Suggestions from the model (LOW TRUST: not from approved knowledge; check them before acting):
+  1. [Investigate] ... Why: ... Risk: ... [EV-LOG-01]
 Recommended automation: payments-heapdump-restart: preserve the evidence before recovery (inputs: pod=...)
 Gaps:
   - ...
@@ -220,13 +225,14 @@ Evidence considered:
   - Pod payments-notify-...: restarted 1 time; last termination OOMKilled, exit code 137 ... [EV-POD-01]
   - ...
 Knowledge used:
-  - KB-RB-014#diagnosis: payments-notify: memory exhaustion and OOMKilled restarts (2.x on OpenShift): Diagnosis (relevance 0.87)
+  - KB-RB-014#symptoms: payments-notify: memory exhaustion and OOMKilled restarts (2.x on OpenShift): Symptoms (relevance 0.87)
+  - KB-RB-014#actions-level-1: payments-notify: memory exhaustion and OOMKilled restarts (2.x on OpenShift): Actions, Level 1: ... (with KB-RB-014#symptoms)
   - ...
 Removed from the evidence before analysis: 1 card number
 References: trace tr-<id> (MLflow) | model qwen3-8b | prompt enrichment-v1 | policy policy-v1 | retrieval <version> | service 0.3.0 | tokens <n> | workflow job <id> | event <id>
 ```
 
-The model's analysis comes first, then what it rests on: the evidence as the model saw it and the passages it was given. The "removed" line appears only when sanitisation removed something, and says what kind, never what. The trace ID is MLflow's, so it can be searched for in MLflow's interface; if MLflow could not record the trace, the line says "trace not recorded" with the request's own ID, which the service's log carries.
+The model's analysis comes first, then the documented fix, then the model's own suggestions under a low-trust heading (DD24), then what it all rests on: the evidence as the model saw it and the passages it was given. The "removed" line appears only when sanitisation removed something, and says what kind, never what. The trace ID is MLflow's, so it can be searched for in MLflow's interface; if MLflow could not record the trace, the line says "trace not recorded" with the request's own ID, which the service's log carries.
 
 Enrichment uses three custom incident fields:
 
@@ -380,7 +386,7 @@ The repository holds two kinds of playbook. `playbooks/` builds the environment 
 | ID | Scenario | Demonstrates | Pass condition | Reference acceptance area |
 |---|---|---|---|---|
 | S1 | Trigger the memory fault | Value moment: level 1 and level 2 | Incident raised within 2 minutes of the alert; work note within 60 seconds of the incident, citing the correct runbook and evidence; correct job recommended; the engineer's launch recovers the service. Compared against a timed manual diagnosis of the same incident. | Evidence and AI quality; time to usable diagnosis |
-| S2 | Trigger a fault with no runbook | Trust moment | Work note states insufficient evidence and requires manual review, with no invented steps | Evidence and AI quality |
+| S2 | Trigger a fault with no runbook | Trust moment | Work note states there is no documented fix and requires manual review; it gives no next steps and no job, only the model's suggestions, labelled low trust and each citing the evidence it rests on (DD24) | Evidence and AI quality |
 | S3 | Revoke the gateway key, then trigger the fault | Failure handling and the gateway kill switch | Incident raised and assigned as normal; "enrichment unavailable" note with the reason | Failure handling; governance |
 | S4 | Add a second incident family | Scaling as a content-only change | Rerunning phases 05 and 07 with a new diagnostic job and runbooks covers the new family, with no change to the enrichment service | Not applicable |
 | S5 | Follow a work note to its trace | Traceability | The trace shows the prompt version, model, retrieved sources and workflow job | Governance |
@@ -394,7 +400,8 @@ Scenarios S1 to S5 are presented to the audience. `verify.yml` also checks the f
 | Concurrent update | An engineer's edit to the incident during enrichment is preserved | Enrichment lifecycle |
 | Wrong-version source | The superseded runbook is never cited | Evidence and AI quality |
 | Access filtering | The restricted document is never retrieved | Evidence and AI quality |
-| Prompt injection | A log line containing instructions to the model does not change the recommended job or add uncited steps | Evidence and AI quality |
+| Prompt injection | A log line containing instructions to the model does not change the recommended job or add uncited steps or suggestions |
+| Low-trust suggestions | Suggestions cite observed evidence only, never carry a job, sit apart from the documented fix, and always require manual review | Evidence and AI quality |
 | Sensitive data | A planted token and card-like number in the logs are redacted before the prompt and absent from the work note and trace | Evidence and AI quality |
 | Latency and cost | Time to work note and token usage per enrichment are recorded, as an input to the cost per enriched incident measure | Value measures |
 
@@ -439,6 +446,7 @@ Scenarios S1 to S5 are presented to the audience. `verify.yml` also checks the f
 | OI08 | ~~Confirm whether the audience's own highest-volume incident family can be reproduced, as a replacement for DD01.~~ Closed: DD01 (JVM memory exhaustion) stands; a second reproducible family is designed in M5. | Before corpus authoring |
 | OI09 | ~~Confirm licence and publication approval.~~ Closed: a personal learning and demonstration kit, kept private in the author's GitHub under Apache 2.0 and shared with colleagues as collaborators. Making it public is a later decision, once the kit is mature, and follows the review in M6.7. | Not applicable |
 | OI10 | Decide whether to add a reconciliation sweep: a scheduled AAP job, with its own user allowed to launch only the enrichment workflow, that launches it for qualifying incidents left without an enrichment state for more than 2 minutes. It covers outages longer than the trigger's retries; the workflow is already idempotent. | M6 |
+| OI11 | Decide whether enrichment may consult sources beyond approved knowledge, such as vendor documentation or the internet, for its low-trust suggestions (DD24). The concerns in a bank are data leaving the environment in search queries, the trust and currency of the sources, and instructions planted in fetched pages. A middle way is a curated set of vendor documents ingested as a separate, unapproved tier, searched like the corpus and cited as such. | After M4 |
 
 ## Related documents and references
 

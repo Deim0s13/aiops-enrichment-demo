@@ -1,12 +1,15 @@
 {# The work note (design 5.4): labelled as AI-generated and unreviewed, the model's analysis first, then
-   what it was based on (the sanitised evidence and the passages used), then the references needed to
+   the documented fix, then the model's own low-trust suggestions, clearly apart (DD24), then what it
+   was based on (the sanitised evidence and the passages used), then the references needed to
    reconstruct it. #}
 {% set a = enrichment_call_answer %}
 {% set p = a.provenance | default({}) %}
+{# Ends each part with one full stop: adds one only where the text has none. #}
+{% set stop = '([^.])$' %}
 {% set nouns = {'card': 'card number', 'email': 'email address', 'token': 'token', 'key': 'key', 'secret': 'secret value',
                 'private_key': 'private key'} %}
 [AI-generated enrichment | revision {{ enrichment_call_revision }} | not reviewed by an engineer]
-Outcome: {{ 'enriched' if a.status == 'enriched' else 'insufficient evidence, so no next steps are given' }} | Manual review required: {{ 'yes' if a.manual_review_required else 'no' }}
+Outcome: {{ 'enriched, with a documented fix' if a.status == 'enriched' else 'no documented fix, so only the model\'s low-trust suggestions are given' }} | Manual review required: {{ 'yes' if a.manual_review_required else 'no' }}
 Summary: {{ a.summary }}
 {% if a.symptoms | default([]) %}
 Symptoms:
@@ -18,10 +21,15 @@ Symptoms:
 Likely cause ({{ c.confidence | default('unknown') }}): {{ c.statement }} [{{ c.citations | join(', ') }}]
 {% endfor %}
 {% if a.next_steps %}
-Next steps:
+Next steps (documented fix, from approved knowledge):
 {% for s in a.next_steps %}
-{% set stop = '\\.?$' %}
-  {{ loop.index }}. {{ s.step | regex_replace(stop, '.') }}{{ (' Prerequisites: ' ~ s.prerequisites | regex_replace(stop, '.')) if s.prerequisites | default('') else '' }}{{ (' Risk: ' ~ s.risk | regex_replace(stop, '.')) if s.risk | default('') else '' }} Verify: {{ s.verify | default('n/a', true) | regex_replace(stop, '.') }} [{{ s.citations | join(', ') }}]
+  {{ loop.index }}. {{ s.step | regex_replace(stop, '\\1.') }}{{ (' Prerequisites: ' ~ s.prerequisites | regex_replace(stop, '\\1.')) if s.prerequisites | default('') else '' }}{{ (' Risk: ' ~ s.risk | regex_replace(stop, '\\1.')) if s.risk | default('') else '' }} Verify: {{ s.verify | default('n/a', true) | regex_replace(stop, '\\1.') }} [{{ s.citations | join(', ') }}]
+{% endfor %}
+{% endif %}
+{% if a.suggestions | default([]) %}
+Suggestions from the model (LOW TRUST: not from approved knowledge; check them before acting):
+{% for s in a.suggestions %}
+  {{ loop.index }}. [{{ 'Investigate' if s.kind == 'investigate' else 'Possible fix' }}] {{ s.action | regex_replace(stop, '\\1.') }}{{ (' Why: ' ~ s.reason | regex_replace(stop, '\\1.')) if s.reason | default('') else '' }}{{ (' Risk: ' ~ s.risk | regex_replace(stop, '\\1.')) if s.risk | default('') else '' }} [{{ s.citations | join(', ') }}]
 {% endfor %}
 {% endif %}
 {% if a.recommended_job %}
@@ -46,10 +54,16 @@ Evidence considered:
 {% if a.knowledge_used | default([]) %}
 Knowledge used:
 {% for k in a.knowledge_used %}
-  - {{ k.id }}: {{ k.title }} (relevance {{ '%.2f' | format(k.score | float) }})
+  - {{ k.id }}: {{ k.title }} ({{ ('relevance %.2f' | format(k.score | float)) if k.score is not none and not k.added_with else 'with ' ~ k.added_with }})
 {% endfor %}
 {% else %}
 Knowledge used: none (see gaps)
+{% endif %}
+{% if a.checks_removed | default([]) %}
+Removed by the service's checks:
+{% for n in a.checks_removed %}
+  - {{ n }}
+{% endfor %}
 {% endif %}
 {% if p.redactions | default({}) %}
 Removed from the evidence before analysis: {% for kind, count in p.redactions | dictsort %}{{ count }} {{ nouns[kind] | default(kind) }}{{ 's' if count | int > 1 else '' }}{{ ', ' if not loop.last else '' }}{% endfor %}

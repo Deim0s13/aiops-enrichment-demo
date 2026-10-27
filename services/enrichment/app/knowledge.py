@@ -163,23 +163,49 @@ def connect():
     return conn
 
 
-def search(conn, query_vector, service: str, version: str, limit: int = 5) -> list[dict]:
+def _patterns(prefixes) -> list[str]:
+    return [p.lower() + "%" for p in prefixes]
+
+
+def search(conn, query_vector, service: str, version: str, limit: int = 5, skip_sections=()) -> list[dict]:
     """The passages closest to the query, for one service and its version only (design 5.3, rule
     2). Status and access are enforced by the database for the reader identity, and repeated here
-    so the query is correct for any identity. Exact search: the corpus is small, and an exact
-    scan never misses a passage that a filter would otherwise starve an approximate index of."""
+    so the query is correct for any identity. Sections whose heading starts with one of
+    skip_sections, such as a document's Purpose, are left out. Exact search: the corpus is small,
+    and an exact scan never misses a passage that a filter would otherwise starve an approximate
+    index of."""
     import numpy as np
 
     rows = conn.execute(
         """
-        SELECT id, doc_id, doc_title, section, content, 1 - (embedding <=> %(q)s) AS score
+        SELECT id, doc_id, doc_title, section, content, type, 1 - (embedding <=> %(q)s) AS score
         FROM passages
         WHERE service = %(service)s AND %(version)s = ANY(versions)
           AND status = 'approved' AND access = 'internal'
+          AND NOT (lower(section) LIKE ANY(%(skip)s))
         ORDER BY embedding <=> %(q)s
         LIMIT %(limit)s
         """,
-        {"q": np.array(query_vector), "service": service, "version": major_version(version), "limit": limit},
+        {"q": np.array(query_vector), "service": service, "version": major_version(version), "limit": limit,
+         "skip": _patterns(skip_sections)},
     ).fetchall()
-    keys = ("id", "doc_id", "doc_title", "section", "content", "score")
+    keys = ("id", "doc_id", "doc_title", "section", "content", "type", "score")
     return [dict(zip(keys, row)) for row in rows]
+
+
+def sections(conn, doc_id: str, prefixes) -> list[dict]:
+    """A document's sections whose headings start with one of prefixes, in the order prefixes
+    gives, such as a runbook's Diagnosis and then its Actions. Approved, internal passages only."""
+    rows = conn.execute(
+        """
+        SELECT id, doc_id, doc_title, section, content, type
+        FROM passages
+        WHERE doc_id = %(doc)s AND status = 'approved' AND access = 'internal'
+          AND lower(section) LIKE ANY(%(want)s)
+        """,
+        {"doc": doc_id, "want": _patterns(prefixes)},
+    ).fetchall()
+    keys = ("id", "doc_id", "doc_title", "section", "content", "type")
+    found = [dict(zip(keys, row)) for row in rows]
+    order = [p.lower() for p in prefixes]
+    return sorted(found, key=lambda r: (next(i for i, p in enumerate(order) if r["section"].lower().startswith(p)), r["id"]))

@@ -63,17 +63,20 @@
   ansible.builtin.set_fact:
     enrichment_call_answer: "{{ enrichment_call_response.json }}"
 
-# Design 5.3, rules 3 to 5: the shape, the citations and the catalogue. A failure here takes the
-# workflow's failure branch; nothing unchecked reaches the incident.
+# Design 5.3, rules 3 to 5: the shape, the citations and the catalogue; DD24: the suggestions.
+# A failure here takes the workflow's failure branch; nothing unchecked reaches the incident.
 - name: Check the answer before it is written
   ansible.builtin.assert:
     that:
       - enrichment_call_answer.status in ['enriched', 'insufficient_evidence']
       - >-
-        ['gaps', 'likely_causes', 'manual_review_required', 'next_steps', 'provenance', 'recommended_job', 'summary']
+        ['gaps', 'likely_causes', 'manual_review_required', 'next_steps', 'provenance', 'recommended_job', 'suggestions', 'summary']
         | difference(enrichment_call_answer.keys() | list) | length == 0
       - enrichment_call_answer.likely_causes | rejectattr('citations', 'truthy') | list | length == 0
       - enrichment_call_answer.next_steps | rejectattr('citations', 'truthy') | list | length == 0
+      # Low-trust suggestions (DD24) must cite the evidence they rest on, and never come with a job of their own.
+      - enrichment_call_answer.suggestions | rejectattr('citations', 'truthy') | list | length == 0
+      - enrichment_call_answer.suggestions | selectattr('job_id', 'defined') | list | length == 0
       - >-
         enrichment_call_answer.recommended_job is none
         or enrichment_call_answer.recommended_job.job_id | default('') in enrichment_call_catalogue | map(attribute='id') | list

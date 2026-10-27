@@ -21,7 +21,7 @@ MAAS_REQUEST_EXTRA = json.loads(os.environ.get("MAAS_REQUEST_EXTRA", "") or "{}"
 MAAS_TIMEOUT = float(os.environ.get("MAAS_TIMEOUT", "75"))
 MAAS_CA_FILE = os.environ.get("MAAS_CA_FILE", "")
 TEMPERATURE = float(os.environ.get("ENRICHMENT_TEMPERATURE", "0.2"))
-MAX_TOKENS = int(os.environ.get("ENRICHMENT_MAX_TOKENS", "1200"))
+MAX_TOKENS = int(os.environ.get("ENRICHMENT_MAX_TOKENS", "1600"))
 
 
 class ModelError(RuntimeError):
