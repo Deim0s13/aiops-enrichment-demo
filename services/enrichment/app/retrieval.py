@@ -8,9 +8,9 @@ also reads only the first 512 tokens). A passage scores the best of its matches.
 Sections that describe a document rather than say what to do (its Purpose, Scope, Related documents,
 Change history and Timeline) are not searched: they are short and mention every keyword, so they
 outranked the runbook's Diagnosis and Actions in the first cluster runs, and the model was left
-without the documented fix. Instead, when a document's passages are chosen, its actionable sections
-come with them: a runbook's Diagnosis and Actions, a resolution's Resolution and Root cause. A
-runbook is meant to be followed, not sampled.
+without the documented fix. Instead, the best-matching runbook brings its Diagnosis and Actions, and
+the best-matching resolution its Root cause and Resolution. A runbook is meant to be followed, not
+sampled.
 
 Only passages at or above the relevance threshold are chosen; if none is, there is no documented fix
 and the answer can only be insufficient_evidence (app.prompt). Retrieval is always filtered on the
@@ -24,14 +24,15 @@ from app import knowledge
 
 THRESHOLD = float(os.environ.get("ENRICHMENT_RELEVANCE_THRESHOLD", "0.80"))
 MAX_PASSAGES = int(os.environ.get("ENRICHMENT_MAX_PASSAGES", "5"))
-EXPAND_DOCUMENTS = int(os.environ.get("ENRICHMENT_EXPAND_DOCUMENTS", "2"))
+# How many documents of each type bring their actionable sections: the best runbook and the best resolution.
+EXPAND_DOCUMENTS = int(os.environ.get("ENRICHMENT_EXPAND_DOCUMENTS", "1"))
 SKIP_SECTIONS = tuple(s.strip() for s in os.environ.get(
     "ENRICHMENT_SKIP_SECTIONS", "Purpose,Scope,Related documents,Change history,Timeline").split(",") if s.strip())
 # The sections that say what to do, by document type, in the order the model should read them.
 ACTIONABLE = {"runbook": ("Diagnosis", "Actions"), "resolution": ("Root cause", "Resolution")}
 PER_QUERY = 5
 RETRIEVAL_VERSION = (f"{knowledge.EMBED_MODEL.split('/')[-1]}|exact|per-evidence-max|skip-navigation|"
-                     f"expand{EXPAND_DOCUMENTS}|t{THRESHOLD:.2f}|k{MAX_PASSAGES}")
+                     f"expand{EXPAND_DOCUMENTS}-per-type|t{THRESHOLD:.2f}|k{MAX_PASSAGES}")
 
 
 def queries(incident: dict, evidence: list[dict]) -> list[str]:
@@ -60,13 +61,19 @@ def retrieve(conn, embedder, incident: dict, evidence: list[dict], version: str)
     ranked = sorted(best.values(), key=lambda r: r["score"], reverse=True)
     chosen = [dict(r, added_with=None) for r in ranked if r["score"] >= THRESHOLD][:MAX_PASSAGES]
 
-    # The best-matching documents bring their actionable sections, if not already chosen.
+    # The best-matching runbook and the best-matching resolution bring their actionable sections, if
+    # not already chosen. One of each, not the two best overall: past resolutions often outscore the
+    # runbook, and the runbook is the current procedure.
     have = {p["id"] for p in chosen}
     documents: list[dict] = []
-    for passage in chosen:
-        if passage["doc_id"] not in {d["doc_id"] for d in documents}:
-            documents.append(passage)
-    for top in documents[:EXPAND_DOCUMENTS]:
+    for doc_type in ACTIONABLE:
+        seen: list[str] = []
+        for passage in chosen:
+            if passage["type"] == doc_type and passage["doc_id"] not in seen:
+                seen.append(passage["doc_id"])
+                if len(seen) <= EXPAND_DOCUMENTS:
+                    documents.append(passage)
+    for top in documents:
         for extra in knowledge.sections(conn, top["doc_id"], ACTIONABLE.get(top["type"], ())):
             if extra["id"] not in have:
                 have.add(extra["id"])

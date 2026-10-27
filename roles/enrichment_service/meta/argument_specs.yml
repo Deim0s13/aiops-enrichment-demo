@@ -45,7 +45,7 @@ argument_specs:
         description: The most passages sent to the model for one incident.
       enrichment_service_expand_documents:
         type: int
-        description: How many of the best-matching documents bring their actionable sections with them.
+        description: How many documents of each type (runbook, resolution) bring their actionable sections with them.
       enrichment_service_skip_sections:
         type: list
         elements: str

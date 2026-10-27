@@ -19,10 +19,11 @@ enrichment_service_knowledge_secret: knowledge-reader-db
 # insufficient_evidence (design 5.3, rule 5). Provisional until M4.7: phase 05 reports the scores of a
 # question no document answers, and the threshold belongs between that and the memory fault's.
 enrichment_service_relevance_threshold: 0.80
-# The best-matching passages sent, and how many of the best documents bring their actionable sections
-# (a runbook's Diagnosis and Actions, a resolution's Root cause and Resolution) with them (DD24).
+# The best-matching passages sent, and how many documents of each type bring their actionable sections
+# with them: the best runbook its Diagnosis and Actions, the best resolution its Root cause and
+# Resolution (DD24).
 enrichment_service_max_passages: 5
-enrichment_service_expand_documents: 2
+enrichment_service_expand_documents: 1
 # Sections that describe a document rather than say what to do are not searched (DD24).
 enrichment_service_skip_sections: [Purpose, Scope, Related documents, Change history, Timeline]
 enrichment_service_temperature: 0.2

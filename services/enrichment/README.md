@@ -12,7 +12,7 @@ The contract is section 5.3 of the implementation design, and how each rule is a
 |---|---|---|
 | 1 | `app/main.py` | Checks the caller's token and the request: each evidence item against the design 5.2 format, the service's version and the catalogue |
 | 2 | `app/sanitise.py` | Redacts tokens, keys, secret values, email addresses and Luhn-valid card numbers from the evidence and the incident description, and counts what it removed (rule 1) |
-| 3 | `app/retrieval.py` | One question per evidence item, filtered on the service and its major version, as the read-only identity, leaving out sections that describe a document (Purpose, Scope and the like); keeps passages at or above the relevance threshold, at most five, and the two best documents bring their Diagnosis and Actions, or Root cause and Resolution (rule 2, DD24) |
+| 3 | `app/retrieval.py` | One question per evidence item, filtered on the service and its major version, as the read-only identity, leaving out sections that describe a document (Purpose, Scope and the like); keeps passages at or above the relevance threshold, at most five, and the best runbook brings its Diagnosis and Actions, the best resolution its Root cause and Resolution (rule 2, DD24) |
 | 4 | `app/prompt.py` | The prompt (`enrichment-v2`) and a schema built for the request: the documented fix as next steps, the model's own ideas as low-trust suggestions citing evidence only, citations only from supplied IDs, the job only from the catalogue, and only `insufficient_evidence` when no passage met the threshold (DD24) |
 | 5 | `app/model.py` | The gateway call, OpenAI-compatible, with constrained output; any failure becomes a reason that is safe to show (rule 3) |
 | 6 | `app/policy.py` | Checks the answer again (`policy-v2`): drops unknown citations and jobs, turns a step with no approved passage into a suggestion and an answer that cites no passage into `insufficient_evidence`, keeps suggestions to observed evidence with no job, requires manual review where evidence is missing or suggestions are given (rules 4 and 5, DD24) |
@@ -28,7 +28,7 @@ Set by phase 06 from the `enrichment_service` role's defaults and the inventory:
 |---|---|---|
 | `ENRICHMENT_RELEVANCE_THRESHOLD` | 0.80 | Passages below it are not sent to the model. Provisional until M4.7; phase 05 reports a calibration score to set it from |
 | `ENRICHMENT_MAX_PASSAGES` | 5 | The best-matching passages sent for one incident |
-| `ENRICHMENT_EXPAND_DOCUMENTS` | 2 | How many of the best documents bring their actionable sections |
+| `ENRICHMENT_EXPAND_DOCUMENTS` | 1 | How many documents of each type bring their actionable sections |
 | `ENRICHMENT_SKIP_SECTIONS` | Purpose, Scope, Related documents, Change history, Timeline | Section headings, by prefix, that are not searched |
 | `ENRICHMENT_TEMPERATURE`, `ENRICHMENT_MAX_TOKENS` | 0.2, 1600 | The model's sampling and answer length |
 | `MAAS_REQUEST_EXTRA` | `{}` | Model-specific request fields, such as Qwen3's thinking switch, from `demo_model.request_extra` |
