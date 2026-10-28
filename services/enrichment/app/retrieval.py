@@ -23,7 +23,7 @@ import re
 
 from app import knowledge
 
-THRESHOLD = float(os.environ.get("ENRICHMENT_RELEVANCE_THRESHOLD", "0.80"))
+THRESHOLD = float(os.environ.get("ENRICHMENT_RELEVANCE_THRESHOLD", "0.75"))
 MAX_PASSAGES = int(os.environ.get("ENRICHMENT_MAX_PASSAGES", "5"))
 # How many documents of each type bring their actionable sections: the best runbook and the best resolution.
 EXPAND_DOCUMENTS = int(os.environ.get("ENRICHMENT_EXPAND_DOCUMENTS", "1"))

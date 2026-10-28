@@ -4,9 +4,10 @@
 
 Runs as the read-only identity. Asks the question the memory fault's evidence poses, for
 payments-notify 2.4.1 and without the service's name, as the service asks it, and reports what the
-service would get back, what it can see at all, and whether it can change anything. Also asks a
-question no document answers, and reports its scores only, to calibrate the service's relevance
-threshold. Prints a JSON report as its last line; the build judges it.
+service would get back (skipping the same navigation sections), what it can see at all, and whether
+it can change anything. Also asks a question no document answers, and reports its scores only, to
+calibrate the service's relevance threshold. Prints a JSON report as its last line; the build judges
+it.
 """
 
 import json
@@ -14,7 +15,7 @@ import os
 
 import psycopg
 
-from app import knowledge
+from app import knowledge, retrieval
 
 QUERY = os.environ.get(
     "KNOWLEDGE_CHECK_QUERY",
@@ -36,9 +37,11 @@ def main() -> None:
     report: dict = {}
     with knowledge.connect() as conn:
         embedder = knowledge.embedder()
-        results = knowledge.search(conn, embedder.query(QUERY), SERVICE, VERSION, limit=5)
+        results = knowledge.search(conn, embedder.query(QUERY), SERVICE, VERSION, limit=5,
+                                   skip_sections=retrieval.SKIP_SECTIONS)
         report["results"] = [{"id": r["id"], "score": round(float(r["score"]), 3)} for r in results]
-        calibration = knowledge.search(conn, embedder.query(CALIBRATION_QUERY), SERVICE, VERSION, limit=3)
+        calibration = knowledge.search(conn, embedder.query(CALIBRATION_QUERY), SERVICE, VERSION, limit=3,
+                                       skip_sections=retrieval.SKIP_SECTIONS)
         report["calibration"] = [{"id": r["id"], "score": round(float(r["score"]), 3)} for r in calibration]
         # What this identity can see at all, with no filter in the query: the database decides.
         report["visible"] = dict(conn.execute(

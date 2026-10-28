@@ -26,7 +26,7 @@ Set by phase 06 from the `enrichment_service` role's defaults and the inventory:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ENRICHMENT_RELEVANCE_THRESHOLD` | 0.80 | Passages below it are not sent to the model. Provisional until M4.7; phase 05 reports a calibration score to set it from |
+| `ENRICHMENT_RELEVANCE_THRESHOLD` | 0.75 | Passages below it are not sent to the model. Set from measured scores (M4.7); phase 05 reports the calibration on every build |
 | `ENRICHMENT_MAX_PASSAGES` | 5 | The best-matching passages sent for one incident |
 | `ENRICHMENT_EXPAND_DOCUMENTS` | 1 | How many documents of each type bring their actionable sections |
 | `ENRICHMENT_SKIP_SECTIONS` | Purpose, Scope, Related documents, Change history, Timeline | Section headings, by prefix, that are not searched |

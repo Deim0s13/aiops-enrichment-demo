@@ -16,9 +16,11 @@ enrichment_service_resources:
 # Enrichment (M4.4). The read-only knowledge identity's connection, from phase 05.
 enrichment_service_knowledge_secret: knowledge-reader-db
 # Passages scoring below this are not sent to the model; with none above it, the answer can only be
-# insufficient_evidence (design 5.3, rule 5). Provisional until M4.7: phase 05 reports the scores of a
-# question no document answers, and the threshold belongs between that and the memory fault's.
-enrichment_service_relevance_threshold: 0.80
+# insufficient_evidence (design 5.3, rule 5). Set from measurement (2026-10-28, M4.7): with navigation
+# sections skipped and the service's name left out, a throttling question no document answers scored
+# 0.70 at best, the phase 06 check's sparse memory-fault request 0.79 and the full memory question
+# 0.87. Phase 05 reports the first and last on every build, so a drift shows.
+enrichment_service_relevance_threshold: 0.75
 # The best-matching passages sent, and how many documents of each type bring their actionable sections
 # with them: the best runbook its Diagnosis and Actions, the best resolution its Root cause and
 # Resolution (DD24).
