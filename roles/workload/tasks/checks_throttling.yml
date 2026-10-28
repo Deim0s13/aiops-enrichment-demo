@@ -1,0 +1,121 @@
+---
+# Scenario S2 (DD25), end to end: MessageHub throttles payments-notify, a fault no runbook covers. The
+# check starts from a fresh pod, so the memory fault just proved leaves no restart or log behind for
+# the diagnostics to find, triggers the fault from the AAP namespace, waits for its critical alert,
+# its own incident and the enrichment, then clears the fault. The note must say there is no
+# documented fix, give no next steps and no job, and give only low-trust suggestions. Appends its
+# results to workload_results. Takes about five minutes.
+
+- name: Name the throttling problem, as the integration stand-in correlates it
+  ansible.builtin.set_fact:
+    workload_throttling_correlation: "{{ workload_throttling_alert_labels.service }}/{{ workload_throttling_alert_labels.incident_family }}"
+
+- name: Close the throttling problem's incident if an earlier fault left it open
+  ansible.builtin.include_role:
+    name: demo_reset
+  vars:
+    demo_reset_assignment_group: "{{ workload_assignment_group }}"
+    demo_reset_correlation_id: "{{ workload_throttling_correlation }}"
+    demo_reset_close_notes: >-
+      Closed by the phase 08 build check, which triggers the throttling fault again and expects a fresh incident for the
+      same problem. The incident was raised for an ACME Bank demonstration.
+
+- name: Start payments-notify afresh, so no earlier fault is in the evidence
+  ansible.builtin.include_tasks: restart.yml
+
+- name: Trigger the throttling fault from the AAP namespace
+  ansible.builtin.include_tasks: trigger.yml
+  vars:
+    workload_trigger_path: /fault?scenario=throttling
+
+- name: Keep the trigger's answer
+  ansible.builtin.set_fact:
+    workload_throttling_trigger: "{{ workload_trigger }}"
+
+- name: Wait for the throttling alert to fire
+  ansible.builtin.uri:
+    url: "https://{{ (workload_thanos.resources | first).spec.host }}/api/v1/query?query={{ workload_throttling_alert_query | urlencode }}"
+    headers:
+      Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+    validate_certs: "{{ demo_cluster_validate_certs }}"
+    timeout: 30
+  vars:
+    workload_throttling_alert_query: >-
+      max(ALERTS{namespace="{{ workload_namespace }}", alertname="PaymentsNotifyDeliveryThrottled", alertstate="firing"})
+  register: workload_throttling_alert
+  until: workload_throttling_alert is not failed and workload_throttling_alert.json.data.result | length > 0
+  retries: 24
+  delay: 10
+  when: workload_throttling_trigger.status | default(-1) == 202
+  failed_when: false
+  no_log: true
+
+- name: Wait for the throttling incident and its enrichment to settle
+  servicenow.itsm.api_info:
+    instance: &admin
+      host: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}"
+      username: "{{ secrets_values.servicenow_admin_username }}"
+      password: "{{ secrets_values.servicenow_admin_password }}"
+    resource: incident
+    sysparm_query: "correlation_id={{ workload_throttling_correlation }}^stateNOT IN6,7,8"
+    columns: [sys_id, number, priority, sys_created_by, u_ai_enrichment_state]
+  register: workload_throttling_incident
+  until: >-
+    workload_throttling_incident is not failed
+    and (workload_throttling_incident.record | map(attribute='u_ai_enrichment_state') | first | default(''))
+        in ['complete', 'insufficient_evidence', 'unavailable']
+  retries: "{{ workload_incident_retries }}"
+  delay: "{{ workload_incident_delay }}"
+  failed_when: false
+
+- name: Read the throttling incident's work note
+  servicenow.itsm.api_info:
+    instance: *admin
+    resource: sys_journal_field
+    sysparm_query: >-
+      element_id={{ workload_throttling_incident.record[0].sys_id }}^element=work_notes^valueLIKEAI-generated enrichment^ORDERBYDESCsys_created_on
+    columns: [value]
+  register: workload_throttling_note
+  until: workload_throttling_note is not failed
+  retries: 3
+  delay: 5
+  when: workload_throttling_incident.record | default([]) | length > 0
+
+# Left running, the fault would keep the alert firing for the rest of its time.
+- name: Clear the fault
+  ansible.builtin.include_tasks: trigger.yml
+  vars:
+    workload_trigger_path: /fault/clear
+
+- name: Judge the throttling scenario
+  ansible.builtin.set_fact:
+    workload_results: "{{ workload_results + workload_throttling_results }}"
+  vars:
+    inc: "{{ workload_throttling_incident.record | default([]) | first | default({}) }}"
+    note: "{{ (workload_throttling_note.record | default([]) | first | default({})).value | default('') }}"
+    suggestions: "{{ note.count('[Investigate]') + note.count('[Possible fix]') }}"
+    workload_throttling_results:
+      - check: "S2: the throttling fault starts, and its alert fires (PaymentsNotifyDeliveryThrottled)"
+        passed: >-
+          {{ workload_throttling_trigger.status | default(-1) == 202
+             and (workload_throttling_alert.json | default({})).data.result | default([]) | length > 0 }}
+        detail: >-
+          trigger HTTP {{ workload_throttling_trigger.status | default('none') }}; alert
+          {{ 'fired' if (workload_throttling_alert.json | default({})).data.result | default([]) | length > 0 else 'not seen' }}
+      - check: "S2: the alert raises its own incident, at priority 2, as svc-monitoring"
+        passed: "{{ inc.number is defined and inc.priority | default('') == '2' and inc.sys_created_by | default('') == 'svc-monitoring' }}"
+        detail: >-
+          {{ (inc.number ~ ', priority ' ~ inc.priority ~ ', raised by ' ~ inc.sys_created_by) if inc.number is defined
+             else 'no open incident for ' ~ workload_throttling_correlation }}
+      - check: "S2: the note says there is no documented fix, with no next steps and no job"
+        passed: >-
+          {{ inc.u_ai_enrichment_state | default('') == 'insufficient_evidence'
+             and 'Outcome: no documented fix' in note and 'Next steps (documented fix' not in note
+             and 'Recommended automation: none' in note and 'Manual review required: yes' in note }}
+        detail: >-
+          enrichment state {{ inc.u_ai_enrichment_state | default('', true) or 'empty' }};
+          {{ note | regex_search('Outcome: [^|]*') | default('no outcome', true) | trim }};
+          {{ note | regex_search('Recommended automation: [a-z0-9-]+') | default('no automation line', true) }}
+      - check: "S2: the model's suggestions are given, labelled low trust, each citing evidence"
+        passed: "{{ suggestions | int > 0 and 'LOW TRUST' in note }}"
+        detail: "{{ suggestions }} suggestion(s); {{ note | regex_search('trace (tr-[0-9a-f]+|not recorded)') | default('no trace', true) }}"

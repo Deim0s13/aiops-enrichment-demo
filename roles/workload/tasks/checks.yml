@@ -1,8 +1,9 @@
 ---
-# The single scenario, end to end: trigger it from the AAP namespace, as the AAP job does, wait for the
-# OOM kill and the recovery, confirm through the metrics API that the heap peak was recorded and both
-# alerts fired, then confirm in ServiceNow that the integration stand-in raised or added to the
-# problem's incident and the AI trigger enriched it (DD19). Takes about five minutes.
+# The single memory scenario (S1), end to end: trigger it from the AAP namespace, as the AAP job does,
+# wait for the OOM kill and the recovery, confirm through the metrics API that the heap peak was
+# recorded and both alerts fired, then confirm in ServiceNow that the integration stand-in raised or
+# added to the problem's incident and the AI trigger enriched it (DD19). Takes about five minutes.
+# Then the throttling scenario (S2, checks_throttling.yml), unless workload_check_throttling is false.
 
 # Enrichment runs once, when an incident is raised. An incident still open from an earlier fault would
 # collect this run's alerts without a new enrichment, so it is closed first and the check proves the
@@ -323,6 +324,10 @@
     fix: >-
       {{ note.split('Next steps (documented fix')[1].split('Suggestions from the model')[0].split('Recommended automation')[0]
          if 'Next steps (documented fix' in note else '' }}
+
+- name: Prove the throttling scenario too (S2)
+  ansible.builtin.include_tasks: checks_throttling.yml
+  when: workload_check_throttling | bool
 
 - name: Report the checks
   ansible.builtin.set_fact:

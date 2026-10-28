@@ -1,0 +1,72 @@
+---
+# Calls the service's fault endpoint from the AAP namespace, as the demo control does, in a short Job.
+# Vars: workload_trigger_path, such as /fault?scenario=throttling or /fault/clear. Sets workload_trigger.
+
+- name: Name this call's Job
+  ansible.builtin.set_fact:
+    workload_check_job: "payments-notify-check-{{ now(utc=true, fmt='%Y%m%d%H%M%S') }}"
+
+- name: "Call the service: {{ workload_trigger_path }}"
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: "{{ workload_check_job }}"
+        namespace: "{{ workload_caller_namespace }}"
+        labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: build-check }
+      spec:
+        backoffLimit: 0
+        ttlSecondsAfterFinished: 600
+        template:
+          spec:
+            restartPolicy: Never
+            automountServiceAccountToken: false
+            containers:
+              - name: trigger
+                image: "{{ workload_check_image }}"
+                command: [python3, -c, "{{ lookup('ansible.builtin.template', 'trigger.py.j2') }}"]
+                resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 200m, memory: 128Mi } }
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  runAsNonRoot: true
+                  capabilities: { drop: [ALL] }
+                  seccompProfile: { type: RuntimeDefault }
+
+- name: Wait for the Job to finish
+  kubernetes.core.k8s_info:
+    api_version: batch/v1
+    kind: Job
+    namespace: "{{ workload_caller_namespace }}"
+    name: "{{ workload_check_job }}"
+  register: workload_trigger_job
+  until: >-
+    workload_trigger_job is not failed
+    and ((workload_trigger_job.resources | first | default({})).status | default({})).succeeded | default(0)
+        + ((workload_trigger_job.resources | first | default({})).status | default({})).failed | default(0) >= 1
+  retries: 30
+  delay: 5
+  no_log: true
+
+- name: Read what the Job printed
+  kubernetes.core.k8s_log:
+    namespace: "{{ workload_caller_namespace }}"
+    label_selectors: ["job-name={{ workload_check_job }}"]
+  register: workload_trigger_log
+  no_log: true
+
+- name: Keep only the service's answer
+  ansible.builtin.set_fact:
+    workload_trigger: "{{ (workload_trigger_log.log_lines | select | last | default('{}')) | from_json }}"
+
+- name: Remove the Job
+  kubernetes.core.k8s:
+    state: absent
+    api_version: batch/v1
+    kind: Job
+    namespace: "{{ workload_caller_namespace }}"
+    name: "{{ workload_check_job }}"
+    delete_options:
+      propagationPolicy: Background
+  changed_when: false

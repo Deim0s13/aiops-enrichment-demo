@@ -19,6 +19,7 @@ approved, internal passages only.
 """
 
 import os
+import re
 
 from app import knowledge
 
@@ -31,17 +32,26 @@ SKIP_SECTIONS = tuple(s.strip() for s in os.environ.get(
 # The sections that say what to do, by document type, in the order the model should read them.
 ACTIONABLE = {"runbook": ("Diagnosis", "Actions"), "resolution": ("Root cause", "Resolution")}
 PER_QUERY = 5
-RETRIEVAL_VERSION = (f"{knowledge.EMBED_MODEL.split('/')[-1]}|exact|per-evidence-max|skip-navigation|"
+RETRIEVAL_VERSION = (f"{knowledge.EMBED_MODEL.split('/')[-1]}|exact|per-evidence-max|no-service-name|skip-navigation|"
                      f"expand{EXPAND_DOCUMENTS}-per-type|t{THRESHOLD:.2f}|k{MAX_PASSAGES}")
 
 
 def queries(incident: dict, evidence: list[dict]) -> list[str]:
-    """The incident's description, then one question per evidence item that is not a gap."""
-    description = incident.get("short_description", "")
+    """The incident's description, then one question per evidence item that is not a gap. The
+    service's own name is taken out: every candidate is already for that service, so its name only
+    pulls every document closer and hides the difference between a fault a runbook covers and one it
+    does not."""
+    service = incident.get("cmdb_ci", "")
+
+    def strip(text: str) -> str:
+        # Pod names start with the service's name, so they go too.
+        return " ".join(re.sub(rf"\b{re.escape(service)}[-a-z0-9]*", " ", text).split()) if service else text.strip()
+
+    description = strip(incident.get("short_description", ""))
     asked = [description] if description else []
     for item in evidence:
         if not item["id"].endswith("-GAP"):
-            asked.append(f"{description}\n{item['fact']}".strip())
+            asked.append(f"{description}\n{strip(item['fact'])}".strip())
     return asked
 
 

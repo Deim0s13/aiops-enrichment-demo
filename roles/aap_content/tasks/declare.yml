@@ -183,7 +183,9 @@
 
       # A demo control, not part of the enrichment path: the presenter starts the fault here.
       - name: "{{ aap_content_fault_template }}"
-        description: Starts the payments-notify memory fault. Single, it is OOMKilled once and comes back clean; recurring, it keeps coming back until cleared.
+        description: >-
+          Starts a payments-notify fault. single: OOMKilled once, comes back clean. recurring: keeps coming back until cleared.
+          throttling: MessageHub refuses deliveries, a fault with no runbook (S2). Run reset.yml between scenarios.
         playbook: automation/demo/trigger_fault.yml
         organization: "{{ aap_content_organisation }}"
         project: "{{ aap_content_project_name }}"
@@ -193,14 +195,16 @@
           fault_service_url: "{{ aap_content_workload_url }}"
         survey_enabled: true
         survey_spec:
-          name: Memory fault
+          name: payments-notify fault
           description: Which scenario to run
           spec:
             - question_name: Scenario
-              question_description: "single: killed once, comes back clean. recurring: keeps coming back until cleared."
+              question_description: >-
+                single: OOMKilled once, comes back clean. recurring: keeps coming back until cleared. throttling: MessageHub
+                refuses deliveries for about 15 minutes, a fault with no runbook.
               variable: fault_scenario
               type: multiplechoice
-              choices: [single, recurring]
+              choices: [single, recurring, throttling]
               default: single
               required: true
 

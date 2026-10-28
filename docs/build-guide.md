@@ -240,6 +240,8 @@ oc get secret aap-admin-password -n aap -o jsonpath='{.data.password}' | base64 
 
 Run preflight first if the PDI may have gone to sleep: it tells you when to wake it.
 
+Sign in to the PDI directly, in a browser, at least once a week. ServiceNow reclaims developer instances that are 90 days old and have had no direct sign-in for 10 days, and neither signing in to the developer site nor the build's own API calls count as activity. The developer site's "last used" date is not reliable, so do not go by it.
+
 ```bash
 ansible-navigator run playbooks/04_servicenow.yml
 ```
@@ -400,14 +402,17 @@ What it does (role `workload`):
 4. **Routes the alerts to the integration stand-in** with an `AlertmanagerConfig`: alerts that name an incident family go, grouped by service and incident family, to phase 07's *Alertmanager alerts* event stream, signed in with the user name and password phase 07 generated (copied to the `alertmanager-integration` Secret). The stand-in keeps one open incident per service and problem (DD19). Only a critical alert raises one, at priority 2: the heap warning on its own is a monitoring event, not an incident. Alerts for the same problem, warnings included, are then added as work notes with an occurrence count, and a cleared alert is noted while the incident stays open for the engineer.
 5. **Applies network policies**: only the `aap` namespace (where the fault trigger runs) and user workload monitoring (which scrapes it) can reach the service.
 6. **Lets the diagnostics read this namespace**: a RoleBinding gives the `aiops-diagnostics` service account from phase 07 `view` here, and nowhere else (DD20).
-7. **Proves the fault, end to end**: it triggers the single scenario from the `aap` namespace, waits for the OOM kill and the recovery, and confirms through the metrics API that the heap peak was recorded and both alerts fired. Then it confirms in ServiceNow that the alerts raised one incident, or added to the one already open, as `svc-monitoring`; that the OOM kill raised it to priority 2; that the AI trigger enriched it; that the work note carries evidence from all four diagnostics; and that the enrichment is grounded: its outcome is `enriched`, the running version reached the note, and its knowledge includes the current runbook or a past resolution and nothing it must never use; that its documented fix cites the runbook's or a resolution's actions; and that the note leads to its trace in MLflow. If an earlier run left the problem's incident open, the check closes it first, with a note saying why, because enrichment runs once, when an incident is raised. This takes about five minutes on every run, and leaves a real incident behind: `reset.yml` closes it.
+7. **Proves the fault, end to end**: it triggers the single scenario from the `aap` namespace, waits for the OOM kill and the recovery, and confirms through the metrics API that the heap peak was recorded and both alerts fired. Then it confirms in ServiceNow that the alerts raised one incident, or added to the one already open, as `svc-monitoring`; that the OOM kill raised it to priority 2; that the AI trigger enriched it; that the work note carries evidence from all four diagnostics; and that the enrichment is grounded: its outcome is `enriched`, the running version reached the note, and its knowledge includes the current runbook or a past resolution and nothing it must never use; that its documented fix cites the runbook's or a resolution's actions; and that the note leads to its trace in MLflow. Then it proves the throttling scenario (S2, DD25) on a fresh pod: the fault starts, its backlog alert fires, it raises its own incident at priority 2, and the note says there is no documented fix, with no next steps and no job, and gives the model's suggestions under the low-trust heading. It clears the fault afterwards. Set `workload_check_throttling=false` to skip this part. If an earlier run left the problem's incident open, the check closes it first, with a note saying why, because enrichment runs once, when an incident is raised. This takes about ten minutes on every run, and leaves two real incidents behind: `reset.yml` closes them.
 
 ### Triggering the fault in a demo
 
-There are two scenarios:
+There are three scenarios:
 
 - **Single**: the cache grows for a few minutes, the container is OOMKilled once, and it restarts clean.
 - **Recurring**: as single, but the fault resumes after every restart, so the service keeps failing until an engineer acts. `reset.yml` clears it.
+- **Throttling** (S2): MessageHub refuses payments-notify's deliveries with HTTP 429 for about 15 minutes, and customer confirmations queue. Nothing restarts. No runbook covers it, so the note says there is no documented fix and gives only the model's low-trust suggestions.
+
+Run `reset.yml` between scenarios. The diagnostics look back 30 minutes, so without a reset, the memory fault's restart and log would turn up in the throttling incident's evidence.
 
 In AAP, launch **Demo | Trigger memory fault** and choose the scenario in the survey. Phase 07 creates the template.
 
@@ -427,7 +432,11 @@ curl -s -X POST 'http://localhost:8080/fault?scenario=single'
 curl -s -X POST 'http://localhost:8080/fault?scenario=recurring'
 ```
 
-To stop a recurring fault by hand, clear it through the same port forward. The current container recovers straight away:
+```bash
+curl -s -X POST 'http://localhost:8080/fault?scenario=throttling'
+```
+
+To stop a recurring or throttling fault by hand, clear it through the same port forward. The current container recovers straight away:
 
 ```bash
 curl -s -X POST 'http://localhost:8080/fault/clear'
@@ -487,6 +496,7 @@ podman stop aiops-demo-vault
 | Symptom | Cause and fix |
 |---|---|
 | "This run uses verbosity 3" | Secrets are not read at `-vvv` and above. Use `-vv` |
+| "502 Bad Gateway" from `snow_adc`, in any phase that calls ServiceNow | The PDI is asleep, waking, or unavailable on ServiceNow's side. Wake it from the developer site and wait until you can sign in to it, then rerun. If the developer site shows it offline with no way to wake it, check the ServiceNow community for a PDI outage and wait. Nothing in the build needs changing |
 | "did not accept the token", in preflight or at the start of any phase | The session token expired. Log in again and repeat the `api_token` line in step 3 |
 | "Cannot reach the cluster API" | The environment is stopped, or Vault holds an earlier environment's API URL. Check the environment is running, then repeat the `api_url` line in step 3 if it changed |
 | "The API presents a certificate signed by a CA that is not publicly trusted" | The CA bundle is not in Vault. Load it with the `api_ca_cert` line in step 3 |

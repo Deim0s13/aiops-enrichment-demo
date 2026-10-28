@@ -26,6 +26,17 @@ workload_alert_labels:
   service: payments-notify
   incident_family: jvm-memory
   team: payments
+# Provider throttling (scenario S2, DD25): MessageHub refuses deliveries, and confirmations queue. The
+# alert is critical, so it raises its own incident, for its own problem: customers are not being told
+# about their payments. Its backlog passes the threshold within seconds of the fault starting.
+workload_throttling_alert_labels:
+  service: payments-notify
+  incident_family: provider-throttling
+  team: payments
+workload_backlog_alert: 200
+workload_backlog_alert_for: 1m
+# How long MessageHub throttles before it accepts deliveries again and the backlog drains.
+workload_throttle_seconds: 900
 # The OOMKilled alert stays firing this long after a kill. kube-state-metrics is scraped less often
 # than the service, so a shorter window can miss the restart (2 minutes did, 2026-10-21). In the
 # recurring scenario the kills come faster than this, so the alert stays firing; the heap alert,
@@ -62,3 +73,7 @@ workload_incident_delay: 10
 # the superseded 1.x runbook, the restricted break-glass procedure or another service's resolution.
 workload_expected_sources: [KB-RB-014, KB-RS-044, KB-RS-031]
 workload_forbidden_sources: [KB-RB-009, KB-SEC-003, KB-RS-029]
+# Prove the throttling scenario (S2) too, after the memory fault: a fresh pod, the fault, its alert, its
+# own incident, and a note that says there is no documented fix and gives only low-trust suggestions.
+# Adds about five minutes.
+workload_check_throttling: true

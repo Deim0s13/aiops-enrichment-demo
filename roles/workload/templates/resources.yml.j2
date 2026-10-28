@@ -24,6 +24,7 @@ spec:
             - {name: JVM_MAX_HEAP, value: "{{ workload_max_heap }}"}
             - {name: LEAK_MB_PER_SECOND, value: "{{ workload_leak_mb_per_second }}"}
             - {name: FAULT_STATE_DIR, value: /var/lib/payments-notify}
+            - {name: THROTTLE_SECONDS, value: "{{ workload_throttle_seconds }}"}
           volumeMounts:
             # Survives a container restart, not a new pod: where the recurring fault's marker lives.
             - {name: fault-state, mountPath: /var/lib/payments-notify}
@@ -97,6 +98,15 @@ spec:
           annotations:
             summary: "payments-notify was terminated for exceeding its memory limit (OOMKilled) and restarted"
             description: "Pod {{ '{{' }} $labels.pod {{ '}}' }} was OOMKilled and restarted in the last {{ workload_oom_alert_window }}."
+        # Scenario S2 (DD25): no runbook covers this, by design.
+        - alert: PaymentsNotifyDeliveryThrottled
+          expr: >-
+            max by (namespace, pod) (payments_notify_delivery_backlog{namespace="{{ workload_namespace }}"}) > {{ workload_backlog_alert }}
+          for: {{ workload_backlog_alert_for }}
+          labels: {{ workload_throttling_alert_labels | combine({'severity': 'critical'}) | to_json }}
+          annotations:
+            summary: "payments-notify customer confirmations are queuing: MessageHub is refusing deliveries"
+            description: "Pod {{ '{{' }} $labels.pod {{ '}}' }} has {{ '{{' }} $value {{ '}}' }} notifications waiting to be delivered."
 ---
 # Lets the diagnostics read this namespace, and only this one (design 6.1, DD20).
 apiVersion: rbac.authorization.k8s.io/v1

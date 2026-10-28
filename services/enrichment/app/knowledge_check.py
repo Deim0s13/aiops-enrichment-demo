@@ -3,9 +3,10 @@
     python -m app.knowledge_check
 
 Runs as the read-only identity. Asks the question the memory fault's evidence poses, for
-payments-notify 2.4.1, and reports what the service would get back, what it can see at all, and
-whether it can change anything. Also asks a question no document answers, and reports its scores
-only, to calibrate the service's relevance threshold. Prints a JSON report as its last line; the build judges it.
+payments-notify 2.4.1 and without the service's name, as the service asks it, and reports what the
+service would get back, what it can see at all, and whether it can change anything. Also asks a
+question no document answers, and reports its scores only, to calibrate the service's relevance
+threshold. Prints a JSON report as its last line; the build judges it.
 """
 
 import json
@@ -17,14 +18,14 @@ from app import knowledge
 
 QUERY = os.environ.get(
     "KNOWLEDGE_CHECK_QUERY",
-    "payments-notify container OOMKilled exit code 137, heap well short of its maximum, maximum heap equal to "
+    "container OOMKilled exit code 137, heap well short of its maximum, maximum heap equal to "
     "the container memory limit, NotificationTemplateCache growing and entries are never evicted",
 )
 # A question no document answers (scenario S2, provider throttling), asked only to report how close an
 # unanswered question scores: the gap between the two sets the relevance threshold (M4.7).
 CALIBRATION_QUERY = os.environ.get(
     "KNOWLEDGE_CALIBRATION_QUERY",
-    "payments-notify HTTP 429 Too Many Requests from MessageHub, rate limit exceeded, notification delivery retried "
+    "HTTP 429 Too Many Requests from MessageHub, rate limit exceeded, notification delivery retried "
     "with back-off, customer confirmations delayed",
 )
 SERVICE = os.environ.get("KNOWLEDGE_CHECK_SERVICE", "payments-notify")

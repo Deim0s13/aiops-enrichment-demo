@@ -11,7 +11,7 @@ The whole environment is built and configured with Ansible playbooks, so it can 
 | Scenario | What the audience sees |
 |---|---|
 | Value | A real memory fault raises an incident, and a cited work note with a recommended job appears within a minute |
-| Trust | A fault with no runbook produces "insufficient evidence" rather than invented advice |
+| Trust | A fault with no runbook, MessageHub throttling, produces "no documented fix", with the model's own suggestions clearly labelled low trust rather than passed off as procedure |
 | Failure handling | Revoking the model gateway key leaves incident handling untouched, with "enrichment unavailable" recorded on the incident |
 | Scaling | A second incident family is added with new Ansible content and runbooks only |
 | Traceability | Any work note can be followed to its model trace, prompt version and sources |

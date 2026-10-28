@@ -62,7 +62,7 @@
       - "Platform: {{ aap_content_url }}; organisation {{ aap_content_organisation }}"
       - "Execution environment: {{ aap_content_ee_image }}"
       - "Decision environment: {{ aap_content_de_image }}, from {{ aap_content_de_source }}"
-      - "Demo control: {{ aap_content_fault_template }}, with a survey for the single or recurring scenario"
+      - "Demo control: {{ aap_content_fault_template }}, with a survey for the single, recurring or throttling scenario"
       - "Workflow: {{ aap_content_workflow_name }} ({{ aap_content_templates.values() | join(', ') }}); launched only by {{ aap_content_eda_user }}"
       - >-
         Diagnostics: {{ aap_content_diagnostics.values() | join(', ') }}, in parallel as service account
