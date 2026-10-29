@@ -49,11 +49,14 @@ def main() -> None:
         calibration = knowledge.search(conn, embedder.query(CALIBRATION_QUERY), SERVICE, VERSION, limit=3,
                                        skip_sections=retrieval.SKIP_SECTIONS)
         report["calibration"] = [{"id": r["id"], "score": round(float(r["score"]), 3)} for r in calibration]
+        # The service's own document gate (DD27), on each scenario's description: the best documents and
+        # their scores, and which pass.
         report["descriptions"] = {}
         for name, text in DESCRIPTIONS.items():
-            found = knowledge.search(conn, embedder.query(text), SERVICE, VERSION, limit=1,
-                                     skip_sections=retrieval.SKIP_SECTIONS)
-            report["descriptions"][name] = {"id": found[0]["id"], "score": round(float(found[0]["score"]), 3)} if found else {}
+            verdict = retrieval.gate(conn, embedder, {"cmdb_ci": SERVICE, "short_description": text}, VERSION)
+            top = sorted(verdict["documents"].items(), key=lambda kv: kv[1], reverse=True)[:3]
+            report["descriptions"][name] = {"score": top[0][1] if top else 0, "top": top, "passed": verdict["passed"]}
+        report["document_gate"] = retrieval.DOCUMENT_GATE
         # What this identity can see at all, with no filter in the query: the database decides.
         report["visible"] = dict(conn.execute(
             "SELECT status || '/' || access, count(*) FROM passages GROUP BY 1").fetchall())

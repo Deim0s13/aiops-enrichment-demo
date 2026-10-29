@@ -21,6 +21,10 @@ enrichment_service_knowledge_secret: knowledge-reader-db
 # 0.70 at best, the phase 06 check's sparse memory-fault request 0.79 and the full memory question
 # 0.87. Phase 05 reports the first and last on every build, so a drift shows.
 enrichment_service_relevance_threshold: 0.75
+# The document gate (DD27): a document reaches the model only if it scores at least this against the
+# incident's description alone. Measured (2026-10-29): the memory fault's description 0.79, the
+# throttling fault's 0.65 at best. Phase 05 reports both on every build.
+enrichment_service_document_gate: 0.72
 # The best-matching passages sent, and how many documents of each type bring their actionable sections
 # with them: the best runbook its Diagnosis and Actions, the best resolution its Root cause and
 # Resolution (DD24).

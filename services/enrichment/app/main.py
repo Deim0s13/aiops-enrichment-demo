@@ -162,32 +162,44 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
     # Rule 2.
     with tracing.span("retrieve", "RETRIEVER") as step:
         if not version:
-            passages, candidates = [], []
+            passages, candidates, verdict = [], [], {"documents": {}, "passed": []}
             retrieval_gaps.append("The service's running version is not known, so no runbook could be matched to it.")
         else:
             tracing.safe_inputs(step, {"queries": retrieval.queries(incident, evidence), "service": incident["cmdb_ci"],
                                        "version": knowledge.major_version(version)})
             try:
                 with knowledge.connect() as conn:
-                    passages, candidates = retrieval.retrieve(conn, state["embedder"], incident, evidence, version)
+                    passages, candidates, verdict = retrieval.retrieve(conn, state["embedder"], incident, evidence,
+                                                                       version)
             except Exception as error:  # noqa: BLE001 - any failure here means no knowledge, and is reported as such
                 log.warning("trace=%s knowledge index unavailable: %s", trace_ref, type(error).__name__)
                 raise HTTPException(status_code=503,
                                     detail=f"The knowledge index could not be searched ({type(error).__name__}).") from None
         chosen = {p["id"] for p in passages}
-        tracing.safe_attributes(step, {"threshold": retrieval.THRESHOLD, "max_passages": retrieval.MAX_PASSAGES,
+        tracing.safe_attributes(step, {"document_gate": retrieval.DOCUMENT_GATE,
+                                       "gate_scores": ",".join(f"{d}={s}" for d, s in verdict["documents"].items()),
+                                       "gate_passed": ",".join(verdict["passed"]),
+                                       "threshold": retrieval.THRESHOLD, "max_passages": retrieval.MAX_PASSAGES,
                                        "skip_sections": ",".join(retrieval.SKIP_SECTIONS),
                                        "expand_documents": retrieval.EXPAND_DOCUMENTS,
                                        "added_with_document": ",".join(p["id"] for p in passages if p.get("added_with"))})
         # In MLflow's document format, so its interface shows each passage with its score.
         tracing.safe_outputs(step, [{"id": c["id"], "page_content": c["content"],
-                                     "metadata": {"doc_uri": c["id"], "score": c["score"], "sent_to_model": c["id"] in chosen}}
+                                     "metadata": {"doc_uri": c["id"], "score": c["score"], "sent_to_model": c["id"] in chosen,
+                                                  "document_gate_passed": not c.get("gated", False)}}
                                     for c in candidates])
     insufficient = not passages
     if insufficient and version:
-        best = f" (best match {candidates[0]['id']} at {candidates[0]['score']:.2f})" if candidates else ""
-        retrieval_gaps.append(f"No approved runbook or resolution for {incident['cmdb_ci'] or 'this service'} "
-                              f"{knowledge.major_version(version)} met the relevance threshold of {retrieval.THRESHOLD:.2f}{best}.")
+        target = f"{incident['cmdb_ci'] or 'this service'} {knowledge.major_version(version)}"
+        if not verdict["passed"]:
+            top = max(verdict["documents"].items(), key=lambda kv: kv[1], default=None)
+            best = f" (closest {top[0]} at {top[1]:.2f}, needs {retrieval.DOCUMENT_GATE:.2f})" if top else ""
+            retrieval_gaps.append(f"No approved runbook or resolution for {target} addresses the failure this incident "
+                                  f"describes{best}, so there is no documented fix.")
+        else:
+            best = f" (best match {candidates[0]['id']} at {candidates[0]['score']:.2f})" if candidates else ""
+            retrieval_gaps.append(f"No approved runbook or resolution for {target} met the relevance threshold of "
+                                  f"{retrieval.THRESHOLD:.2f}{best}.")
     passage_ids = [p["id"] for p in passages]
 
     # Rule 3.
@@ -236,7 +248,8 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
             "service": incident["cmdb_ci"],
             "target_version": version,
             "source_ids": passage_ids,
-            "candidates": [{"id": c["id"], "score": c["score"]} for c in candidates[:10]],
+            "candidates": [{"id": c["id"], "score": c["score"], "gated": c.get("gated", False)} for c in candidates[:10]],
+            "document_gate": {"bar": retrieval.DOCUMENT_GATE, "scores": verdict["documents"], "passed": verdict["passed"]},
             "redactions": dict(redactions),
             "answer_redactions": dict(answer_redactions),
             "tokens": tokens,

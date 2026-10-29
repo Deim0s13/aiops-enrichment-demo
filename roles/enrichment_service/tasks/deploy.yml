@@ -144,6 +144,8 @@
                       value: "{{ enrichment_service_request_extra | to_json }}"
                     - name: ENRICHMENT_RELEVANCE_THRESHOLD
                       value: "{{ enrichment_service_relevance_threshold | string }}"
+                    - name: ENRICHMENT_DOCUMENT_GATE
+                      value: "{{ enrichment_service_document_gate | string }}"
                     - name: ENRICHMENT_MAX_PASSAGES
                       value: "{{ enrichment_service_max_passages | string }}"
                     - name: ENRICHMENT_EXPAND_DOCUMENTS

@@ -40,6 +40,9 @@ argument_specs:
       enrichment_service_relevance_threshold:
         type: float
         description: Passages scoring below this are not sent to the model (design 5.3, rule 5).
+      enrichment_service_document_gate:
+        type: float
+        description: A document reaches the model only if it scores at least this against the incident's description alone (DD27).
       enrichment_service_max_passages:
         type: int
         description: The most passages sent to the model for one incident.

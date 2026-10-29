@@ -12,7 +12,9 @@ url = os.environ["URL"]
 context = ssl.create_default_context(cafile="/etc/ca/service-ca.crt")
 incident = {
     "incident": {"sys_id": "0" * 32, "number": "INC0000000", "cmdb_ci": "payments-notify", "priority": "2",
-                 "short_description": "Phase 06 build check: payments-notify container OOMKilled"},
+                 # Worded as the memory fault's alert words it, so the document gate (DD27) sees a real description.
+                 "short_description": "Phase 06 build check: payments-notify was terminated for exceeding its memory "
+                                      "limit (OOMKilled) and restarted"},
     "service_version": "2.4.1",
     "evidence": [
         {"id": "EV-POD-01", "source": "openshift.pod_status", "target": "demo-payments/payments-notify",

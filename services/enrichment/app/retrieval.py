@@ -12,8 +12,12 @@ without the documented fix. Instead, the best-matching runbook brings its Diagno
 the best-matching resolution its Root cause and Resolution. A runbook is meant to be followed, not
 sampled.
 
-Only passages at or above the relevance threshold are chosen; if none is, there is no documented fix
-and the answer can only be insufficient_evidence (app.prompt). Retrieval is always filtered on the
+First, a gate (DD27): a document may reach the model only if it is relevant to the incident's own
+description, the failure the alert states. Evidence about other conditions, such as a heap setting
+that every memory runbook discusses, would otherwise bring a document in on its own, and the model
+then bends the evidence to fit it, as it did in the first runs of scenario S2. Then only passages of
+documents that passed, at or above the relevance threshold, are chosen; if none is, there is no
+documented fix and the answer can only be insufficient_evidence (app.prompt). Retrieval is always filtered on the
 incident's service and its major version, and runs as the read-only identity, which can see
 approved, internal passages only.
 """
@@ -31,9 +35,14 @@ SKIP_SECTIONS = tuple(s.strip() for s in os.environ.get(
     "ENRICHMENT_SKIP_SECTIONS", "Purpose,Scope,Service overview,Related documents,Change history,Timeline").split(",") if s.strip())
 # The sections that say what to do, by document type, in the order the model should read them.
 ACTIONABLE = {"runbook": ("Diagnosis", "Actions"), "resolution": ("Root cause", "Resolution")}
+# A document reaches the model only if its best passage scores at least this against the incident's
+# description alone (DD27). Set from measurement (2026-10-29): the memory fault's description scored
+# 0.79 against its runbook, the throttling fault's 0.65 against anything.
+DOCUMENT_GATE = float(os.environ.get("ENRICHMENT_DOCUMENT_GATE", "0.72"))
+GATE_LIMIT = 50
 PER_QUERY = 5
-RETRIEVAL_VERSION = (f"{knowledge.EMBED_MODEL.split('/')[-1]}|exact|per-evidence-max|no-service-name|skip-navigation|"
-                     f"expand{EXPAND_DOCUMENTS}-per-type|t{THRESHOLD:.2f}|k{MAX_PASSAGES}")
+RETRIEVAL_VERSION = (f"{knowledge.EMBED_MODEL.split('/')[-1]}|exact|gate{DOCUMENT_GATE:.2f}|per-evidence-max|no-service-name|"
+                     f"skip-navigation|expand{EXPAND_DOCUMENTS}-per-type|t{THRESHOLD:.2f}|k{MAX_PASSAGES}")
 
 
 def queries(incident: dict, evidence: list[dict]) -> list[str]:
@@ -55,21 +64,40 @@ def queries(incident: dict, evidence: list[dict]) -> list[str]:
     return asked
 
 
-def retrieve(conn, embedder, incident: dict, evidence: list[dict], version: str) -> tuple[list[dict], list[dict]]:
-    """Returns the passages to send to the model, and every candidate considered with its score. A
-    passage added with its document carries added_with: the ID of the passage that matched."""
+def gate(conn, embedder, incident: dict, version: str) -> dict:
+    """The document-level relevance gate (DD27): each document's best score against the incident's
+    description alone, and which documents pass. Only those may reach the model. Evidence about other
+    conditions, such as a risky setting, can match a document well; it must not bring that document
+    in on its own."""
+    service = incident.get("cmdb_ci", "")
+    description = queries(incident, [])
+    scores: dict[str, float] = {}
+    if description:
+        for row in knowledge.search(conn, embedder.query(description[0]), service, version, limit=GATE_LIMIT,
+                                    skip_sections=SKIP_SECTIONS):
+            scores.setdefault(row["doc_id"], round(float(row["score"]), 3))
+    return {"documents": scores, "passed": sorted(d for d, s in scores.items() if s >= DOCUMENT_GATE)}
+
+
+def retrieve(conn, embedder, incident: dict, evidence: list[dict], version: str) -> tuple[list[dict], list[dict], dict]:
+    """Returns the passages to send to the model, every candidate considered with its score, and the
+    gate's verdict. A passage added with its document carries added_with: the ID of the passage that
+    matched."""
     service = incident.get("cmdb_ci", "")
     if not service or not knowledge.major_version(version):
-        return [], []
+        return [], [], {"documents": {}, "passed": []}
+    verdict = gate(conn, embedder, incident, version)
+    allowed = set(verdict["passed"])
     best: dict[str, dict] = {}
     for question in queries(incident, evidence):
         for row in knowledge.search(conn, embedder.query(question), service, version, limit=PER_QUERY,
                                     skip_sections=SKIP_SECTIONS):
+            row["gated"] = row["doc_id"] not in allowed
             row["score"] = round(float(row["score"]), 3)
             if row["id"] not in best or row["score"] > best[row["id"]]["score"]:
                 best[row["id"]] = row
     ranked = sorted(best.values(), key=lambda r: r["score"], reverse=True)
-    chosen = [dict(r, added_with=None) for r in ranked if r["score"] >= THRESHOLD][:MAX_PASSAGES]
+    chosen = [dict(r, added_with=None) for r in ranked if r["score"] >= THRESHOLD and not r["gated"]][:MAX_PASSAGES]
 
     # The best-matching runbook and the best-matching resolution bring their actionable sections, if
     # not already chosen. One of each, not the two best overall: past resolutions often outscore the
@@ -88,4 +116,4 @@ def retrieve(conn, embedder, incident: dict, evidence: list[dict], version: str)
             if extra["id"] not in have:
                 have.add(extra["id"])
                 chosen.append(dict(extra, score=best.get(extra["id"], {}).get("score"), added_with=top["id"]))
-    return chosen, ranked
+    return chosen, ranked, verdict
