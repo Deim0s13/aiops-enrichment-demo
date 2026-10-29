@@ -229,7 +229,7 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
         except policy.AnswerError as error:
             log.warning("trace=%s model answer refused: %s", trace_ref, error)
             raise HTTPException(status_code=502, detail=f"The model's answer did not follow the schema: {error}.") from None
-        checked["gaps"] = (retrieval_gaps + checked["gaps"])[:policy.LIMITS["gaps"]]
+        checked["gaps"] = policy.merge_gaps(retrieval_gaps, checked["gaps"])
         tracing.safe_outputs(step, {"answer": checked, "answer_redactions": dict(answer_redactions)})
 
     response = {

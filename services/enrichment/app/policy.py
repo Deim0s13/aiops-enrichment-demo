@@ -1,4 +1,4 @@
-"""The service's checks on the model's answer (design 5.3, rules 3 to 5; DD24, DD26), version 3.
+"""The service's checks on the model's answer (design 5.3, rules 3 to 5; DD24, DD26), version 4.
 
 The schema already constrains the answer, but a decoder may ignore a keyword it does not support, so
 nothing is taken on trust:
@@ -15,14 +15,18 @@ nothing is taken on trust:
 - an insufficient_evidence answer has no next steps and no job;
 - manual review is required whenever a diagnostic left a gap, the answer is insufficient, or it
   carries suggestions.
+- the model's gaps that only repeat the service's own "no documented fix" are dropped (merge_gaps).
 Change POLICY_VERSION with any change here.
 """
 
 import re
 
-POLICY_VERSION = "policy-v3"
+POLICY_VERSION = "policy-v4"
 # A model sometimes fills a list with a placeholder rather than leaving it empty.
 _PLACEHOLDER = re.compile(r"^(none|none noted|no gaps?|n/?a|nothing)\.?$", re.I)
+
+# A gap that only says there is no documented fix, which the service states itself when it is so.
+_NO_FIX = re.compile(r"\bno (approved|documented|relevant)\b.*\b(runbook|resolution|fix|knowledge|passage)", re.I)
 
 LIMITS = {"symptoms": 6, "likely_causes": 3, "next_steps": 5, "suggestions": 4, "gaps": 8}
 KINDS = ("investigate", "fix")
@@ -140,7 +144,7 @@ def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids
         steps, job = [], None
     suggestions = [s for s in suggestions if s["citations"]][:LIMITS["suggestions"]]
 
-    gaps = knowledge_gaps + [g for g in _texts(answer["gaps"], "gaps") if not _PLACEHOLDER.match(g)]
+    gaps = merge_gaps(knowledge_gaps, [g for g in _texts(answer["gaps"], "gaps") if not _PLACEHOLDER.match(g)])
     return {
         "status": status,
         "summary": _text(answer["summary"], "summary"),
@@ -176,3 +180,11 @@ def _as_suggestion(step: dict, observed: set, causes: list, documents: list) -> 
                 citations = [c for c in cause["citations"] if c in observed]
                 break
     return {"kind": "fix", "action": step["step"], "reason": reason, "risk": step["risk"], "citations": citations}
+
+
+def merge_gaps(service_gaps: list[str], model_gaps: list[str]) -> list[str]:
+    """The service's own gaps first. When the service has said there is no documented fix, a model gap
+    saying the same is dropped, so the note says it once."""
+    says_no_fix = any(_NO_FIX.search(g) for g in service_gaps)
+    kept = [g for g in model_gaps if not (says_no_fix and _NO_FIX.search(g))]
+    return (service_gaps + kept)[:LIMITS["gaps"]]

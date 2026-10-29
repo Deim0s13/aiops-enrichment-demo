@@ -19,3 +19,6 @@ aap_validate_certs: true
 # The first install pulls several images, so the wait is long.
 aap_ready_retries: 60
 aap_ready_delay: 20
+# Phase 03 warns when the subscription expires within this many days: AAP refuses to launch any job
+# once it has, so the demo stops raising and enriching incidents (seen 2026-10-29).
+aap_subscription_warn_days: 7

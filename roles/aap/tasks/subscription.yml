@@ -28,9 +28,15 @@
       {{ aap_config.status | default('no response') }}. Check the platform with: oc get pods -n {{ aap_namespace }}
     quiet: true
 
+# An expired subscription still reports a valid key, but the platform refuses to launch jobs ("License
+# has expired"), so it counts as missing, and a fresh manifest replaces it.
 - name: Decide whether the manifest is needed
   ansible.builtin.set_fact:
-    aap_subscription_needed: "{{ not (aap_config.json.license_info.valid_key | default(false) | bool) }}"
+    aap_subscription_needed: >-
+      {{ not (aap_config.json.license_info.valid_key | default(false) | bool)
+         or aap_config.json.license_info.date_expired | default(false) | bool
+         or (aap_config.json.license_info.license_date | default(0) | int > 0
+             and aap_config.json.license_info.license_date | int < now().timestamp() | int) }}
     aap_manifest_available: "{{ secrets_values.aap_manifest_b64 | default('') | length > 0 }}"
 
 - name: Apply the subscription manifest
@@ -83,13 +89,19 @@
   ansible.builtin.set_fact:
     aap_license: "{{ (aap_config_after if aap_manifest_applied is not skipped else aap_config).json.license_info | default({}) }}"
 
-- name: Check that a valid subscription is attached
+- name: Check that a valid, unexpired subscription is attached
   ansible.builtin.assert:
-    that: aap_license.valid_key | default(false) | bool or not aap_manifest_available | bool
+    that: >-
+      (aap_license.valid_key | default(false) | bool and not aap_license.date_expired | default(false) | bool
+       and (aap_license.license_date | default(0) | int == 0 or aap_license.license_date | int > now().timestamp() | int))
+      or not aap_manifest_available | bool
     fail_msg: >-
-      The platform reports no valid subscription after the manifest was applied
-      ({{ aap_license.license_type | default('no licence information') }}).
-      Check Settings, Subscription in the platform's web console.
+      The platform reports no valid, unexpired subscription
+      ({{ aap_license.license_type | default('no licence information') }}{{
+      (', expired ' ~ ('%Y-%m-%d' | ansible.builtin.strftime(aap_license.license_date | int)))
+      if aap_license.license_date | default(0) | int > 0 else '' }}). AAP will refuse to launch any job. Export a
+      fresh manifest from the Customer Portal's subscription allocations, load it into aap_manifest_b64 in
+      aiops-demo/entitlements (laptop setup step 3), and rerun phase 03.
     quiet: true
 
 - name: Record the subscription result
@@ -98,6 +110,8 @@
       {{ aap_report + [('Subscription: ' ~ ('applied' if aap_manifest_applied is not skipped else 'already attached')
            ~ ', ' ~ aap_license.subscription_name | default('unnamed')
            ~ (', expires ' ~ ('%Y-%m-%d' | ansible.builtin.strftime(aap_license.license_date | default(0) | int))
+              ~ (' (WARNING: in under ' ~ aap_subscription_warn_days ~ ' days; AAP stops launching jobs then)'
+                 if aap_license.license_date | int - now().timestamp() | int < aap_subscription_warn_days * 86400 else '')
               if aap_license.license_date | default(0) | int > 0 else ''))
           if aap_license.valid_key | default(false) | bool else
           'Subscription: none, because aap_manifest_b64 is empty in aiops-demo/entitlements'] }}

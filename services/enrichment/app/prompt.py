@@ -1,4 +1,4 @@
-"""The prompt and the per-request output schema (design 5.3), version 3 (DD24, DD26).
+"""The prompt and the per-request output schema (design 5.3), version 4 (DD24, DD26).
 
 Version 1 was the prompt and schema the model was selected with (docs/model-selection.md). Version 2
 separated two kinds of advice: next_steps, the documented fix, each from an approved passage; and
@@ -7,7 +7,10 @@ job. Version 3 ties the documented fix to the incident's own failure. The incide
 description states; other conditions the evidence shows, such as a risky setting, are context. Each
 likely cause names the passages that document it (documented_by), the first cause is the incident's
 failure, and next steps may only come from the documents behind that first cause (DD26). The service
-enforces it (app.policy). Change PROMPT_VERSION with any change here, so a work note can always be
+enforces it (app.policy). Version 4 orders the suggestions, the incident's failure first and at most
+one about another condition, and asks each suggestion's risk to say whether it could make the incident
+worse: the first S2 notes suggested scaling out against a provider that was throttling, which adds load
+to the dependency refusing it. Change PROMPT_VERSION with any change here, so a work note can always be
 traced to the prompt that produced it.
 
 The schema is built for each request. Citations may only be IDs supplied with this request, a
@@ -19,7 +22,7 @@ enforced by the decoder, not left to the model's judgement.
 
 import re
 
-PROMPT_VERSION = "enrichment-v3"
+PROMPT_VERSION = "enrichment-v4"
 
 SYSTEM = """You are the incident enrichment assistant for ACME Bank's operations team. You help an on-call
 engineer find a fix quickly. You do not take any action yourself.
@@ -39,9 +42,13 @@ Give two kinds of advice, and never mix them:
   addresses that failure, preferably its Actions or Resolution, and cites that passage's ID, with any
   evidence IDs that show the step applies.
 - suggestions: your own ideas, to troubleshoot or to fix what the documented fix does not cover,
-  including the incident's failure when no passage addresses it, and conditions other than the
-  incident. They are not approved, and the engineer is told so. Each cites the evidence IDs it is
-  based on and says plainly what to check or change, why, and the risk.
+  including the incident's failure when no passage addresses it. They are not approved, and the
+  engineer is told so. Each cites the evidence IDs it is based on and says plainly what to check or
+  change, why, and the risk. List those for the incident's failure first; add at most one about
+  another condition. The risk must say whether the action could make the incident worse. Never
+  suggest adding load to a dependency that is refusing or throttling work, for example scaling out
+  against a rate limit; prefer pacing or reducing the load, honouring any Retry-After, checking the
+  dependency's status, and raising it with whoever runs it.
 
 Rules:
 1. Use only IDs that appear in the request. Never invent an ID.
