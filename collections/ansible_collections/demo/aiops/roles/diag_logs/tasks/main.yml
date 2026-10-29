@@ -98,3 +98,5 @@
       {%- set out.lines = out.lines + [text] -%}
       {%- endfor -%}
       {{ out.lines | to_json }}
+  # The log text is shown only once redacted, by the evidence role (DD28), not here at higher verbosity.
+  no_log: true

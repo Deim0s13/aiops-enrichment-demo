@@ -53,22 +53,35 @@
         ref: ""
   when: evidence_target | length == 0
 
+# Evidence is redacted here, at the source, before it is published (DD28): workflow artefacts are kept
+# in AAP's job records and passed to the next job as variables, so anything left in them would stay in
+# AAP. The enrichment service sanitises again on arrival, with its own patterns (design 5.3, rule 1).
+- name: Redact and shape the evidence
+  ansible.builtin.set_fact:
+    evidence_published: "{{ evidence_published_json | from_json }}"
+  vars:
+    evidence_published_json: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for item in evidence_items[:evidence_max_items] -%}
+      {%- set clean = namespace(fact=item.fact | string, target=item.target | default('') | string, ref=item.ref | default('') | string) -%}
+      {%- for r in evidence_redactions -%}
+      {%- set clean.fact = clean.fact | regex_replace(r.pattern, r.replacement) -%}
+      {%- set clean.target = clean.target | regex_replace(r.pattern, r.replacement) -%}
+      {%- set clean.ref = clean.ref | regex_replace(r.pattern, r.replacement) -%}
+      {%- endfor -%}
+      {%- set ns.out = ns.out + [{'id': item.id, 'source': item.source | default(evidence_source),
+            'collected_at': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'), 'target': clean.target,
+            'fact': clean.fact | truncate(evidence_fact_limit), 'ref': clean.ref}] -%}
+      {%- endfor -%}
+      {{ ns.out | to_json }}
+
 # Workflow artefacts reach the work note step. Each diagnostic has its own key, so the four, which
 # run in parallel, do not overwrite each other.
 - name: Publish the evidence for the work note step
   ansible.builtin.set_stats:
-    data: "{{ {'diagnostics_evidence_' ~ evidence_diagnostic: evidence_published | from_json} }}"
+    data: "{{ {'diagnostics_evidence_' ~ evidence_diagnostic: evidence_published} }}"
     per_host: false
-  vars:
-    evidence_published: >-
-      {%- set ns = namespace(out=[]) -%}
-      {%- for item in evidence_items[:evidence_max_items] -%}
-      {%- set ns.out = ns.out + [{'id': item.id, 'source': item.source | default(evidence_source),
-            'collected_at': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'), 'target': item.target | default(''),
-            'fact': item.fact | string | truncate(evidence_fact_limit), 'ref': item.ref | default('')}] -%}
-      {%- endfor -%}
-      {{ ns.out | to_json }}
 
 - name: Report
   ansible.builtin.debug:
-    msg: "{{ evidence_items[:evidence_max_items] | map(attribute='id') | zip(evidence_items[:evidence_max_items] | map(attribute='fact') | map('truncate', 200)) | map('join', ': ') | list }}"
+    msg: "{{ evidence_published | map(attribute='id') | zip(evidence_published | map(attribute='fact') | map('truncate', 200)) | map('join', ': ') | list }}"

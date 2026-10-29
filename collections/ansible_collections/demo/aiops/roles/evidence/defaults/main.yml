@@ -9,3 +9,17 @@ evidence_fact_limit: 4000
 # Seconds each call to the cluster or the metrics API may take. The job template's own timeout
 # (60 seconds) is the backstop.
 evidence_call_timeout: 15
+# Redacted from every fact, target and reference before the evidence leaves the job (DD28): tokens,
+# secret values, email addresses and long digit runs such as card numbers. Broader than the service's
+# own patterns, which also check card numbers by Luhn: here a false positive costs only a little evidence.
+evidence_redactions:
+  - pattern: '(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}'
+    replacement: '\1 [REDACTED:token]'
+  - pattern: '\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
+    replacement: '[REDACTED:token]'
+  - pattern: '(?i)\b(password|passwd|pwd|secret|client[_-]?secret|token|api[_-]?key|apikey|access[_-]?key)(\s*[:=]\s*)("[^"]*"|[^\s,;"]+)'
+    replacement: '\1\2[REDACTED:secret]'
+  - pattern: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+    replacement: '[REDACTED:email]'
+  - pattern: '(?<![0-9-])(?:[0-9][ -]?){12,18}[0-9](?![0-9-])'
+    replacement: '[REDACTED:number]'

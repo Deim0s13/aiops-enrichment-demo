@@ -1,8 +1,10 @@
 ---
-# The M2 acceptance checks (design section 9), run any time after a build:
+# The acceptance checks (design section 9), run any time after a build:
 #   ansible-navigator run verify.yml
 # Raises incidents as svc-monitoring and reads the outcome back from ServiceNow. V5 stops the
-# enrichment service for a minute or two and always starts it again: do not run it mid-demo.
+# enrichment service for a minute or two and always starts it again, and V6 to V9 restart payments-notify
+# and run its memory fault with planted log lines: do not run it mid-demo. Takes about ten minutes;
+# -e verify_trust=false skips V6 to V9.
 # The incidents are kept for review, and reset.yml closes them; -e verify_cleanup=true deletes them.
 
 - name: Verify the demo against its acceptance criteria
@@ -18,6 +20,7 @@
       validate_certs: "{{ demo_cluster_validate_certs }}"
       ca_cert: "{{ secrets_cluster_ca_file | default(omit) }}"
     kubernetes.core.k8s_info: *cluster_auth
+    kubernetes.core.k8s_log: *cluster_auth
 
   tasks:
     - name: Resolve the cluster and ServiceNow secrets
@@ -34,3 +37,5 @@
         verify_category: "{{ demo_servicenow.category }}"
         verify_aap_namespace: "{{ demo_namespaces.aap }}"
         verify_enrichment_namespace: "{{ demo_namespaces.enrichment }}"
+        verify_workload_namespace: "{{ demo_namespaces.workload }}"
+        verify_validate_certs: "{{ demo_cluster_validate_certs }}"

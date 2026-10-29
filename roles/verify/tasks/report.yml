@@ -10,6 +10,10 @@
       {%- endfor -%}
       {%- set ns.lines = ns.lines + [('Incidents deleted: ' if verify_cleanup | bool else 'Incidents kept for review (reset.yml closes them): ')
             ~ verify_incidents.values() | map(attribute='number') | join(', ')] -%}
+      {%- if verify_trust_number | default('') -%}
+      {%- set ns.lines = ns.lines + ['Trust checks: ' ~ verify_trust_number ~ ', raised by payments-notify\'s memory fault with planted log lines,'
+            ~ ' is kept to show its note (reset.yml closes it)'] -%}
+      {%- endif -%}
       {{ ns.lines | to_json }}
 
 - name: Delete this run's incidents and their emails

@@ -11,5 +11,9 @@
 - name: "V5: the enrichment service unavailable"
   ansible.builtin.include_tasks: unavailable.yml
 
+- name: "V6 to V9: prompt injection, sensitive data, wrong knowledge, latency and cost"
+  ansible.builtin.include_tasks: trust.yml
+  when: verify_trust | bool
+
 - name: Report and judge
   ansible.builtin.include_tasks: report.yml

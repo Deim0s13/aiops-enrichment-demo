@@ -28,6 +28,10 @@ argument_specs:
       evidence_fact_limit:
         type: int
         description: Longest fact, in characters.
+      evidence_redactions:
+        type: list
+        elements: dict
+        description: Patterns, each with pattern and replacement, redacted from every fact before it is published (DD28).
       evidence_call_timeout:
         type: int
         description: Seconds each call may take.
