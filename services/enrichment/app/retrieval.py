@@ -5,8 +5,8 @@ pod's termination, the log's warnings and the running configuration each point a
 of a runbook, and one long query made of all of them would blur those together (the embedding model
 also reads only the first 512 tokens). A passage scores the best of its matches.
 
-Sections that describe a document rather than say what to do (its Purpose, Scope, Related documents,
-Change history and Timeline) are not searched: they are short and mention every keyword, so they
+Sections that describe a document or its service rather than say what to do (its Purpose, Scope,
+Service overview, Related documents, Change history and Timeline) are not searched: they are short and mention every keyword, so they
 outranked the runbook's Diagnosis and Actions in the first cluster runs, and the model was left
 without the documented fix. Instead, the best-matching runbook brings its Diagnosis and Actions, and
 the best-matching resolution its Root cause and Resolution. A runbook is meant to be followed, not
@@ -28,7 +28,7 @@ MAX_PASSAGES = int(os.environ.get("ENRICHMENT_MAX_PASSAGES", "5"))
 # How many documents of each type bring their actionable sections: the best runbook and the best resolution.
 EXPAND_DOCUMENTS = int(os.environ.get("ENRICHMENT_EXPAND_DOCUMENTS", "1"))
 SKIP_SECTIONS = tuple(s.strip() for s in os.environ.get(
-    "ENRICHMENT_SKIP_SECTIONS", "Purpose,Scope,Related documents,Change history,Timeline").split(",") if s.strip())
+    "ENRICHMENT_SKIP_SECTIONS", "Purpose,Scope,Service overview,Related documents,Change history,Timeline").split(",") if s.strip())
 # The sections that say what to do, by document type, in the order the model should read them.
 ACTIONABLE = {"runbook": ("Diagnosis", "Actions"), "resolution": ("Root cause", "Resolution")}
 PER_QUERY = 5

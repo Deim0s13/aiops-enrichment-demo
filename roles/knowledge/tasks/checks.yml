@@ -63,7 +63,10 @@
       Calibration (report only): a provider throttling question, which no document answers, scores best
       {{ (knowledge_check.calibration | default([]) | first | default({})).score | default('n/a') }}
       ({{ knowledge_check.calibration | default([]) | map(attribute='id') | join(', ') or 'no results' }});
-      the memory fault scores best {{ (knowledge_check.results | default([]) | first | default({})).score | default('n/a') }}
+      the memory fault scores best {{ (knowledge_check.results | default([]) | first | default({})).score | default('n/a') }}.
+      Incident descriptions alone: {{ knowledge_check.descriptions | default({}) | dict2items
+      | map(attribute='key') | zip(knowledge_check.descriptions | default({}) | dict2items | map(attribute='value')
+      | map(attribute='score', default='n/a')) | map('join', ' ') | join(', ') or 'n/a' }}
 
 - name: Stop if a check failed
   ansible.builtin.assert:

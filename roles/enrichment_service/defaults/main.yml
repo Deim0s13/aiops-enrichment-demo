@@ -27,7 +27,9 @@ enrichment_service_relevance_threshold: 0.75
 enrichment_service_max_passages: 5
 enrichment_service_expand_documents: 1
 # Sections that describe a document rather than say what to do are not searched (DD24).
-enrichment_service_skip_sections: [Purpose, Scope, Related documents, Change history, Timeline]
+# Service overview describes the service: the memory runbook's mentions MessageHub, which made it look
+# relevant to the throttling fault (S2, DD26).
+enrichment_service_skip_sections: [Purpose, Scope, Service overview, Related documents, Change history, Timeline]
 enrichment_service_temperature: 0.2
 # Room for the documented fix and the model's suggestions; an answer cut off at the limit is refused.
 enrichment_service_max_tokens: 1600

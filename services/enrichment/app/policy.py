@@ -1,15 +1,17 @@
-"""The service's checks on the model's answer (design 5.3, rules 3 to 5; DD24), version 2.
+"""The service's checks on the model's answer (design 5.3, rules 3 to 5; DD24, DD26), version 3.
 
 The schema already constrains the answer, but a decoder may ignore a keyword it does not support, so
 nothing is taken on trust:
 - the answer must have the schema's fields, of the right kinds (rule 3), or the call fails;
 - a cause or step citing an ID that was not supplied is dropped, and checks_removed says so (rule 4);
 - a recommended job not in the catalogue is dropped (rule 4);
-- a next step that cites no approved passage is not documented, so it becomes a low-trust
-  suggestion to fix, if it cites evidence, rather than passing as the documented fix;
+- the documented fix is for the incident's own failure only: the first likely cause. If no passage
+  documents that cause, there is no documented fix, the answer is insufficient_evidence, and its
+  steps become low-trust suggestions (rule 5, DD26);
+- a next step from a document that does not document the first cause, or from no passage at all, is
+  not the documented fix for this incident, so it becomes a low-trust suggestion, if it can cite
+  evidence;
 - a suggestion may cite only observed evidence, never a passage or a gap, and never carries a job;
-- an "enriched" answer that cites no retrieved passage is not grounded in approved knowledge, so it
-  becomes insufficient_evidence, with its steps kept as suggestions (rule 5);
 - an insufficient_evidence answer has no next steps and no job;
 - manual review is required whenever a diagnostic left a gap, the answer is insufficient, or it
   carries suggestions.
@@ -18,7 +20,7 @@ Change POLICY_VERSION with any change here.
 
 import re
 
-POLICY_VERSION = "policy-v2"
+POLICY_VERSION = "policy-v3"
 # A model sometimes fills a list with a placeholder rather than leaving it empty.
 _PLACEHOLDER = re.compile(r"^(none|none noted|no gaps?|n/?a|nothing)\.?$", re.I)
 
@@ -76,10 +78,18 @@ def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids
             kept.append(clean)
         return kept[:LIMITS[field]]
 
+    raw_causes = [c for c in answer["likely_causes"] if isinstance(c, dict)] if isinstance(answer["likely_causes"], list) else []
     causes = cited(answer["likely_causes"], "likely_causes", ("statement", "confidence"))
     for cause in causes:
         if cause["confidence"] not in CONFIDENCE:
             cause["confidence"] = "low"
+        # The passages the model says document this cause, kept only if they were supplied.
+        raw = next((c for c in raw_causes if str(c.get("statement", "")).strip() == cause["statement"]), {})
+        listed = raw.get("documented_by") if isinstance(raw.get("documented_by"), list) else []
+        cause["documented_by"] = [p for p in dict.fromkeys(listed) if p in passage_ids]
+
+    # The incident's failure is the first cause; its documents are the only source of the documented fix.
+    primary_docs = {_doc(p) for p in causes[0]["documented_by"]} if causes else set()
     steps = cited(answer["next_steps"], "next_steps", ("step", "prerequisites", "risk", "verify"))
 
     # Low-trust suggestions: grounded in what was observed, and nothing else.
@@ -98,13 +108,16 @@ def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids
         suggestions.append({"kind": item.get("kind") if item.get("kind") in KINDS else "investigate",
                             **{k: item[k].strip() for k in keys}, "citations": list(dict.fromkeys(citations))})
 
-    # A step with no approved passage behind it is the model's idea, not the documented fix.
+    # A step with no approved passage behind it is the model's idea, not the documented fix; a step from
+    # a document about another condition is not the documented fix for this incident.
     documented = []
     for step in steps:
-        if set(step["citations"]) & set(passage_ids):
+        step_docs = {_doc(c) for c in step["citations"] if c in passage_ids}
+        if step_docs & primary_docs:
             documented.append(step)
         else:
-            suggestions.append(_as_suggestion(step, observed))
+            other = sorted(step_docs)
+            suggestions.append(_as_suggestion(step, observed, causes, other))
     steps = documented
 
     job = answer["recommended_job"]
@@ -117,12 +130,13 @@ def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids
             job = {"job_id": job["job_id"], "reason": _text(job.get("reason", ""), "recommended_job.reason"),
                    "inputs": {str(k): str(v) for k, v in inputs.items()}}
 
-    grounded = any(set(item["citations"]) & set(passage_ids) for item in causes + steps)
-    if status == "enriched" and not grounded:
+    if status == "enriched" and not (primary_docs and steps):
         status = "insufficient_evidence"
-        knowledge_gaps.append("No cause or step cites an approved runbook or resolution, so there is no documented fix.")
+        knowledge_gaps.append("No approved runbook or resolution addresses the incident's own failure, so there is no "
+                              "documented fix for it.")
     if status == "insufficient_evidence":
-        suggestions += [_as_suggestion(step, observed) for step in steps]
+        suggestions += [_as_suggestion(step, observed, causes, sorted({_doc(c) for c in step["citations"] if c in passage_ids}))
+                        for step in steps]
         steps, job = [], None
     suggestions = [s for s in suggestions if s["citations"]][:LIMITS["suggestions"]]
 
@@ -142,9 +156,23 @@ def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids
     }
 
 
-def _as_suggestion(step: dict, observed: set) -> dict:
-    """A next step without an approved passage behind it, kept as a low-trust suggestion to fix."""
-    reason = " ".join(part for part in (step["prerequisites"] and f"Prerequisites: {step['prerequisites']}",
+def _doc(passage_id: str) -> str:
+    """The document a passage belongs to: KB-RB-014#actions-level-1 is in KB-RB-014."""
+    return passage_id.split("#")[0]
+
+
+def _as_suggestion(step: dict, observed: set, causes: list, documents: list) -> dict:
+    """A next step that is not the documented fix for this incident, kept as a low-trust suggestion
+    to fix. If it came from a document about another condition, the reason says so. It cites the
+    step's evidence or, failing that, the evidence of the cause that document covers."""
+    source = (f"Documented in {', '.join(documents)} for another condition, not for this incident's failure."
+              if documents else "")
+    reason = " ".join(part for part in (source, step["prerequisites"] and f"Prerequisites: {step['prerequisites']}",
                                         step["verify"] and f"Verify: {step['verify']}") if part)
-    return {"kind": "fix", "action": step["step"], "reason": reason, "risk": step["risk"],
-            "citations": [c for c in step["citations"] if c in observed]}
+    citations = [c for c in step["citations"] if c in observed]
+    if not citations and documents:
+        for cause in causes:
+            if {_doc(p) for p in cause.get("documented_by", [])} & set(documents):
+                citations = [c for c in cause["citations"] if c in observed]
+                break
+    return {"kind": "fix", "action": step["step"], "reason": reason, "risk": step["risk"], "citations": citations}

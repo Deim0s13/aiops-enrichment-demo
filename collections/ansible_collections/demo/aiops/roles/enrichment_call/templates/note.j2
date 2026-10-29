@@ -18,7 +18,7 @@ Symptoms:
 {% endfor %}
 {% endif %}
 {% for c in a.likely_causes %}
-Likely cause ({{ c.confidence | default('unknown') }}): {{ c.statement }} [{{ c.citations | join(', ') }}]
+Likely cause ({{ c.confidence | default('unknown') }}): {{ c.statement }} [{{ c.citations | join(', ') }}]{{ (' Documented in: ' ~ (c.documented_by | map('regex_replace', '#.*$', '') | unique | join(', ')) ~ '.') if c.documented_by | default([]) else '' }}
 {% endfor %}
 {% if a.next_steps %}
 Next steps (documented fix, from approved knowledge):

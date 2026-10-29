@@ -291,10 +291,10 @@ What it does (role `knowledge`, DD21):
    - the read-only identity sees only approved, internal passages, whatever it asks for
    - it cannot change the index
    - a search for the memory fault, for `payments-notify` 2.4.1, finds the current runbook or a past resolution first, and never the superseded runbook, the restricted document or another service's resolution
-6. **Reports a calibration measurement**, which is never judged: the best score of a provider throttling question, which no document answers (scenario S2), beside the memory fault's best score. The enrichment service's relevance threshold belongs between the two, and is set from this line in M4.7:
+6. **Reports a calibration measurement**, which is never judged: the best score of a provider throttling question, which no document answers (scenario S2), beside the memory fault's best score. The enrichment service's relevance threshold belongs between the two (it is 0.75, set from this line in M4.7). The last part shows how close each scenario's incident description comes to the knowledge base on its own (DD26):
 
    ```text
-   Calibration (report only): a provider throttling question, which no document answers, scores best 0.78 (KB-RB-014#service-overview, ...); the memory fault scores best 0.87
+   Calibration (report only): a provider throttling question, which no document answers, scores best 0.70 (KB-RB-017#symptoms, ...); the memory fault scores best 0.87. Incident descriptions alone: memory ..., throttling ...
    ```
 
 ## 10 Phase 06: enrichment service

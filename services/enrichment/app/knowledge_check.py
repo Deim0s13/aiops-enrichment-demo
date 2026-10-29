@@ -29,6 +29,12 @@ CALIBRATION_QUERY = os.environ.get(
     "HTTP 429 Too Many Requests from MessageHub, rate limit exceeded, notification delivery retried "
     "with back-off, customer confirmations delayed",
 )
+# Each scenario's incident description, as its alert states it and without the service's name: how
+# close each comes to the knowledge base on its own, reported only (DD26).
+DESCRIPTIONS = {
+    "memory": "was terminated for exceeding its memory limit (OOMKilled) and restarted",
+    "throttling": "customer confirmations are queuing: MessageHub is refusing deliveries",
+}
 SERVICE = os.environ.get("KNOWLEDGE_CHECK_SERVICE", "payments-notify")
 VERSION = os.environ.get("KNOWLEDGE_CHECK_VERSION", "2.4.1")
 
@@ -43,6 +49,11 @@ def main() -> None:
         calibration = knowledge.search(conn, embedder.query(CALIBRATION_QUERY), SERVICE, VERSION, limit=3,
                                        skip_sections=retrieval.SKIP_SECTIONS)
         report["calibration"] = [{"id": r["id"], "score": round(float(r["score"]), 3)} for r in calibration]
+        report["descriptions"] = {}
+        for name, text in DESCRIPTIONS.items():
+            found = knowledge.search(conn, embedder.query(text), SERVICE, VERSION, limit=1,
+                                     skip_sections=retrieval.SKIP_SECTIONS)
+            report["descriptions"][name] = {"id": found[0]["id"], "score": round(float(found[0]["score"]), 3)} if found else {}
         # What this identity can see at all, with no filter in the query: the database decides.
         report["visible"] = dict(conn.execute(
             "SELECT status || '/' || access, count(*) FROM passages GROUP BY 1").fetchall())
