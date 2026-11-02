@@ -1,4 +1,4 @@
-"""The service's checks on the model's answer (design 5.3, rules 3 to 5; DD24, DD26), version 4.
+"""The service's checks on the model's answer (design 5.3, rules 3 to 5; DD24, DD26, DD29), version 5.
 
 The schema already constrains the answer, but a decoder may ignore a keyword it does not support, so
 nothing is taken on trust:
@@ -11,7 +11,12 @@ nothing is taken on trust:
 - a next step from a document that does not document the first cause, or from no passage at all, is
   not the documented fix for this incident, so it becomes a low-trust suggestion, if it can cite
   evidence;
-- a suggestion may cite only observed evidence, never a passage or a gap, and never carries a job;
+- a suggestion may cite only observed evidence or the vendor documentation researched for this
+  request, never a passage or a gap, and never carries a job; one that cites the research is a
+  researched fix (basis "research"), any other is the model's own idea (basis "evidence");
+- a URL or phone number the model wrote that is not in the request is removed: a step naming one is
+  dropped, and anywhere else it is replaced, and checks_removed says so. A made-up contact is the
+  most harmful thing a model can invent for an engineer under pressure;
 - an insufficient_evidence answer has no next steps and no job;
 - manual review is required whenever a diagnostic left a gap, the answer is insufficient, or it
   carries suggestions.
@@ -21,14 +26,49 @@ Change POLICY_VERSION with any change here.
 
 import re
 
-POLICY_VERSION = "policy-v4"
+POLICY_VERSION = "policy-v5"
 # A model sometimes fills a list with a placeholder rather than leaving it empty.
 _PLACEHOLDER = re.compile(r"^(none|none noted|no gaps?|n/?a|nothing)\.?$", re.I)
 
 # A gap that only says there is no documented fix, which the service states itself when it is so.
 _NO_FIX = re.compile(r"\bno (approved|documented|relevant)\b.*\b(runbook|resolution|fix|knowledge|passage)", re.I)
 
-LIMITS = {"symptoms": 6, "likely_causes": 3, "next_steps": 5, "suggestions": 4, "gaps": 8}
+LIMITS = {"symptoms": 6, "likely_causes": 3, "next_steps": 5, "suggestions": 4, "steps": 4, "gaps": 8}
+
+# Contacts and addresses a model might invent: URLs, and phone numbers written in groups of digits.
+_URL = re.compile(r"\b(?:https?://|www\.)[^\s)\]>\"']+", re.I)
+_PHONE = re.compile(r"(?<![\w.:/-])(?:\+\d{1,3} ?)?\(?\d{1,4}\)?(?: \d{2,4}){2,3}(?![\w:/-]|\.\d)")
+REMOVED = "[removed: not in the sources]"
+
+
+def _contacts(text: str) -> set[str]:
+    """The URLs and phone numbers in a text, normalised so the same one written differently matches."""
+    found = {u.rstrip(".,;:").lower() for u in _URL.findall(text or "")}
+    found |= {re.sub(r"\D", "", p) for p in _PHONE.findall(text or "") if len(re.sub(r"\D", "", p)) >= 8}
+    return found
+
+
+class _Scrubber:
+    """Removes contacts that are not in the request, and counts them."""
+
+    def __init__(self, sources_text: str):
+        self.allowed = _contacts(sources_text)
+        self.removed = 0
+
+    def invented(self, text: str) -> bool:
+        return bool(_contacts(text) - self.allowed)
+
+    def clean(self, text: str) -> str:
+        def keep(match: re.Match) -> str:
+            value = match.group(0)
+            key = value.rstrip(".,;:").lower() if _URL.fullmatch(value) else re.sub(r"\D", "", value)
+            if _PHONE.fullmatch(value) and len(key) < 8:
+                return value
+            if key in self.allowed:
+                return value
+            self.removed += 1
+            return REMOVED
+        return _PHONE.sub(keep, _URL.sub(keep, text))
 KINDS = ("investigate", "fix")
 CONFIDENCE = ("high", "medium", "low")
 
@@ -50,7 +90,7 @@ def _texts(value, field: str) -> list[str]:
 
 
 def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids: list[str],
-          diagnostic_gaps: int) -> dict:
+          diagnostic_gaps: int, research_ids: list[str] | None = None, sources_text: str = "") -> dict:
     required = ("status", "summary", "symptoms", "likely_causes", "next_steps", "suggestions", "recommended_job", "gaps",
                 "manual_review_required")
     missing = [f for f in required if f not in answer]
@@ -60,7 +100,9 @@ def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids
     if status not in ("enriched", "insufficient_evidence"):
         raise AnswerError(f"status {status!r} is not allowed")
 
-    known = set(evidence_ids) | set(passage_ids)
+    research_ids = list(research_ids or [])
+    known = set(evidence_ids) | set(passage_ids) | set(research_ids)
+    scrub = _Scrubber(sources_text)
     # What the checks removed, reported apart from the gaps, which are about the evidence.
     notes: list[str] = []
     knowledge_gaps: list[str] = []
@@ -96,8 +138,9 @@ def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids
     primary_docs = {_doc(p) for p in causes[0]["documented_by"]} if causes else set()
     steps = cited(answer["next_steps"], "next_steps", ("step", "prerequisites", "risk", "verify"))
 
-    # Low-trust suggestions: grounded in what was observed, and nothing else.
+    # Suggestions: grounded in what was observed or in the research, and nothing else.
     observed = {i for i in evidence_ids if not i.endswith("-GAP")}
+    grounds = observed | set(research_ids)
     if not isinstance(answer["suggestions"], list):
         raise AnswerError("suggestions is not a list")
     suggestions = []
@@ -105,12 +148,23 @@ def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids
         keys = ("action", "reason", "risk")
         if not isinstance(item, dict) or not all(isinstance(item.get(k), str) for k in keys):
             raise AnswerError("an item in suggestions does not have the schema's fields")
-        citations = [c for c in item.get("citations") or [] if c in observed]
+        citations = [c for c in item.get("citations") or [] if c in grounds]
         if not citations or not item["action"].strip():
-            notes.append("One suggestion was left out: it cited no observed evidence.")
+            notes.append("One suggestion was left out: it cited neither observed evidence nor the research.")
             continue
+        how = []
+        for line in item.get("steps") if isinstance(item.get("steps"), list) else []:
+            if not isinstance(line, str) or not line.strip():
+                continue
+            if scrub.invented(line):
+                scrub.removed += 1
+                continue
+            how.append(line.strip())
         suggestions.append({"kind": item.get("kind") if item.get("kind") in KINDS else "investigate",
-                            **{k: item[k].strip() for k in keys}, "citations": list(dict.fromkeys(citations))})
+                            **{k: item[k].strip() for k in keys}, "steps": how[:LIMITS["steps"]],
+                            "owner": str(item.get("owner") or "").strip(), "verify": str(item.get("verify") or "").strip(),
+                            "basis": "research" if set(citations) & set(research_ids) else "evidence",
+                            "citations": list(dict.fromkeys(citations))})
 
     # A step with no approved passage behind it is the model's idea, not the documented fix; a step from
     # a document about another condition is not the documented fix for this incident.
@@ -142,12 +196,29 @@ def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids
         suggestions += [_as_suggestion(step, observed, causes, sorted({_doc(c) for c in step["citations"] if c in passage_ids}))
                         for step in steps]
         steps, job = [], None
-    suggestions = [s for s in suggestions if s["citations"]][:LIMITS["suggestions"]]
+    suggestions = [s for s in suggestions if s["citations"]]
+    # Researched fixes first: they rest on the vendor's documentation, the others on the evidence alone.
+    suggestions = sorted(suggestions, key=lambda s: s["basis"] != "research")[:LIMITS["suggestions"]]
 
-    gaps = merge_gaps(knowledge_gaps, [g for g in _texts(answer["gaps"], "gaps") if not _PLACEHOLDER.match(g)])
+    # Contacts the request did not contain are removed from everything the engineer will read.
+    for item in causes:
+        item["statement"] = scrub.clean(item["statement"])
+    for item in steps:
+        for k in ("step", "prerequisites", "risk", "verify"):
+            item[k] = scrub.clean(item[k])
+    for item in suggestions:
+        for k in ("action", "reason", "risk", "owner", "verify"):
+            item[k] = scrub.clean(item[k])
+    if job is not None:
+        job["reason"] = scrub.clean(job["reason"])
+    if scrub.removed:
+        notes.append(f"{scrub.removed} URL(s), phone number(s) or step(s) naming one were removed: they were not in the "
+                     "evidence, the approved knowledge or the research, so the model made them up.")
+
+    gaps = merge_gaps(knowledge_gaps, [scrub.clean(g) for g in _texts(answer["gaps"], "gaps") if not _PLACEHOLDER.match(g)])
     return {
         "status": status,
-        "summary": _text(answer["summary"], "summary"),
+        "summary": scrub.clean(_text(answer["summary"], "summary")),
         "symptoms": _texts(answer["symptoms"], "symptoms")[:LIMITS["symptoms"]],
         "likely_causes": causes,
         "next_steps": steps,
@@ -171,15 +242,15 @@ def _as_suggestion(step: dict, observed: set, causes: list, documents: list) -> 
     step's evidence or, failing that, the evidence of the cause that document covers."""
     source = (f"Documented in {', '.join(documents)} for another condition, not for this incident's failure."
               if documents else "")
-    reason = " ".join(part for part in (source, step["prerequisites"] and f"Prerequisites: {step['prerequisites']}",
-                                        step["verify"] and f"Verify: {step['verify']}") if part)
+    reason = " ".join(part for part in (source, step["prerequisites"] and f"Prerequisites: {step['prerequisites']}") if part)
     citations = [c for c in step["citations"] if c in observed]
     if not citations and documents:
         for cause in causes:
             if {_doc(p) for p in cause.get("documented_by", [])} & set(documents):
                 citations = [c for c in cause["citations"] if c in observed]
                 break
-    return {"kind": "fix", "action": step["step"], "reason": reason, "risk": step["risk"], "citations": citations}
+    return {"kind": "fix", "action": step["step"], "reason": reason, "steps": [], "owner": "", "verify": step["verify"],
+            "risk": step["risk"], "basis": "evidence", "citations": citations}
 
 
 def merge_gaps(service_gaps: list[str], model_gaps: list[str]) -> list[str]:

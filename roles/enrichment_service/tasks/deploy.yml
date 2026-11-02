@@ -86,6 +86,51 @@
     namespace: "{{ enrichment_service_namespace }}"
     name: "{{ enrichment_service_name }}-mlflow"
 
+# Research (DD29): the vendor documentation the service may read when no approved knowledge covers a
+# failure. An allow-list from the inventory; each source's site is the route phase 05 publishes.
+- name: Find the enabled research sources' sites
+  kubernetes.core.k8s_info:
+    api_version: route.openshift.io/v1
+    kind: Route
+    namespace: "{{ item.route.namespace }}"
+    name: "{{ item.route.name }}"
+  loop: "{{ enrichment_service_research_enabled }}"
+  loop_control:
+    label: "{{ item.id }}"
+  register: enrichment_service_research_routes
+  until: enrichment_service_research_routes is not failed
+  retries: 3
+  delay: 5
+  vars: &research_enabled
+    enrichment_service_research_enabled: >-
+      {{ enrichment_service_research_sources | selectattr('enabled', 'defined') | selectattr('enabled') | list
+         if enrichment_service_research | bool else [] }}
+
+- name: Keep each source's allow-listed site
+  ansible.builtin.set_fact:
+    enrichment_service_research_sources_resolved: "{{ enrichment_service_research_json | from_json }}"
+  vars:
+    enrichment_service_research_json: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for r in enrichment_service_research_routes.results | default([]) -%}
+      {%- if r.resources | default([]) | length > 0 and r.resources[0].spec.host | default('') -%}
+      {%- set ns.out = ns.out + [{'id': r.item.id, 'name': r.item.name, 'services': r.item.services,
+            'match': r.item.match | default([r.item.name]),
+            'sitemap': 'https://' ~ r.resources[0].spec.host ~ '/' ~ r.item.sitemap_path | default('sitemap.xml')}] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ ns.out | to_json }}
+
+- name: Stop if an enabled research source has no site
+  ansible.builtin.assert:
+    that: enrichment_service_research_sources_resolved | length == enrichment_service_research_enabled | length
+    fail_msg: >-
+      Research source(s) {{ enrichment_service_research_enabled | map(attribute='id')
+      | difference(enrichment_service_research_sources_resolved | map(attribute='id')) | join(', ') }} have no published site.
+      Run phase 05 first, which publishes MessageHub's documentation, or set enabled to false in demo_research_sources.
+    quiet: true
+  vars: *research_enabled
+
 - name: Deploy the service, its TLS-serving address and its network policies
   kubernetes.core.k8s:
     state: present
@@ -156,6 +201,16 @@
                       value: "{{ enrichment_service_temperature | string }}"
                     - name: ENRICHMENT_MAX_TOKENS
                       value: "{{ enrichment_service_max_tokens | string }}"
+                    # Research (DD29): the allow-listed vendor documentation, its relevance floor and how
+                    # many sections go to the model.
+                    - name: ENRICHMENT_RESEARCH
+                      value: "{{ 'on' if enrichment_service_research | bool else 'off' }}"
+                    - name: ENRICHMENT_RESEARCH_SOURCES
+                      value: "{{ enrichment_service_research_sources_resolved | to_json }}"
+                    - name: ENRICHMENT_RESEARCH_THRESHOLD
+                      value: "{{ enrichment_service_research_threshold | string }}"
+                    - name: ENRICHMENT_RESEARCH_MAX_SECTIONS
+                      value: "{{ enrichment_service_research_max_sections | string }}"
                     # The read-only knowledge identity (phase 05), and the service CA to verify the database.
                     - name: KNOWLEDGE_DB_HOST
                       valueFrom: { secretKeyRef: { name: "{{ enrichment_service_knowledge_secret }}", key: host } }
@@ -306,6 +361,11 @@
         Image: {{ 'built from commit ' ~ enrichment_service_commit[:12] if enrichment_service_built else
                   'already built for commit ' ~ enrichment_service_commit[:12] }}; {{ enrichment_service_image }}
       - "Service: {{ enrichment_service_url }}, TLS from the service CA; callers only from {{ enrichment_service_caller_namespace }}"
+      - >-
+        Research (DD29): {{ (enrichment_service_research_sources_resolved | map(attribute='name')
+        | zip(enrichment_service_research_sources_resolved | map(attribute='sitemap')) | map('join', ' at ') | join('; '))
+        if enrichment_service_research_sources_resolved | length > 0 else 'off, no sources enabled' }}; floor
+        {{ enrichment_service_research_threshold }}, at most {{ enrichment_service_research_max_sections }} sections
       - >-
         API token: {{ 'generated' if enrichment_service_token_new else 'reused' }}, in
         {{ enrichment_service_namespace }}/{{ enrichment_service_token_secret }} and

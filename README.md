@@ -52,6 +52,7 @@ aiops-enrichment-demo/
 │   ├── enrichment/                   enrichment service source, built in-cluster
 │   └── payments-notify/              sample service with a reproducible fault
 ├── knowledge/                        synthetic runbooks and prior resolutions, with approval metadata
+├── vendor-docs/                      a fictional vendor's public documentation, which enrichment may research
 └── docs/
 ```
 

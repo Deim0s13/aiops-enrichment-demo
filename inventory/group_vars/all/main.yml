@@ -30,6 +30,8 @@ demo_namespaces:
   models: aiops-models
   data: aiops-data
   aap: aap
+  # MessageHub's fictional documentation site (DD29), standing for the outside world.
+  vendor_docs: vendor-messagehub
 
 # The repository AAP syncs as its project (phase 07, DD16). Private, so AAP reads it with a
 # fine-grained, read-only token from Vault (source/github_token).
@@ -88,6 +90,18 @@ demo_enrichment_catalogue:
     description: >-
       Fail the payments database over to its standby. High risk: interrupts every payments service for
       up to two minutes. Use only for a confirmed primary database failure.
+
+# Vendor documentation the enrichment service may research when no approved knowledge covers a failure
+# (DD29). An allow-list, per service: a source is read only for these services, and only when the
+# evidence names it (match). Its site is the route that publishes it; MessageHub's is phase 05's
+# stand-in for its public documentation. enabled: false takes a source off the list.
+demo_research_sources:
+  - id: messagehub
+    name: MessageHub
+    services: [payments-notify]
+    match: [MessageHub]
+    enabled: true
+    route: { namespace: "{{ demo_namespaces.vendor_docs }}", name: messagehub-docs }
 
 # Container images (DD12). Pinned; the build never pulls latest.
 demo_images:

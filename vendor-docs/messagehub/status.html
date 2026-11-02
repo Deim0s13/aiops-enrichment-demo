@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Status and incidents | MessageHub Docs</title>
+<meta name="last-updated" content="2026-09-30"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font-family:system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;line-height:1.5;color:#1d2433}
+header,footer{color:#5b6475;font-size:.9rem}nav a{margin-right:1rem}code{background:#eef1f6;padding:0 .25rem}
+h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:2rem}</style></head>
+<body><header><strong>MessageHub Docs</strong> (fictional, for the ACME Bank demonstration) <nav><a href="index.html">Home</a> <a href="rate-limits.html">Rate limits</a> <a href="retries.html">Handling 429</a> <a href="limit-increase.html">Higher limits</a> <a href="status.html">Status and incidents</a> <a href="support.html">Support</a></nav></header>
+<main><h1>Status and incidents</h1><p>How MessageHub announces incidents, and what changes for clients during one.</p>
+<section id="status-page"><h2>Status page</h2><p>Incidents and maintenance are announced on the MessageHub status page, status.messagehub.example, by region and channel. Customers can subscribe to updates for their region. Check it first when many requests fail at once.</p></section>
+<section id="degraded-mode"><h2>Degraded mode</h2><p>To protect delivery for all customers during an incident, MessageHub may reduce every client's limit in a region to 50% (degraded mode). Responses in degraded mode carry the header <code>X-MessageHub-Degraded: true</code>, and the status page names the affected region. Limits return to normal when the incident is resolved; limit increases are not granted during degraded mode.</p></section>
+<section id="what-to-do"><h2>What to do during an incident</h2><p>Pace sends to the reduced limit, honour <code>Retry-After</code>, and hold messages in your own queue. Do not open limit-increase requests; if the incident affects your production service, open a Priority 1 support case referencing the status page incident.</p></section>
+</main>
+<footer>Last updated 2026-09-30. MessageHub is a fictional messaging provider.</footer></body></html>

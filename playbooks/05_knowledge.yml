@@ -1,7 +1,8 @@
 ---
 # Phase 05: the knowledge index (design 5.6, DD21). A database with pgvector in the shared PostgreSQL,
 # loaded with the corpus as merged on the repository's main branch, and proved as the read-only
-# identity the enrichment service will use.
+# identity the enrichment service will use. Then MessageHub's documentation site (DD29), which the
+# service may research when no approved knowledge covers a failure.
 #   ansible-navigator run playbooks/05_knowledge.yml
 #
 # Run phase 02 (PostgreSQL) first, and push changes to knowledge/ and services/enrichment: the
@@ -39,6 +40,13 @@
         knowledge_postgres_image: "{{ demo_images.postgresql }}"
         knowledge_repository: "{{ demo_repository }}"
 
+    - name: Serve MessageHub's documentation site, which the service may research (DD29)
+      ansible.builtin.include_role:
+        name: vendor_docs
+      vars:
+        vendor_docs_namespace: "{{ demo_namespaces.vendor_docs }}"
+        vendor_docs_validate_certs: "{{ demo_cluster_validate_certs }}"
+
     - name: Report what phase 05 found and changed
       ansible.builtin.debug:
-        msg: "{{ knowledge_report }}"
+        msg: "{{ knowledge_report + vendor_docs_report }}"

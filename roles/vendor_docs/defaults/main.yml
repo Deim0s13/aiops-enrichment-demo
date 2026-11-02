@@ -1,0 +1,14 @@
+---
+# Phase 05: MessageHub's documentation site (DD29), the vendor documentation the enrichment service
+# may research when no approved knowledge covers a failure. MessageHub is fictional, so its pages are
+# served in the cluster, in a namespace of their own, and reached only through the cluster's router, as
+# an outside site would be.
+vendor_docs_name: messagehub-docs
+# The pages, from this repository. They stand for a vendor's public site, not ACME's approved knowledge,
+# so they are published from the laptop's copy rather than read from main like the corpus.
+vendor_docs_source: "{{ role_path }}/../../vendor-docs/messagehub"
+# Serves the pages with Python's own web server: the same image the build checks use, so no new image.
+vendor_docs_image: registry.access.redhat.com/ubi9/python-312:9.8-1791998425
+vendor_docs_port: 8080
+vendor_docs_validate_certs: true
+vendor_docs_checks: true

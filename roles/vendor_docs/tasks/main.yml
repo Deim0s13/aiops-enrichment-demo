@@ -1,0 +1,165 @@
+---
+- name: Create the namespace and the route, so the site's address is known
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      - apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: "{{ vendor_docs_namespace }}"
+          labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: vendor-docs }
+      - apiVersion: route.openshift.io/v1
+        kind: Route
+        metadata:
+          name: "{{ vendor_docs_name }}"
+          namespace: "{{ vendor_docs_namespace }}"
+          labels: { app: "{{ vendor_docs_name }}", app.kubernetes.io/part-of: aiops-enrichment-demo }
+        spec:
+          to: { kind: Service, name: "{{ vendor_docs_name }}" }
+          port: { targetPort: http }
+          tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+
+- name: Read the route's host
+  kubernetes.core.k8s_info:
+    api_version: route.openshift.io/v1
+    kind: Route
+    namespace: "{{ vendor_docs_namespace }}"
+    name: "{{ vendor_docs_name }}"
+  register: vendor_docs_route
+  until: vendor_docs_route is not failed and (vendor_docs_route.resources | first | default({})).spec.host | default('') | length > 0
+  retries: 6
+  delay: 5
+
+- name: Keep the host and the pages
+  ansible.builtin.set_fact:
+    vendor_docs_host: "{{ vendor_docs_route.resources[0].spec.host }}"
+    vendor_docs_pages: "{{ query('ansible.builtin.fileglob', vendor_docs_source ~ '/*.html') | map('basename') | sort | list }}"
+
+- name: Stop if there are no pages to serve
+  ansible.builtin.assert:
+    that: vendor_docs_pages | length > 0
+    fail_msg: "No pages found in {{ vendor_docs_source }}."
+    quiet: true
+
+- name: Serve the pages and their sitemap, reachable only through the router
+  kubernetes.core.k8s:
+    state: present
+    apply: true
+    definition:
+      - apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: "{{ vendor_docs_name }}"
+          namespace: "{{ vendor_docs_namespace }}"
+          labels: { app: "{{ vendor_docs_name }}", app.kubernetes.io/part-of: aiops-enrichment-demo }
+        data: "{{ vendor_docs_files }}"
+      - apiVersion: v1
+        kind: Service
+        metadata:
+          name: "{{ vendor_docs_name }}"
+          namespace: "{{ vendor_docs_namespace }}"
+          labels: { app: "{{ vendor_docs_name }}", app.kubernetes.io/part-of: aiops-enrichment-demo }
+        spec:
+          selector: { app: "{{ vendor_docs_name }}" }
+          ports:
+            - { name: http, port: 8080, targetPort: "{{ vendor_docs_port }}" }
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: "{{ vendor_docs_name }}"
+          namespace: "{{ vendor_docs_namespace }}"
+          labels: { app: "{{ vendor_docs_name }}", app.kubernetes.io/part-of: aiops-enrichment-demo }
+        spec:
+          replicas: 1
+          selector:
+            matchLabels: { app: "{{ vendor_docs_name }}" }
+          template:
+            metadata:
+              labels: { app: "{{ vendor_docs_name }}" }
+              # A change to the pages rolls the server, so it never serves an old copy.
+              annotations: { checksum/pages: "{{ vendor_docs_files | to_json | hash('sha256') }}" }
+            spec:
+              automountServiceAccountToken: false
+              containers:
+                - name: web
+                  image: "{{ vendor_docs_image }}"
+                  command: [python3, -m, http.server, "{{ vendor_docs_port | string }}", --directory, /srv/site]
+                  ports:
+                    - { name: http, containerPort: "{{ vendor_docs_port }}" }
+                  readinessProbe:
+                    httpGet: { path: /sitemap.xml, port: "{{ vendor_docs_port }}" }
+                    periodSeconds: 10
+                  volumeMounts:
+                    - { name: site, mountPath: /srv/site, readOnly: true }
+                  resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 200m, memory: 128Mi } }
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    readOnlyRootFilesystem: true
+                    runAsNonRoot: true
+                    capabilities: { drop: [ALL] }
+                    seccompProfile: { type: RuntimeDefault }
+              volumes:
+                - name: site
+                  configMap: { name: "{{ vendor_docs_name }}" }
+      # As an outside site: the router may reach it, nothing else in the cluster.
+      - apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-router-only
+          namespace: "{{ vendor_docs_namespace }}"
+          labels: { app.kubernetes.io/part-of: aiops-enrichment-demo }
+        spec:
+          podSelector: {}
+          policyTypes: [Ingress]
+          ingress:
+            # The router's namespace, and the host network for routers that run on it.
+            - from:
+                - namespaceSelector:
+                    matchLabels: { network.openshift.io/policy-group: ingress }
+                - namespaceSelector:
+                    matchLabels: { policy-group.network.openshift.io/host-network: "" }
+  vars:
+    vendor_docs_files: "{{ vendor_docs_files_json | from_json }}"
+    vendor_docs_files_json: >-
+      {%- set ns = namespace(files={'sitemap.xml': lookup('ansible.builtin.template', 'sitemap.xml.j2')}) -%}
+      {%- for page in vendor_docs_pages -%}
+      {%- set ns.files = ns.files | combine({page: lookup('ansible.builtin.file', vendor_docs_source ~ '/' ~ page)}) -%}
+      {%- endfor -%}
+      {{ ns.files | to_json }}
+
+- name: Wait for the site to be ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ vendor_docs_namespace }}"
+    name: "{{ vendor_docs_name }}"
+  register: vendor_docs_deployment
+  until: >-
+    vendor_docs_deployment is not failed
+    and ((vendor_docs_deployment.resources | first | default({})).status | default({})).updatedReplicas | default(0) >= 1
+    and ((vendor_docs_deployment.resources | first | default({})).status | default({})).readyReplicas | default(0) >= 1
+    and ((vendor_docs_deployment.resources | first | default({})).status | default({})).replicas | default(0) == 1
+  retries: 30
+  delay: 5
+  no_log: true
+
+- name: Prove the site through its route, as the service will reach it
+  ansible.builtin.uri:
+    url: "https://{{ vendor_docs_host }}/{{ item }}"
+    validate_certs: "{{ vendor_docs_validate_certs }}"
+    return_content: true
+  loop: [sitemap.xml, rate-limits.html]
+  register: vendor_docs_check
+  until: vendor_docs_check is not failed
+  retries: 12
+  delay: 5
+  when: vendor_docs_checks | bool
+
+- name: Report the site
+  ansible.builtin.set_fact:
+    vendor_docs_report:
+      - >-
+        Vendor documentation: MessageHub's site at https://{{ vendor_docs_host }}/, {{ vendor_docs_pages | length }} pages
+        ({{ vendor_docs_pages | join(', ') }}), in {{ vendor_docs_namespace }}, reachable only through the router;
+        {{ ('sitemap lists ' ~ (vendor_docs_check.results[0].content | regex_findall('<loc>') | length) ~ ' pages through the route')
+           if vendor_docs_checks | bool else 'not checked' }}

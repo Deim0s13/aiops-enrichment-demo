@@ -74,6 +74,21 @@ argument_specs:
       enrichment_service_validate_certs:
         type: bool
         description: Verify the certificate of MLflow's external address when the checks read a trace back.
+      enrichment_service_research:
+        type: bool
+        description: Let the service research allow-listed vendor documentation when no approved knowledge covers a failure (DD29).
+      enrichment_service_research_sources:
+        type: list
+        elements: dict
+        description: >-
+          The allow-list, from demo_research_sources: each with id, name, services, match, enabled, and the route
+          (namespace and name) that publishes its site.
+      enrichment_service_research_threshold:
+        type: float
+        description: The relevance floor for a documentation section to reach the model.
+      enrichment_service_research_max_sections:
+        type: int
+        description: The most documentation sections sent to the model.
       enrichment_service_checks:
         type: bool
         description: Check the service from inside the cluster.

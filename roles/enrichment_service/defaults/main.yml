@@ -35,8 +35,18 @@ enrichment_service_expand_documents: 1
 # relevant to the throttling fault (S2, DD26).
 enrichment_service_skip_sections: [Purpose, Scope, Service overview, Related documents, Change history, Timeline]
 enrichment_service_temperature: 0.2
-# Room for the documented fix and the model's suggestions; an answer cut off at the limit is refused.
-enrichment_service_max_tokens: 1600
+# Room for the documented fix and the model's suggestions, now with steps; an answer cut off at the
+# limit is refused.
+enrichment_service_max_tokens: 2000
+# Research (DD29): when no approved knowledge covers a failure, the service may read the vendor
+# documentation of a dependency the evidence names, from this allow-list (the inventory's
+# demo_research_sources). Sections are ranked with the knowledge's embedding model; those at or above
+# the floor, at most this many, go to the model. Not yet calibrated against the real model: phase 06
+# reports the scores of its research check.
+enrichment_service_research: true
+enrichment_service_research_sources: []
+enrichment_service_research_threshold: 0.60
+enrichment_service_research_max_sections: 4
 # Tracing (M4.5, DD23): every request is traced in OpenShift AI's MLflow, in this experiment in the
 # workspace of the service's namespace. Best effort: if MLflow is down, enrichment carries on and the
 # note says the trace was not recorded.
@@ -52,3 +62,5 @@ enrichment_service_ready_delay: 10
 # The image the in-cluster checks run in: the same base as the service, so it is already on the node.
 enrichment_service_check_image: registry.access.redhat.com/ubi9/python-312:9.8-1791998425
 enrichment_service_checks: true
+# This checkout's copy of the service, to compare its versions with the running service's.
+enrichment_service_source: "{{ role_path }}/../../services/enrichment"

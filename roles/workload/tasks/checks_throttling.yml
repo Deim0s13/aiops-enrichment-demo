@@ -3,8 +3,9 @@
 # check starts from a fresh pod, so the memory fault just proved leaves no restart or log behind for
 # the diagnostics to find, triggers the fault from the AAP namespace, waits for its critical alert,
 # its own incident and the enrichment, then clears the fault. The note must say there is no
-# documented fix, give no next steps and no job, and give only low-trust suggestions. Appends its
-# results to workload_results. Takes about five minutes.
+# documented fix, give no next steps and no job, and give fixes researched in MessageHub's
+# documentation (DD29), each citing the page it comes from, and no other advice it can label as
+# approved. Appends its results to workload_results. Takes about five minutes.
 
 - name: Name the throttling problem, as the integration stand-in correlates it
   ansible.builtin.set_fact:
@@ -94,6 +95,9 @@
     inc: "{{ workload_throttling_incident.record | default([]) | first | default({}) }}"
     note: "{{ (workload_throttling_note.record | default([]) | first | default({})).value | default('') }}"
     suggestions: "{{ note.count('[Investigate]') + note.count('[Possible fix]') }}"
+    researched: >-
+      {{ note.split('Researched fixes (from')[1].split('Suggestions from the model')[0].split('Recommended automation')[0]
+         if 'Researched fixes (from' in note else '' }}
     workload_throttling_results:
       - check: "S2: the throttling fault starts, and its alert fires (PaymentsNotifyDeliveryThrottled)"
         passed: >-
@@ -116,6 +120,15 @@
           enrichment state {{ inc.u_ai_enrichment_state | default('', true) or 'empty' }};
           {{ note | regex_search('Outcome: [^|]*') | default('no outcome', true) | trim }};
           {{ note | regex_search('Recommended automation: [a-z0-9-]+') | default('no automation line', true) }}
-      - check: "S2: the model's suggestions are given, labelled low trust, each citing evidence"
-        passed: "{{ suggestions | int > 0 and 'LOW TRUST' in note }}"
+      - check: "S2: suggestions are given, each labelled as not approved by ACME"
+        passed: "{{ suggestions | int > 0 and ('LOW TRUST' in note or 'NOT approved by ACME' in note) }}"
         detail: "{{ suggestions }} suggestion(s); {{ note | regex_search('trace (tr-[0-9a-f]+|not recorded)') | default('no trace', true) }}"
+      - check: "S2: fixes are researched in MessageHub's documentation, each citing the page it comes from, with steps"
+        passed: >-
+          {{ researched.count('[Investigate]') + researched.count('[Possible fix]') > 0
+             and researched.count('RD-messagehub-') >= researched.count('[Investigate]') + researched.count('[Possible fix]')
+             and researched.count('     - ') > 0 and 'Vendor documentation used' in note }}
+        detail: >-
+          {{ researched.count('[Investigate]') + researched.count('[Possible fix]') }} researched fix(es) citing
+          {{ researched | regex_findall('RD-messagehub-[a-z0-9-]+#[a-z0-9-]+') | unique | join(', ') or 'no documentation' }};
+          {{ researched.count('     - ') }} step(s); {{ 'documentation listed' if 'Vendor documentation used' in note else 'no documentation listed' }}

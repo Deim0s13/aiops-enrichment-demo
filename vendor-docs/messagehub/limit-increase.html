@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Requesting a higher limit | MessageHub Docs</title>
+<meta name="last-updated" content="2026-09-14"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font-family:system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;line-height:1.5;color:#1d2433}
+header,footer{color:#5b6475;font-size:.9rem}nav a{margin-right:1rem}code{background:#eef1f6;padding:0 .25rem}
+h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:2rem}</style></head>
+<body><header><strong>MessageHub Docs</strong> (fictional, for the ACME Bank demonstration) <nav><a href="index.html">Home</a> <a href="rate-limits.html">Rate limits</a> <a href="retries.html">Handling 429</a> <a href="limit-increase.html">Higher limits</a> <a href="status.html">Status and incidents</a> <a href="support.html">Support</a></nav></header>
+<main><h1>Requesting a higher limit</h1><p>Organisation administrators can ask for a client's limit to be raised permanently, or for a set period.</p>
+<section id="who-can-request"><h2>Who can request a change</h2><p>Only an organisation administrator of the customer's MessageHub account can request a limit change. Engineers without that role should ask their organisation's MessageHub account owner to raise it.</p></section>
+<section id="permanent-increase"><h2>Permanent increase</h2><p>In the Console, open Organisation, then Plans and limits, select the client ID and choose Request change. Give the current and requested limit, the peak rate you expect and why. Increases above the plan's maximum need a plan change. Permanent increases are reviewed within 2 business days.</p></section>
+<section id="temporary-increase"><h2>Temporary increase</h2><p>For a planned peak or a production incident, request a temporary increase of up to twice the current limit for up to 72 hours, from the same page. On the Business plan, temporary increases are approved within 4 business hours; during a production incident, open a Priority 1 support case as well and quote the client ID.</p></section>
+<section id="before-you-ask"><h2>Before you ask</h2><p>Check that the throttling is not caused by retries ignoring <code>Retry-After</code> or by a MessageHub incident: a higher limit does not help in either case. Provide the client ID, the time the 429 responses began, your request rate and the size of any backlog.</p></section>
+</main>
+<footer>Last updated 2026-09-14. MessageHub is a fictional messaging provider.</footer></body></html>

@@ -42,6 +42,7 @@
       script: check_caller.py.j2
       env:
         - { name: URL, value: "{{ enrichment_service_url }}" }
+        - { name: RESEARCH, value: "{{ '1' if enrichment_service_research_sources_resolved | length > 0 else '0' }}" }
         - name: TOKEN
           valueFrom: { secretKeyRef: { name: "{{ enrichment_service_token_secret }}", key: token } }
       # OpenShift publishes the service CA bundle in every namespace as this ConfigMap.
@@ -72,8 +73,8 @@
     enrichment_service_jobs is not failed
     and ((enrichment_service_jobs.resources | first | default({})).status | default({})).succeeded | default(0)
         + ((enrichment_service_jobs.resources | first | default({})).status | default({})).failed | default(0) >= 1
-  # The call with the token waits for the model, up to 100 seconds.
-  retries: 40
+  # Each call with the token waits for the model, up to 100 seconds.
+  retries: 60
   delay: 5
   no_log: true
 
@@ -143,9 +144,32 @@
     enrichment_service_trace_spans: "{{ (enrichment_service_trace_read.results | default([{}, {}]))[1].content | default('', true) }}"
   no_log: true
 
+# The versions this checkout says the service is at, to compare with what answered: phase 06 builds
+# from main on GitHub, so a difference means the change was not pushed, or the build did not run.
+- name: Read the versions in this checkout
+  ansible.builtin.set_fact:
+    enrichment_service_local_versions:
+      service: "{{ lookup('ansible.builtin.file', enrichment_service_source ~ '/app/main.py') | regex_search(pattern % 'SERVICE', '\\1') | first }}"
+      prompt: "{{ lookup('ansible.builtin.file', enrichment_service_source ~ '/app/prompt.py') | regex_search(pattern % 'PROMPT', '\\1') | first }}"
+      policy: "{{ lookup('ansible.builtin.file', enrichment_service_source ~ '/app/policy.py') | regex_search(pattern % 'POLICY', '\\1') | first }}"
+  vars:
+    pattern: '%s_VERSION = "([^"]+)"'
+
 - name: Judge each check
   ansible.builtin.set_fact:
     enrichment_service_results:
+      - check: the running service is the version in this checkout
+        passed: >-
+          {{ enrichment_service_caller.service_version | default('') == enrichment_service_local_versions.service
+             and enrichment_service_caller.prompt_version | default('') == enrichment_service_local_versions.prompt
+             and enrichment_service_caller.policy_version | default('') == enrichment_service_local_versions.policy }}
+        detail: >-
+          running service {{ enrichment_service_caller.service_version | default('none') }},
+          {{ enrichment_service_caller.prompt_version | default('none') }}, {{ enrichment_service_caller.policy_version | default('none') }};
+          this checkout {{ enrichment_service_local_versions.service }}, {{ enrichment_service_local_versions.prompt }},
+          {{ enrichment_service_local_versions.policy }}{{ '' if enrichment_service_caller.prompt_version | default('')
+          == enrichment_service_local_versions.prompt and enrichment_service_caller.service_version | default('')
+          == enrichment_service_local_versions.service else '. Phase 06 builds from main on GitHub: push the change and run phase 06 again' }}
       - check: the service answers over TLS from the service CA
         passed: "{{ enrichment_service_caller.health | default(-1) == 200 }}"
         detail: >-
@@ -196,6 +220,19 @@
              if enrichment_service_caller.trace_recorded | default(false) | bool
              else 'not recorded: the service could not write to MLflow; see oc logs -n ' ~ enrichment_service_namespace
                   ~ ' deploy/' ~ enrichment_service_name ~ ' | grep -i mlflow' }}
+      - check: a failure no approved knowledge covers is researched in the allow-listed vendor documentation (DD29)
+        passed: >-
+          {{ enrichment_service_research_sources_resolved | length == 0
+             or (enrichment_service_caller.research.status | default(-1) == 200
+                 and enrichment_service_caller.research.used | default([]) | length > 0) }}
+        detail: >-
+          {{ ('HTTP ' ~ enrichment_service_caller.research.status | default('none') ~ '; documentation used '
+              ~ (enrichment_service_caller.research.used | default([]) | map(attribute='id')
+                 | zip(enrichment_service_caller.research.used | default([]) | map(attribute='score')) | map('join', ' ') | join(', ') or 'none')
+              ~ '; ' ~ enrichment_service_caller.research.researched_fixes | default(0) ~ ' researched fix(es)'
+              ~ ((': ' ~ enrichment_service_caller.research.notes | join(' ')) if enrichment_service_caller.research.notes | default([]) else '')
+              ~ (('; ' ~ enrichment_service_caller.research.detail) if enrichment_service_caller.research.detail | default('') else ''))
+             if enrichment_service_research_sources_resolved | length > 0 else 'no research sources are enabled, so not checked' }}
       - check: "a namespace other than {{ enrichment_service_caller_namespace }} cannot reach the service"
         passed: "{{ enrichment_service_refused.connect | default('open') != 'open' }}"
         detail: "from {{ enrichment_service_refused_namespace }}: {{ enrichment_service_refused.connect | default('no result') }}"

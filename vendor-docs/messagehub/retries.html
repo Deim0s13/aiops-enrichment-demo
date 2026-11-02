@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Handling HTTP 429 | MessageHub Docs</title>
+<meta name="last-updated" content="2026-08-22"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font-family:system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;line-height:1.5;color:#1d2433}
+header,footer{color:#5b6475;font-size:.9rem}nav a{margin-right:1rem}code{background:#eef1f6;padding:0 .25rem}
+h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:2rem}</style></head>
+<body><header><strong>MessageHub Docs</strong> (fictional, for the ACME Bank demonstration) <nav><a href="index.html">Home</a> <a href="rate-limits.html">Rate limits</a> <a href="retries.html">Handling 429</a> <a href="limit-increase.html">Higher limits</a> <a href="status.html">Status and incidents</a> <a href="support.html">Support</a></nav></header>
+<main><h1>Handling HTTP 429</h1><p>How a client should respond to throttling. Most prolonged throttling we investigate is made worse by the client's own retries.</p>
+<section id="honour-retry-after"><h2>Honour Retry-After</h2><p>When a request is refused with HTTP 429, wait at least the number of seconds in <code>Retry-After</code> before sending the next request with that client ID, not only before retrying the refused one. Pause the whole sender, not each message separately.</p></section>
+<section id="back-off"><h2>Back off with jitter</h2><p>If no <code>Retry-After</code> is given, retry with exponential back-off and full jitter: start at 1 second, double each attempt, cap at 60 seconds, and choose a random wait between zero and that value. Limit retries to 5 a message, then hold the message in your own queue rather than drop it.</p></section>
+<section id="pace-sends"><h2>Pace your sends</h2><p>Send at no more than 90% of your client's limit, with a token bucket or similar rate limiter in front of the API. A paced sender is never throttled in normal operation and drains a backlog at a steady rate.</p></section>
+<section id="batch-endpoint"><h2>Use the batch endpoint</h2><p><code>POST /v2/messages:batch</code> accepts up to 100 messages in one request, and a batch counts as one request against the limit. Moving high-volume notifications to batches is the most effective way to stay under a limit without raising it.</p></section>
+<section id="do-not-scale-out"><h2>Do not scale out to clear throttling</h2><p>Adding instances that send with the same client ID does not add capacity: they share one limit, so more instances means more refused requests. Scale out only after the client's limit has been raised, or give each workload its own client ID.</p></section>
+</main>
+<footer>Last updated 2026-08-22. MessageHub is a fictional messaging provider.</footer></body></html>

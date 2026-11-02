@@ -1,0 +1,19 @@
+---
+argument_specs:
+  main:
+    short_description: Serve MessageHub's fictional documentation site as an outside site
+    description:
+      - Publishes the pages in vendor-docs/messagehub, with a sitemap, from a small web server in a namespace of its own,
+        behind a TLS route and reachable only through the cluster's router (DD29).
+      - Proves the site and its sitemap from the laptop, through the route.
+    options:
+      vendor_docs_namespace:
+        type: str
+        required: true
+        description: The namespace for the site, standing for the outside world.
+      vendor_docs_validate_certs:
+        type: bool
+        description: Whether to check the route's certificate in the check.
+      vendor_docs_checks:
+        type: bool
+        description: Prove the site through its route.

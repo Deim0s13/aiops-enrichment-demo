@@ -4,7 +4,9 @@ For each request from the AAP workflow it:
 1. checks the caller's token and the request, including every evidence item (design 5.2);
 2. sanitises the evidence and the incident's description (app.sanitise, rule 1);
 3. retrieves approved passages for the incident's service and version, as the read-only identity,
-   keeping only those at or above the relevance threshold (app.retrieval, rule 2);
+   keeping only those at or above the relevance threshold (app.retrieval, rule 2); if none covers the
+   failure, researches the allow-listed vendor documentation for a dependency the evidence names
+   (app.research, DD29);
 4. asks the model through the gateway, constrained to a schema built for this request (app.prompt,
    app.model, rule 3);
 5. checks the answer: citations, the catalogue, grounding and manual review (app.policy, rules 4, 5);
@@ -29,10 +31,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from app import knowledge, model, policy, prompt, retrieval, tracing
+from app import injection, knowledge, model, policy, prompt, research, retrieval, tracing
 from app.sanitise import sanitise, sanitise_tree
 
-SERVICE_VERSION = "0.5.0"
+SERVICE_VERSION = "0.6.0"
 API_TOKEN = os.environ["ENRICHMENT_API_TOKEN"]
 MAAS_CONSUMER = os.environ.get("MAAS_CONSUMER", "")
 
@@ -127,9 +129,10 @@ def enrich(request: EnrichRequest, authorization: str | None = Header(default=No
     provenance = response["provenance"]
     provenance["trace_id"] = trace_id if recorded else fallback_id
     provenance["trace_recorded"] = recorded
-    log.info("trace=%s recorded=%s incident=%s status=%s passages=%s tokens=%s model_seconds=%.1f total_seconds=%.1f "
-             "redactions=%s answer_redactions=%s", provenance["trace_id"], recorded, request.incident.number,
+    log.info("trace=%s recorded=%s incident=%s status=%s passages=%s research=%s tokens=%s model_seconds=%.1f "
+             "total_seconds=%.1f redactions=%s answer_redactions=%s", provenance["trace_id"], recorded, request.incident.number,
              response["status"], ",".join(provenance["source_ids"]) or "none",
+             ",".join(r["id"] for r in response["research_used"]) or "none",
              provenance["tokens"]["prompt"] + provenance["tokens"]["completion"], provenance["model_seconds"],
              time.monotonic() - started, provenance["redactions"] or "none", provenance["answer_redactions"] or "none")
     return response
@@ -156,8 +159,17 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
                  "revision": request.revision, "aap_workflow_job": context["workflow_job"], "event_id": context["event_id"],
                  "enrichment_service_version": SERVICE_VERSION, "prompt_version": prompt.PROMPT_VERSION,
                  "policy_version": policy.POLICY_VERSION, "retrieval_version": retrieval.RETRIEVAL_VERSION,
-                 "model": model.MAAS_MODEL, "consumer": MAAS_CONSUMER})
+                 "research_version": research.RESEARCH_VERSION, "model": model.MAAS_MODEL, "consumer": MAAS_CONSUMER})
     retrieval_gaps: list[str] = []
+
+    # Text in the evidence addressed to an AI assistant is kept, as observed, and the note says so (DD30).
+    flagged = []
+    for item in evidence:
+        found = injection.find(item["fact"])
+        if found:
+            flagged.append(item["id"])
+            retrieval_gaps.append(f"Evidence {item['id']} contains text addressed to an AI assistant (\"{found}\"). It was "
+                                  "treated as data, not as instructions; find out what wrote it.")
 
     # Rule 2.
     with tracing.span("retrieve", "RETRIEVER") as step:
@@ -202,9 +214,29 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
                                   f"{retrieval.THRESHOLD:.2f}{best}.")
     passage_ids = [p["id"] for p in passages]
 
+    # No documented fix: research the vendor documentation of a dependency the evidence names (DD29).
+    researched, research_candidates, sources = [], [], []
+    if insufficient:
+        sources = research.sources_for(incident, evidence)
+        if sources:
+            with tracing.span("research", "RETRIEVER") as step:
+                tracing.safe_inputs(step, {"sources": [{"id": s["id"], "sitemap": s["sitemap"], "named_in": s["named_in"]}
+                                                       for s in sources]})
+                researched, research_candidates, research_notes = research.research(state["embedder"], incident, evidence,
+                                                                                    sources)
+                retrieval_gaps += research_notes
+                chosen_research = {c["id"] for c in researched}
+                tracing.safe_attributes(step, {"threshold": research.THRESHOLD, "max_sections": research.MAX_SECTIONS,
+                                               "notes": " | ".join(research_notes)})
+                tracing.safe_outputs(step, [{"id": c["id"], "page_content": c["content"],
+                                             "metadata": {"doc_uri": c["url"], "score": c["score"], "updated": c["updated"],
+                                                          "sent_to_model": c["id"] in chosen_research}}
+                                            for c in research_candidates])
+    research_ids = [c["id"] for c in researched]
+
     # Rule 3.
-    schema = prompt.schema(evidence_ids, passage_ids, job_ids, insufficient)
-    user = prompt.user_message(incident, version, evidence, passages, catalogue, insufficient)
+    schema = prompt.schema(evidence_ids, passage_ids, job_ids, insufficient, research_ids)
+    user = prompt.user_message(incident, version, evidence, passages, catalogue, insufficient, researched)
     with tracing.span("model", "CHAT_MODEL",
                       {"messages": [{"role": "system", "content": prompt.SYSTEM}, {"role": "user", "content": user}],
                        "response_schema": schema}) as step:
@@ -225,11 +257,13 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
     # Rules 4 and 5.
     with tracing.span("check", "PARSER") as step:
         try:
-            checked = policy.apply(answer, evidence_ids, passage_ids, job_ids, diagnostic_gaps)
+            checked = policy.apply(answer, evidence_ids, passage_ids, job_ids, diagnostic_gaps, research_ids, user)
         except policy.AnswerError as error:
             log.warning("trace=%s model answer refused: %s", trace_ref, error)
             raise HTTPException(status_code=502, detail=f"The model's answer did not follow the schema: {error}.") from None
         checked["gaps"] = policy.merge_gaps(retrieval_gaps, checked["gaps"])
+        if flagged:
+            checked["manual_review_required"] = True
         tracing.safe_outputs(step, {"answer": checked, "answer_redactions": dict(answer_redactions)})
 
     response = {
@@ -238,6 +272,9 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
         "evidence_considered": [{"id": e["id"], "source": e["source"], "fact": e["fact"]} for e in evidence],
         "knowledge_used": [{"id": p["id"], "title": f"{p['doc_title']}: {p['section']}", "score": p["score"],
                             "added_with": p.get("added_with")} for p in passages],
+        # Vendor documentation researched for this request (DD29): not approved by ACME.
+        "research_used": [{"id": c["id"], "source": c["source"], "title": f"{c['title']}: {c['section']}", "url": c["url"],
+                           "updated": c["updated"], "fetched_at": c["fetched_at"], "score": c["score"]} for c in researched],
         "provenance": {
             "service_version": SERVICE_VERSION,
             "consumer": MAAS_CONSUMER,
@@ -250,6 +287,10 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
             "source_ids": passage_ids,
             "candidates": [{"id": c["id"], "score": c["score"], "gated": c.get("gated", False)} for c in candidates[:10]],
             "document_gate": {"bar": retrieval.DOCUMENT_GATE, "scores": verdict["documents"], "passed": verdict["passed"]},
+            "research": {"version": research.RESEARCH_VERSION, "sources": [s["id"] for s in sources],
+                         "floor": research.THRESHOLD,
+                         "candidates": [{"id": c["id"], "score": c["score"]} for c in research_candidates[:10]]},
+            "injection_flags": flagged,
             "redactions": dict(redactions),
             "answer_redactions": dict(answer_redactions),
             "tokens": tokens,
@@ -258,6 +299,8 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
         },
     }
     tracing.tag({"outcome": checked["status"], "manual_review_required": checked["manual_review_required"],
-                 "suggestions": len(checked["suggestions"])})
+                 "suggestions": len(checked["suggestions"]),
+                 "researched_fixes": sum(1 for x in checked["suggestions"] if x["basis"] == "research"),
+                 "injection_flags": ",".join(flagged) or "none"})
     tracing.safe_outputs(root, {k: v for k, v in checked.items()})
     return response

@@ -1,7 +1,8 @@
 # Runs in a Job in the caller's namespace: health, a call without the token, and a call with it. The
 # call with the token goes the whole way: sanitisation, retrieval as the read-only identity, the model
 # through the gateway and the service's checks. Its evidence carries a test card number, which must
-# not come back.
+# not come back. A second call, for a failure no approved knowledge covers (MessageHub throttling, S2),
+# must be researched in the allow-listed vendor documentation (DD29).
 import json
 import os
 import ssl
@@ -29,6 +30,21 @@ incident = {
 }
 
 
+throttling = {
+    "incident": {"sys_id": "1" * 32, "number": "INC0000001", "cmdb_ci": "payments-notify", "priority": "2",
+                 "short_description": "Phase 06 build check: payments-notify customer confirmations are queuing: "
+                                      "MessageHub is refusing deliveries"},
+    "service_version": "2.4.1",
+    "evidence": [
+        {"id": "EV-LOG-01", "source": "openshift.logs", "target": "demo-payments/payments-notify",
+         "fact": "WARN MessageHub returned HTTP 429 Too Many Requests for client acme-payments-notify (Retry-After: 30); "
+                 "delivery retry 3 of 5 deferred; backlog 2100 notifications."},
+    ],
+    "context": {"event_id": "phase 06 research check"},
+    "catalogue": [],
+}
+
+
 def call(path, body=None, token=None, timeout=15):
     headers = {"Content-Type": "application/json"}
     if token:
@@ -51,6 +67,7 @@ health = call("/healthz")
 no_token = call("/v1/enrich", incident)
 with_token = call("/v1/enrich", incident, os.environ["TOKEN"], timeout=100)
 provenance = with_token[1].get("provenance", {})
+researched = call("/v1/enrich", throttling, os.environ["TOKEN"], timeout=100) if os.environ.get("RESEARCH") == "1" else (0, {})
 print(json.dumps({
     "health": health[0],
     "no_token": no_token[0],
@@ -59,6 +76,8 @@ print(json.dumps({
     "keys": sorted(with_token[1].keys()),
     "detail": str(with_token[1].get("detail", ""))[:300],
     "prompt_version": provenance.get("prompt_version"),
+    "policy_version": provenance.get("policy_version"),
+    "service_version": provenance.get("service_version"),
     "candidates": provenance.get("candidates", [])[:3],
     "source_ids": provenance.get("source_ids", []),
     "tokens": provenance.get("tokens", {}),
@@ -67,4 +86,11 @@ print(json.dumps({
     "trace_id": provenance.get("trace_id"),
     "trace_recorded": provenance.get("trace_recorded", False),
     "error": health[1].get("error") or with_token[1].get("error"),
+    "research": {
+        "status": researched[0],
+        "used": [{"id": d.get("id"), "score": d.get("score")} for d in researched[1].get("research_used", [])],
+        "researched_fixes": sum(1 for x in researched[1].get("suggestions", []) if x.get("basis") == "research"),
+        "notes": [g for g in researched[1].get("gaps", []) if "documentation" in g][:3],
+        "detail": str(researched[1].get("detail", ""))[:300],
+    },
 }))
