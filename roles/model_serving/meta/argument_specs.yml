@@ -30,6 +30,11 @@ argument_specs:
             description: >-
               Options clients add to each request for this model, such as switching off Qwen3's thinking
               mode. Carried with the model for its consumers; not used for serving.
+          request_extra_thinking:
+            type: dict
+            description: >-
+              The options that switch the model's thinking mode on, used by the enrichment service in
+              place of request_extra when its thinking switch is on (DD32). Not used for serving.
       model_serving_state:
         type: str
         choices: [present, absent]
