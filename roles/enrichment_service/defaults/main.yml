@@ -46,7 +46,23 @@ enrichment_service_max_tokens: 2000
 enrichment_service_research: true
 enrichment_service_research_sources: []
 enrichment_service_research_threshold: 0.60
-enrichment_service_research_max_sections: 4
+# Six sections, at most two from one page, so one page cannot crowd out the rest (DD32).
+enrichment_service_research_max_sections: 6
+enrichment_service_research_per_page: 2
+# The citation check (DD31): a second model call checks every claim against the sources it cites.
+enrichment_service_review: true
+# A suggestion that scores at least this against a documented step repeats it, and is dropped (DD32).
+# Provisional: phase 06 reports the scores of its memory request.
+enrichment_service_repeat_threshold: 0.85
+# Accuracy over speed (DD32): each model call may take this long. The workflow's call to the service
+# waits up to ten minutes.
+enrichment_service_model_timeout: 300
+# The model's thinking mode, before it answers: off by default, to compare notes with it on and off.
+# When on, the request takes demo_model.request_extra_thinking in place of request_extra, and the
+# answer gets this much more room for the reasoning.
+enrichment_service_thinking: false
+enrichment_service_request_extra_thinking: {}
+enrichment_service_thinking_tokens: 6000
 # Tracing (M4.5, DD23): every request is traced in OpenShift AI's MLflow, in this experiment in the
 # workspace of the service's namespace. Best effort: if MLflow is down, enrichment carries on and the
 # note says the trace was not recorded.

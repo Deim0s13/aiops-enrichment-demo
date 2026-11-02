@@ -89,6 +89,27 @@ argument_specs:
       enrichment_service_research_max_sections:
         type: int
         description: The most documentation sections sent to the model.
+      enrichment_service_research_per_page:
+        type: int
+        description: The most documentation sections from one page.
+      enrichment_service_review:
+        type: bool
+        description: Check every claim against the sources it cites with a second model call (DD31).
+      enrichment_service_repeat_threshold:
+        type: float
+        description: A suggestion scoring at least this against a documented step is dropped as a repeat.
+      enrichment_service_model_timeout:
+        type: int
+        description: Seconds each model call may take.
+      enrichment_service_thinking:
+        type: bool
+        description: Switch on the model's thinking mode, with enrichment_service_request_extra_thinking in place of request_extra.
+      enrichment_service_request_extra_thinking:
+        type: dict
+        description: The model request fields that switch its thinking mode on, from demo_model.request_extra_thinking.
+      enrichment_service_thinking_tokens:
+        type: int
+        description: Extra room in each answer for the model's reasoning when thinking is on.
       enrichment_service_checks:
         type: bool
         description: Check the service from inside the cluster.

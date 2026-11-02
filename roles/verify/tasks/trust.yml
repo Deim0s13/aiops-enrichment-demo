@@ -205,8 +205,8 @@
           {{ ('found ' ~ (forbidden_in.note + forbidden_in.trace) | unique | join(', '))
              if forbidden_in.values() | map('length') | sum > 0 else 'none of ' ~ verify_forbidden_knowledge | join(', ') ~ ' found' }}
       - id: V9
-        check: "time to note and token use are recorded (under {{ verify_trust_note_ceiling }} seconds)"
-        passed: "{{ seconds | int >= 0 and seconds | int <= verify_trust_note_ceiling and tokens | int > 0 }}"
+        check: "time to note and token use are recorded (reported, not judged; fails only past {{ verify_note_backstop_seconds }} seconds)"
+        passed: "{{ seconds | int >= 0 and seconds | int <= verify_note_backstop_seconds and tokens | int > 0 }}"
         detail: >-
           {{ ('note ' ~ seconds ~ ' seconds after the incident was raised') if seconds | int >= 0 else 'no note' }};
           {{ tokens }} tokens; trace {{ verify_trust_trace or 'none' }}

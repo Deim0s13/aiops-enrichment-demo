@@ -1,7 +1,9 @@
 {# The work note (design 5.4): labelled as AI-generated and unreviewed, the model's analysis first, then
    the documented fix, then fixes researched in a vendor's documentation (DD29), then the model's own
    low-trust suggestions, each kind clearly apart (DD24), then what it was based on (the sanitised
-   evidence, the passages and the documentation used), then the references needed to reconstruct it. #}
+   evidence, the passages and the documentation used), then the references needed to reconstruct it.
+   Each step and suggestion says whether it is for now or a follow-up, and anything the citation check
+   (DD31) found only partly supported by its sources says so where it stands. #}
 {% set a = enrichment_call_answer %}
 {% set p = a.provenance | default({}) %}
 {# Ends each part with one full stop: adds one only where the text has none. #}
@@ -9,12 +11,15 @@
 {% set researched = a.suggestions | default([]) | selectattr('basis', 'equalto', 'research') | list %}
 {% set ideas = a.suggestions | default([]) | rejectattr('basis', 'equalto', 'research') | list %}
 {% set vendors = a.research_used | default([]) | map(attribute='source') | unique | join(' and ') %}
+{% macro partly(x) -%}
+{{ (' (PARTLY SUPPORTED by its sources: ' ~ x.support_note | default('', true) | regex_replace(stop, '\\1.') ~ ')') if x.support | default('') == 'partly' else '' }}
+{%- endmacro %}
 {% macro suggestion(s, n) %}
-  {{ n }}. [{{ 'Investigate' if s.kind == 'investigate' else 'Possible fix' }}] {{ s.action | regex_replace(stop, '\\1.') }}{{ (' Why: ' ~ s.reason | regex_replace(stop, '\\1.')) if s.reason | default('') else '' }}
+  {{ n }}. [{{ 'Investigate' if s.kind == 'investigate' else 'Possible fix' }}, {{ 'follow-up' if s.timing | default('now') == 'follow-up' else 'now' }}] {{ s.action | regex_replace(stop, '\\1.') }}{{ (' Why: ' ~ s.reason | regex_replace(stop, '\\1.')) if s.reason | default('') else '' }}
 {% for step in s.steps | default([]) %}
      - {{ step | regex_replace(stop, '\\1.') }}
 {% endfor %}
-     {{ ('Who: ' ~ s.owner | regex_replace(stop, '\\1.') ~ ' ') if s.owner | default('') else '' }}{{ ('Verify: ' ~ s.verify | regex_replace(stop, '\\1.') ~ ' ') if s.verify | default('') else '' }}{{ ('Risk: ' ~ s.risk | regex_replace(stop, '\\1.') ~ ' ') if s.risk | default('') else '' }}[{{ s.citations | join(', ') }}]
+     {{ ('Who: ' ~ s.owner | regex_replace(stop, '\\1.') ~ ' ') if s.owner | default('') else '' }}{{ ('Verify: ' ~ s.verify | regex_replace(stop, '\\1.') ~ ' ') if s.verify | default('') else '' }}{{ ('Risk: ' ~ s.risk | regex_replace(stop, '\\1.') ~ ' ') if s.risk | default('') else '' }}[{{ s.citations | join(', ') }}]{{ partly(s) }}
 {%- endmacro %}
 {% set nouns = {'card': 'card number', 'email': 'email address', 'token': 'token', 'key': 'key', 'secret': 'secret value',
                 'private_key': 'private key'} %}
@@ -28,12 +33,12 @@ Symptoms:
 {% endfor %}
 {% endif %}
 {% for c in a.likely_causes %}
-Likely cause ({{ c.confidence | default('unknown') }}): {{ c.statement }} [{{ c.citations | join(', ') }}]{{ (' Documented in: ' ~ (c.documented_by | map('regex_replace', '#.*$', '') | unique | join(', ')) ~ '.') if c.documented_by | default([]) else '' }}
+Likely cause ({{ c.confidence | default('unknown') }}): {{ c.statement }} [{{ c.citations | join(', ') }}]{{ (' Documented in: ' ~ (c.documented_by | map('regex_replace', '#.*$', '') | unique | join(', ')) ~ '.') if c.documented_by | default([]) else '' }}{{ partly(c) }}
 {% endfor %}
 {% if a.next_steps %}
 Next steps (documented fix, from approved knowledge):
 {% for s in a.next_steps %}
-  {{ loop.index }}. {{ s.step | regex_replace(stop, '\\1.') }}{{ (' Prerequisites: ' ~ s.prerequisites | regex_replace(stop, '\\1.')) if s.prerequisites | default('') else '' }}{{ (' Risk: ' ~ s.risk | regex_replace(stop, '\\1.')) if s.risk | default('') else '' }} Verify: {{ s.verify | default('n/a', true) | regex_replace(stop, '\\1.') }} [{{ s.citations | join(', ') }}]
+  {{ loop.index }}. [{{ 'Follow-up' if s.timing | default('now') == 'follow-up' else 'Now' }}] {{ s.step | regex_replace(stop, '\\1.') }}{{ (' Prerequisites: ' ~ s.prerequisites | regex_replace(stop, '\\1.')) if s.prerequisites | default('') else '' }}{{ (' Risk: ' ~ s.risk | regex_replace(stop, '\\1.')) if s.risk | default('') else '' }} Verify: {{ s.verify | default('n/a', true) | regex_replace(stop, '\\1.') }} [{{ s.citations | join(', ') }}]{{ partly(s) }}
 {% endfor %}
 {% endif %}
 {% if researched %}
@@ -60,6 +65,12 @@ Gaps:
 {% endfor %}
 {% else %}
 Gaps: none
+{% endif %}
+{% set rv = a.review | default({}) %}
+{% if rv.status | default('') == 'checked' %}
+Checked against its sources (a second model call, {{ rv.version }}): {{ rv.claims }} claim(s); {{ rv.supported }} supported, {{ rv.partly | length }} partly supported, {{ rv.removed | length }} removed{{ (', ' ~ rv.unchecked | length ~ ' not checked') if rv.unchecked | default([]) else '' }}.
+{% elif rv.status | default('') %}
+Checked against its sources: {{ rv.status }}.
 {% endif %}
 {% if a.evidence_considered | default([]) %}
 Evidence considered:
@@ -91,4 +102,4 @@ Removed by the service's checks:
 Removed from the evidence before analysis: {% for kind, count in p.redactions | dictsort %}{{ count }} {{ nouns[kind] | default(kind) }}{{ 's' if count | int > 1 else '' }}{{ ', ' if not loop.last else '' }}{% endfor %}
 
 {% endif %}
-References: {{ ('trace ' ~ p.trace_id ~ ' (MLflow)') if p.trace_recorded | default(false) else ('trace not recorded, request ' ~ p.trace_id | default('n/a')) }} | model {{ p.model | default('', true) or 'n/a' }} | prompt {{ p.prompt_version | default('n/a') }} | policy {{ p.policy_version | default('n/a') }} | retrieval {{ p.retrieval_version | default('n/a') }}{{ (' | research ' ~ p.research.version) if (p.research | default({})).sources | default([]) else '' }} | service {{ p.service_version | default('n/a') }} | tokens {{ (p.tokens.prompt | default(0)) + (p.tokens.completion | default(0)) if p.tokens is defined else 'n/a' }}{{ (' | ' ~ enrichment_call_references) if enrichment_call_references | default('') else '' }}
+References: {{ ('trace ' ~ p.trace_id ~ ' (MLflow)') if p.trace_recorded | default(false) else ('trace not recorded, request ' ~ p.trace_id | default('n/a')) }} | model {{ p.model | default('', true) or 'n/a' }} | prompt {{ p.prompt_version | default('n/a') }} | policy {{ p.policy_version | default('n/a') }} | retrieval {{ p.retrieval_version | default('n/a') }}{{ (' | research ' ~ p.research.version) if (p.research | default({})).sources | default([]) else '' }}{{ (' | ' ~ rv.version) if rv.version is defined else '' }} | service {{ p.service_version | default('n/a') }} | tokens {{ (p.tokens.prompt | default(0)) + (p.tokens.completion | default(0)) if p.tokens is defined else 'n/a' }}{{ (' | ' ~ enrichment_call_references) if enrichment_call_references | default('') else '' }}

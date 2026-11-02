@@ -73,8 +73,8 @@
     enrichment_service_jobs is not failed
     and ((enrichment_service_jobs.resources | first | default({})).status | default({})).succeeded | default(0)
         + ((enrichment_service_jobs.resources | first | default({})).status | default({})).failed | default(0) >= 1
-  # Each call with the token waits for the model, up to 100 seconds.
-  retries: 60
+  # Each call with the token waits for the model and the citation check, up to ten minutes.
+  retries: 250
   delay: 5
   no_log: true
 
@@ -220,6 +220,16 @@
              if enrichment_service_caller.trace_recorded | default(false) | bool
              else 'not recorded: the service could not write to MLflow; see oc logs -n ' ~ enrichment_service_namespace
                   ~ ' deploy/' ~ enrichment_service_name ~ ' | grep -i mlflow' }}
+      - check: every claim in the answer is checked against the sources it cites, by a second model call (DD31)
+        passed: "{{ not enrichment_service_review | bool or enrichment_service_caller.review.status | default('') == 'checked' }}"
+        detail: >-
+          {{ enrichment_service_caller.review.status | default('none') }}: {{ enrichment_service_caller.review.claims | default(0) }} claim(s),
+          {{ enrichment_service_caller.review.supported | default(0) }} supported, {{ enrichment_service_caller.review.partly | default(0) }} partly,
+          {{ enrichment_service_caller.review.removed | default(0) }} removed; suggestions against the documented steps (report only):
+          {{ enrichment_service_caller.repeats | default([]) | map(attribute='score') | map('string') | join(', ') or 'none compared' }};
+          model calls {{ enrichment_service_caller.seconds | default({}) | dict2items | map(attribute='key')
+                         | zip(enrichment_service_caller.seconds | default({}) | dict2items | map(attribute='value') | map(attribute='seconds'))
+                         | map('join', ' ') | join(' s, ') }} s
       - check: a failure no approved knowledge covers is researched in the allow-listed vendor documentation (DD29)
         passed: >-
           {{ enrichment_service_research_sources_resolved | length == 0

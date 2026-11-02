@@ -1,4 +1,4 @@
-"""The prompt and the per-request output schema (design 5.3), version 5 (DD24, DD26, DD29).
+"""The prompt and the per-request output schema (design 5.3), version 6 (DD24, DD26, DD29, DD32).
 
 Version 1 was the prompt and schema the model was selected with (docs/model-selection.md). Version 2
 separated two kinds of advice: next_steps, the documented fix, each from an approved passage; and
@@ -14,8 +14,10 @@ to the dependency refusing it. Version 5 adds RESEARCH, sections of a vendor's d
 service fetched because no approved knowledge covered the failure (DD29): a suggestion built on it
 cites it, and is a researched fix. Each suggestion now says how (steps), who acts and how to verify
 it, using the specifics in the evidence and the research, and never inventing commands, addresses or
-contacts. Change PROMPT_VERSION with any change here, so a work note can always be traced to the
-prompt that produced it.
+contacts. Version 6 says when each step and suggestion belongs: now, during the incident, or as a
+follow-up, through change; and who acts, so a code change is never handed to the on-call engineer
+mid-incident (the first researched S2 note did that, at low risk). Change PROMPT_VERSION with any
+change here, so a work note can always be traced to the prompt that produced it.
 
 The schema is built for each request. Citations may only be IDs supplied with this request, a
 suggestion may cite only evidence, and the job may only come from the catalogue, so a model
@@ -26,7 +28,7 @@ enforced by the decoder, not left to the model's judgement.
 
 import re
 
-PROMPT_VERSION = "enrichment-v5"
+PROMPT_VERSION = "enrichment-v6"
 
 SYSTEM = """You are the incident enrichment assistant for ACME Bank's operations team. You help an on-call
 engineer find a fix quickly. You do not take any action yourself.
@@ -64,10 +66,18 @@ Give two kinds of advice, and never mix them:
     Never invent a command, console path, setting, URL, phone number or contact that is not in the
     request. If the action is for another team or the vendor, say who to ask, what to ask for and
     what to give them.
-  - owner: who acts, such as the on-call engineer, the service owner, or the vendor through the
-    service owner.
+  - timing: "now" if the on-call engineer can do it during the incident, to find the cause or
+    restore or protect the service; "follow-up" if it changes code, configuration, capacity or a
+    contract, and belongs after the incident, through a change request.
+  - owner: who acts. The on-call engineer for checks and documented operational actions. A code or
+    configuration change is for the team that owns the service, through change, never the on-call
+    engineer mid-incident. A request to a vendor goes through whoever the documentation says may make
+    it, for example the account administrator.
   - verify: how the engineer will know it worked.
-  - risk: whether it could make the incident worse, and how.
+  - risk: whether and how it could make the incident worse, or what it costs; not just a level.
+  Prefer what the engineer can do now; list follow-ups after it.
+
+Each next step also has a timing: "now" or "follow-up", as above.
 
 Rules:
 1. Use only IDs that appear in the request. Never invent an ID.
@@ -92,9 +102,9 @@ Reply with a single JSON object and nothing else, with these fields:
 - summary: one or two sentences on what is happening
 - symptoms: list of observed symptoms and impact
 - likely_causes: list of {"statement", "confidence", "citations": [IDs], "documented_by": [passage IDs]}
-- next_steps: list of {"step", "prerequisites", "risk", "verify", "citations": [IDs]}
-- suggestions: list of {"kind": "investigate" or "fix", "action", "reason", "steps": [text], "owner", "verify",
-  "risk", "citations": [evidence or RESEARCH IDs]}
+- next_steps: list of {"step", "timing": "now" or "follow-up", "prerequisites", "risk", "verify", "citations": [IDs]}
+- suggestions: list of {"kind": "investigate" or "fix", "action", "reason", "steps": [text], "timing": "now" or
+  "follow-up", "owner", "verify", "risk", "citations": [evidence or RESEARCH IDs]}
 - recommended_job: null, or {"job_id", "reason", "inputs": {name: value}}
 - gaps: list of missing or conflicting evidence
 - manual_review_required: true or false"""
@@ -137,9 +147,10 @@ def schema(evidence_ids: list[str], passage_ids: list[str], job_ids: list[str], 
     }
     step = {
         "type": "object", "additionalProperties": False,
-        "required": ["step", "prerequisites", "risk", "verify", "citations"],
+        "required": ["step", "timing", "prerequisites", "risk", "verify", "citations"],
         "properties": {
             "step": {"type": "string"},
+            "timing": {"type": "string", "enum": ["now", "follow-up"]},
             "prerequisites": {"type": "string"},
             "risk": {"type": "string"},
             "verify": {"type": "string"},
@@ -148,12 +159,13 @@ def schema(evidence_ids: list[str], passage_ids: list[str], job_ids: list[str], 
     }
     suggestion = {
         "type": "object", "additionalProperties": False,
-        "required": ["kind", "action", "reason", "steps", "owner", "verify", "risk", "citations"],
+        "required": ["kind", "action", "reason", "steps", "timing", "owner", "verify", "risk", "citations"],
         "properties": {
             "kind": {"type": "string", "enum": ["investigate", "fix"]},
             "action": {"type": "string"},
             "reason": {"type": "string"},
             "steps": {"type": "array", "maxItems": 4, "items": {"type": "string"}},
+            "timing": {"type": "string", "enum": ["now", "follow-up"]},
             "owner": {"type": "string"},
             "verify": {"type": "string"},
             "risk": {"type": "string"},

@@ -65,9 +65,9 @@ def call(path, body=None, token=None, timeout=15):
 
 health = call("/healthz")
 no_token = call("/v1/enrich", incident)
-with_token = call("/v1/enrich", incident, os.environ["TOKEN"], timeout=100)
+with_token = call("/v1/enrich", incident, os.environ["TOKEN"], timeout=600)
 provenance = with_token[1].get("provenance", {})
-researched = call("/v1/enrich", throttling, os.environ["TOKEN"], timeout=100) if os.environ.get("RESEARCH") == "1" else (0, {})
+researched = call("/v1/enrich", throttling, os.environ["TOKEN"], timeout=600) if os.environ.get("RESEARCH") == "1" else (0, {})
 print(json.dumps({
     "health": health[0],
     "no_token": no_token[0],
@@ -78,6 +78,11 @@ print(json.dumps({
     "prompt_version": provenance.get("prompt_version"),
     "policy_version": provenance.get("policy_version"),
     "service_version": provenance.get("service_version"),
+    "review": {k: with_token[1].get("review", {}).get(k) for k in ("status", "claims", "supported")}
+              | {"partly": len(with_token[1].get("review", {}).get("partly", [])),
+                 "removed": len(with_token[1].get("review", {}).get("removed", []))},
+    "repeats": provenance.get("repeats", {}).get("compared", []),
+    "seconds": provenance.get("calls", {}),
     "candidates": provenance.get("candidates", [])[:3],
     "source_ids": provenance.get("source_ids", []),
     "tokens": provenance.get("tokens", {}),

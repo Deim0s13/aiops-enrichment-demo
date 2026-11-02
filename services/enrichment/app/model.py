@@ -7,6 +7,7 @@ Any failure is raised as ModelError with a reason that is safe to show: it never
 
 import json
 import os
+import re
 import ssl
 import time
 import urllib.error
@@ -18,24 +19,30 @@ MAAS_API_KEY = os.environ.get("MAAS_API_KEY", "")
 # Model-specific request fields, such as Qwen3's switch for its thinking mode, set by the build from the
 # inventory so the service itself does not depend on one model.
 MAAS_REQUEST_EXTRA = json.loads(os.environ.get("MAAS_REQUEST_EXTRA", "") or "{}")
-MAAS_TIMEOUT = float(os.environ.get("MAAS_TIMEOUT", "75"))
+MAAS_TIMEOUT = float(os.environ.get("MAAS_TIMEOUT", "300"))
 MAAS_CA_FILE = os.environ.get("MAAS_CA_FILE", "")
 TEMPERATURE = float(os.environ.get("ENRICHMENT_TEMPERATURE", "0.2"))
 MAX_TOKENS = int(os.environ.get("ENRICHMENT_MAX_TOKENS", "1600"))
+
+
+# With a thinking mode switched on (MAAS_REQUEST_EXTRA), a server without a reasoning parser returns the
+# reasoning in the content, before the answer.
+_THINKING = re.compile(r"^\s*<think>.*?</think>\s*", re.S)
 
 
 class ModelError(RuntimeError):
     pass
 
 
-def complete(system: str, user: str, schema: dict) -> tuple[dict, dict, float]:
+def complete(system: str, user: str, schema: dict, temperature: float | None = None,
+             max_tokens: int | None = None) -> tuple[dict, dict, float]:
     """Returns the model's answer as a dict, the token usage, and the seconds the call took."""
     if not (MAAS_URL and MAAS_MODEL and MAAS_API_KEY):
         raise ModelError("The service has no model gateway address, model name or key (MAAS_URL, MAAS_MODEL, MAAS_API_KEY).")
     body = {
         "model": MAAS_MODEL,
-        "temperature": TEMPERATURE,
-        "max_tokens": MAX_TOKENS,
+        "temperature": TEMPERATURE if temperature is None else temperature,
+        "max_tokens": max_tokens or MAX_TOKENS,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         "response_format": {"type": "json_schema", "json_schema": {"name": "enrichment", "strict": True, "schema": schema}},
         **MAAS_REQUEST_EXTRA,
@@ -70,9 +77,9 @@ def complete(system: str, user: str, schema: dict) -> tuple[dict, dict, float]:
     except (KeyError, IndexError, TypeError):
         raise ModelError("The model gateway's answer had no message.") from None
     if choice.get("finish_reason") == "length":
-        raise ModelError(f"The model's answer was cut off at {MAX_TOKENS} tokens.")
+        raise ModelError(f"The model's answer was cut off at {max_tokens or MAX_TOKENS} tokens.")
     try:
-        answer = json.loads(content)
+        answer = json.loads(_THINKING.sub("", content or ""))
     except (json.JSONDecodeError, TypeError):
         raise ModelError("The model's answer was not the JSON the schema requires.") from None
     if not isinstance(answer, dict):

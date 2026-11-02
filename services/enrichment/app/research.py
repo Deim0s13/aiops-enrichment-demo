@@ -40,13 +40,16 @@ ENABLED = os.environ.get("ENRICHMENT_RESEARCH", "on") == "on"
 #   "sitemap": "https://.../sitemap.xml"}], from the inventory (demo_research_sources).
 SOURCES = json.loads(os.environ.get("ENRICHMENT_RESEARCH_SOURCES", "") or "[]")
 THRESHOLD = float(os.environ.get("ENRICHMENT_RESEARCH_THRESHOLD", "0.60"))
-MAX_SECTIONS = int(os.environ.get("ENRICHMENT_RESEARCH_MAX_SECTIONS", "4"))
+MAX_SECTIONS = int(os.environ.get("ENRICHMENT_RESEARCH_MAX_SECTIONS", "6"))
+# At most this many sections from one page, so one page cannot crowd out the others (DD32): the first
+# researched S2 note missed MessageHub's status page and who may ask for a higher limit.
+PER_PAGE = int(os.environ.get("ENRICHMENT_RESEARCH_PER_PAGE", "2"))
 MAX_PAGES = int(os.environ.get("ENRICHMENT_RESEARCH_MAX_PAGES", "12"))
 PAGE_BYTES = 262144
 TIMEOUT = float(os.environ.get("ENRICHMENT_RESEARCH_TIMEOUT", "5"))
 CACHE_SECONDS = int(os.environ.get("ENRICHMENT_RESEARCH_CACHE_SECONDS", "900"))
 CA_FILE = os.environ.get("ENRICHMENT_RESEARCH_CA_FILE", "")
-RESEARCH_VERSION = f"allow-list|named-in-evidence|sitemap|h2-sections|t{THRESHOLD:.2f}|k{MAX_SECTIONS}"
+RESEARCH_VERSION = f"allow-list|named-in-evidence|sitemap|h2-sections|t{THRESHOLD:.2f}|k{MAX_SECTIONS}|page{PER_PAGE}"
 
 _cache: dict[str, tuple[float, list[dict], list[str]]] = {}
 
@@ -212,7 +215,12 @@ def research(embedder, incident: dict, evidence: list[dict], sources: list[dict]
             score = max((_cosine(v, section["vector"]) for v in vectors), default=0.0)
             candidates.append({**{k: v for k, v in section.items() if k != "vector"}, "score": round(score, 3)})
     candidates.sort(key=lambda c: c["score"], reverse=True)
-    chosen = [c for c in candidates if c["score"] >= THRESHOLD][:MAX_SECTIONS]
+    chosen, per_page = [], {}
+    for candidate in candidates:
+        page = candidate["id"].split("#")[0]
+        if candidate["score"] >= THRESHOLD and per_page.get(page, 0) < PER_PAGE and len(chosen) < MAX_SECTIONS:
+            chosen.append(candidate)
+            per_page[page] = per_page.get(page, 0) + 1
     if sources and not chosen and not notes:
         notes.append(f"No section of {', '.join(s['name'] for s in sources)}'s documentation met the research floor of "
                      f"{THRESHOLD:.2f}.")

@@ -145,12 +145,18 @@ demo_model:
   request_extra:
     chat_template_kwargs:
       enable_thinking: false
+  # Used instead when enrichment_service_thinking is true (DD32), to compare notes with thinking on.
+  request_extra_thinking:
+    chat_template_kwargs:
+      enable_thinking: true
 
 # Governed model access for the enrichment service (DD14, ADR06). The enrichment service calls the
 # model as its own service account, through a MaaS subscription with a token budget.
 demo_maas_consumer:
   service_account: aiops-enrichment
-  token_limit: 100000
+  # Enough for a build, phase 08 and verify.yml in one hour with the citation check, each enrichment
+  # being two model calls (DD31), and room for the thinking mode.
+  token_limit: 400000
   token_window: 1h
   # Long enough for an environment's life; a rebuild mints a new key.
   key_expiry: 30d

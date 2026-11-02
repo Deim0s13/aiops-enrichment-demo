@@ -1,4 +1,4 @@
-"""The service's checks on the model's answer (design 5.3, rules 3 to 5; DD24, DD26, DD29), version 5.
+"""The service's checks on the model's answer (design 5.3, rules 3 to 5; DD24, DD26, DD29, DD32), version 6.
 
 The schema already constrains the answer, but a decoder may ignore a keyword it does not support, so
 nothing is taken on trust:
@@ -20,13 +20,18 @@ nothing is taken on trust:
 - an insufficient_evidence answer has no next steps and no job;
 - manual review is required whenever a diagnostic left a gap, the answer is insufficient, or it
   carries suggestions.
-- the model's gaps that only repeat the service's own "no documented fix" are dropped (merge_gaps).
+- the model's gaps that only repeat the service's own "no documented fix" are dropped (merge_gaps);
+- each step and suggestion keeps its timing, now or follow-up, and suggestions are ordered researched
+  first, then what can be done now;
+- a suggestion that repeats a documented step adds nothing for the engineer, and is dropped
+  (drop_repeats, which compares them with the embedding model). Each claim is then checked against
+  its sources by a second model call (app.review, DD31).
 Change POLICY_VERSION with any change here.
 """
 
 import re
 
-POLICY_VERSION = "policy-v5"
+POLICY_VERSION = "policy-v6"
 # A model sometimes fills a list with a placeholder rather than leaving it empty.
 _PLACEHOLDER = re.compile(r"^(none|none noted|no gaps?|n/?a|nothing)\.?$", re.I)
 
@@ -70,6 +75,7 @@ class _Scrubber:
             return REMOVED
         return _PHONE.sub(keep, _URL.sub(keep, text))
 KINDS = ("investigate", "fix")
+TIMINGS = ("now", "follow-up")
 CONFIDENCE = ("high", "medium", "low")
 
 
@@ -120,6 +126,8 @@ def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids
                              "that was not supplied with the request.")
                 continue
             clean = {k: item[k].strip() for k in keys}
+            if field == "next_steps":
+                clean["timing"] = item.get("timing") if item.get("timing") in TIMINGS else "now"
             clean["citations"] = list(dict.fromkeys(citations))
             kept.append(clean)
         return kept[:LIMITS[field]]
@@ -162,6 +170,7 @@ def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids
             how.append(line.strip())
         suggestions.append({"kind": item.get("kind") if item.get("kind") in KINDS else "investigate",
                             **{k: item[k].strip() for k in keys}, "steps": how[:LIMITS["steps"]],
+                            "timing": item.get("timing") if item.get("timing") in TIMINGS else "now",
                             "owner": str(item.get("owner") or "").strip(), "verify": str(item.get("verify") or "").strip(),
                             "basis": "research" if set(citations) & set(research_ids) else "evidence",
                             "citations": list(dict.fromkeys(citations))})
@@ -197,8 +206,9 @@ def apply(answer: dict, evidence_ids: list[str], passage_ids: list[str], job_ids
                         for step in steps]
         steps, job = [], None
     suggestions = [s for s in suggestions if s["citations"]]
-    # Researched fixes first: they rest on the vendor's documentation, the others on the evidence alone.
-    suggestions = sorted(suggestions, key=lambda s: s["basis"] != "research")[:LIMITS["suggestions"]]
+    # Researched fixes first: they rest on the vendor's documentation, the others on the evidence alone;
+    # within each, what the engineer can do now before the follow-ups.
+    suggestions = sorted(suggestions, key=lambda s: (s["basis"] != "research", s["timing"] != "now"))[:LIMITS["suggestions"]]
 
     # Contacts the request did not contain are removed from everything the engineer will read.
     for item in causes:
@@ -249,8 +259,38 @@ def _as_suggestion(step: dict, observed: set, causes: list, documents: list) -> 
             if {_doc(p) for p in cause.get("documented_by", [])} & set(documents):
                 citations = [c for c in cause["citations"] if c in observed]
                 break
-    return {"kind": "fix", "action": step["step"], "reason": reason, "steps": [], "owner": "", "verify": step["verify"],
+    return {"kind": "fix", "action": step["step"], "reason": reason, "steps": [], "timing": step.get("timing", "now"),
+            "owner": "", "verify": step["verify"],
             "risk": step["risk"], "basis": "evidence", "citations": citations}
+
+
+def drop_repeats(checked: dict, embedder, threshold: float) -> list[dict]:
+    """Drops suggestions that repeat a documented step, and returns what each was compared with. A
+    repeat is a suggestion whose action and steps score at or above the threshold against a step."""
+    if not checked["next_steps"] or not checked["suggestions"]:
+        return []
+    steps = [s["step"] for s in checked["next_steps"]]
+    ideas = [" ".join([s["action"]] + s.get("steps", [])) for s in checked["suggestions"]]
+    vectors = embedder.passages(steps + ideas)
+    step_vectors, idea_vectors = vectors[:len(steps)], vectors[len(steps):]
+    compared, kept = [], []
+    for item, vector in zip(checked["suggestions"], idea_vectors):
+        scores = [_cosine(vector, v) for v in step_vectors]
+        best = max(range(len(scores)), key=lambda i: scores[i])
+        compared.append({"action": item["action"][:80], "step": best + 1, "score": round(scores[best], 3)})
+        if scores[best] >= threshold:
+            checked["checks_removed"].append(f"One suggestion was left out: it repeats documented step {best + 1} "
+                                             f"(\"{item['action'][:80]}\").")
+        else:
+            kept.append(item)
+    checked["suggestions"] = kept
+    return compared
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm = (sum(x * x for x in a) ** 0.5) * (sum(y * y for y in b) ** 0.5)
+    return dot / norm if norm else 0.0
 
 
 def merge_gaps(service_gaps: list[str], model_gaps: list[str]) -> list[str]:

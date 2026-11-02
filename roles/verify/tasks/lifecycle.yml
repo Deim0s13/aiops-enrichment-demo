@@ -25,10 +25,11 @@
 - name: Record V1
   ansible.builtin.set_fact:
     verify_results: >-
-      {{ verify_results + [{'id': 'V1', 'check': 'a qualifying incident gets its AI note within ' ~ verify_note_target_seconds ~ ' seconds',
+      {{ verify_results + [{'id': 'V1',
+         'check': 'a qualifying incident gets its AI note (time reported; fails only past ' ~ verify_note_backstop_seconds ~ ' seconds)',
          'passed': verify_incidents.lifecycle.u_ai_enrichment_state | default('') in ['complete', 'insufficient_evidence']
                    and verify_lifecycle_ai_notes | length >= 1
-                   and verify_lifecycle_seconds | int <= verify_note_target_seconds,
+                   and verify_lifecycle_seconds | int <= verify_note_backstop_seconds,
          'detail': verify_incidents.lifecycle.number ~ ', state ' ~ (verify_incidents.lifecycle.u_ai_enrichment_state | default('') or 'empty')
                    ~ ', note after ' ~ verify_lifecycle_seconds ~ ' s'}] }}
 

@@ -186,7 +186,11 @@
                     - name: MAAS_API_KEY
                       valueFrom: { secretKeyRef: { name: "{{ enrichment_service_maas_secret }}", key: api-key } }
                     - name: MAAS_REQUEST_EXTRA
-                      value: "{{ enrichment_service_request_extra | to_json }}"
+                      value: >-
+                        {{ (enrichment_service_request_extra_thinking if enrichment_service_thinking | bool
+                            else enrichment_service_request_extra) | to_json }}
+                    - name: MAAS_TIMEOUT
+                      value: "{{ enrichment_service_model_timeout | string }}"
                     - name: ENRICHMENT_RELEVANCE_THRESHOLD
                       value: "{{ enrichment_service_relevance_threshold | string }}"
                     - name: ENRICHMENT_DOCUMENT_GATE
@@ -200,7 +204,15 @@
                     - name: ENRICHMENT_TEMPERATURE
                       value: "{{ enrichment_service_temperature | string }}"
                     - name: ENRICHMENT_MAX_TOKENS
-                      value: "{{ enrichment_service_max_tokens | string }}"
+                      value: >-
+                        {{ (enrichment_service_max_tokens | int + (enrichment_service_thinking_tokens | int
+                            if enrichment_service_thinking | bool else 0)) | string }}
+                    - name: ENRICHMENT_REVIEW_MAX_TOKENS
+                      value: "{{ (2000 + (enrichment_service_thinking_tokens | int if enrichment_service_thinking | bool else 0)) | string }}"
+                    - name: ENRICHMENT_REVIEW
+                      value: "{{ 'on' if enrichment_service_review | bool else 'off' }}"
+                    - name: ENRICHMENT_REPEAT_THRESHOLD
+                      value: "{{ enrichment_service_repeat_threshold | string }}"
                     # Research (DD29): the allow-listed vendor documentation, its relevance floor and how
                     # many sections go to the model.
                     - name: ENRICHMENT_RESEARCH
@@ -211,6 +223,8 @@
                       value: "{{ enrichment_service_research_threshold | string }}"
                     - name: ENRICHMENT_RESEARCH_MAX_SECTIONS
                       value: "{{ enrichment_service_research_max_sections | string }}"
+                    - name: ENRICHMENT_RESEARCH_PER_PAGE
+                      value: "{{ enrichment_service_research_per_page | string }}"
                     # The read-only knowledge identity (phase 05), and the service CA to verify the database.
                     - name: KNOWLEDGE_DB_HOST
                       valueFrom: { secretKeyRef: { name: "{{ enrichment_service_knowledge_secret }}", key: host } }
@@ -365,7 +379,11 @@
         Research (DD29): {{ (enrichment_service_research_sources_resolved | map(attribute='name')
         | zip(enrichment_service_research_sources_resolved | map(attribute='sitemap')) | map('join', ' at ') | join('; '))
         if enrichment_service_research_sources_resolved | length > 0 else 'off, no sources enabled' }}; floor
-        {{ enrichment_service_research_threshold }}, at most {{ enrichment_service_research_max_sections }} sections
+        {{ enrichment_service_research_threshold }}, at most {{ enrichment_service_research_max_sections }} sections,
+        {{ enrichment_service_research_per_page }} a page
+      - >-
+        Accuracy (DD31, DD32): citation check {{ 'on' if enrichment_service_review | bool else 'off' }}; thinking mode
+        {{ 'on' if enrichment_service_thinking | bool else 'off' }}; each model call may take {{ enrichment_service_model_timeout }} seconds
       - >-
         API token: {{ 'generated' if enrichment_service_token_new else 'reused' }}, in
         {{ enrichment_service_namespace }}/{{ enrichment_service_token_secret }} and

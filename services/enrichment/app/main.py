@@ -9,7 +9,9 @@ For each request from the AAP workflow it:
    (app.research, DD29);
 4. asks the model through the gateway, constrained to a schema built for this request (app.prompt,
    app.model, rule 3);
-5. checks the answer: citations, the catalogue, grounding and manual review (app.policy, rules 4, 5);
+5. checks the answer: citations, the catalogue, grounding and manual review (app.policy, rules 4, 5),
+   drops suggestions that repeat the documented fix, then has a second model call check every claim
+   against the sources it cites (app.review, DD31);
 6. returns the answer with the evidence it considered, the passages it used and its provenance.
 Each request is traced in MLflow, step by step (app.tracing), and the trace ID goes into the note.
 
@@ -31,10 +33,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from app import injection, knowledge, model, policy, prompt, research, retrieval, tracing
+from app import injection, knowledge, model, policy, prompt, research, retrieval, review, tracing
 from app.sanitise import sanitise, sanitise_tree
 
-SERVICE_VERSION = "0.6.0"
+SERVICE_VERSION = "0.7.0"
+# A suggestion scoring at or above this against a documented step repeats it (DD32).
+# Provisional: phase 06 reports the scores of its memory request, to set it from.
+REPEAT_THRESHOLD = float(os.environ.get("ENRICHMENT_REPEAT_THRESHOLD", "0.85"))
 API_TOKEN = os.environ["ENRICHMENT_API_TOKEN"]
 MAAS_CONSUMER = os.environ.get("MAAS_CONSUMER", "")
 
@@ -159,7 +164,8 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
                  "revision": request.revision, "aap_workflow_job": context["workflow_job"], "event_id": context["event_id"],
                  "enrichment_service_version": SERVICE_VERSION, "prompt_version": prompt.PROMPT_VERSION,
                  "policy_version": policy.POLICY_VERSION, "retrieval_version": retrieval.RETRIEVAL_VERSION,
-                 "research_version": research.RESEARCH_VERSION, "model": model.MAAS_MODEL, "consumer": MAAS_CONSUMER})
+                 "research_version": research.RESEARCH_VERSION, "review_version": review.REVIEW_VERSION,
+                 "model": model.MAAS_MODEL, "consumer": MAAS_CONSUMER})
     retrieval_gaps: list[str] = []
 
     # Text in the evidence addressed to an AI assistant is kept, as observed, and the note says so (DD30).
@@ -264,7 +270,40 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
         checked["gaps"] = policy.merge_gaps(retrieval_gaps, checked["gaps"])
         if flagged:
             checked["manual_review_required"] = True
+        repeats = policy.drop_repeats(checked, state["embedder"], REPEAT_THRESHOLD)
+        tracing.safe_attributes(step, {"repeat_threshold": REPEAT_THRESHOLD,
+                                       "repeat_scores": ",".join(f"step{c['step']}={c['score']}" for c in repeats)})
         tracing.safe_outputs(step, {"answer": checked, "answer_redactions": dict(answer_redactions)})
+
+    # DD31: every claim checked against the sources it cites, by a second call.
+    calls = {"answer": {**tokens, "seconds": round(seconds, 1)}}
+    items = review.claims(checked)
+    if not review.ENABLED or not items:
+        summary = {"version": review.REVIEW_VERSION, "status": "off" if not review.ENABLED else "nothing to check",
+                   "claims": len(items), "supported": 0, "partly": [], "removed": [], "unchecked": []}
+    else:
+        sources_text = {e["id"]: e["fact"] for e in evidence}
+        sources_text.update({p["id"]: p["content"] for p in passages})
+        sources_text.update({c["id"]: c["content"] for c in researched})
+        with tracing.span("review", "CHAT_MODEL") as step:
+            try:
+                verdicts, review_tokens, review_seconds, review_user, review_system = review.review(items, sources_text)
+                verdicts = sanitise_tree(verdicts, answer_redactions)
+                tracing.safe_inputs(step, {"messages": [{"role": "system", "content": review_system},
+                                                        {"role": "user", "content": review_user}]})
+                summary = review.apply(checked, items, verdicts)
+                calls["review"] = {**review_tokens, "seconds": round(review_seconds, 1)}
+                tracing.safe_outputs(step, {"verdicts": verdicts, "summary": summary})
+            except model.ModelError as error:
+                log.warning("trace=%s citation check failed: %s", trace_ref, error)
+                summary = {"version": review.REVIEW_VERSION, "status": f"not checked: {error}", "claims": len(items),
+                           "supported": 0, "partly": [], "removed": [], "unchecked": [i["ref"] for i in items]}
+                checked["gaps"].append(f"The answer could not be checked against its sources ({error}), so check each "
+                                       "claim against what it cites before acting on it.")
+                checked["manual_review_required"] = True
+    checked["review"] = summary
+    tokens = {"prompt": sum(c["prompt"] for c in calls.values()), "completion": sum(c["completion"] for c in calls.values())}
+    seconds = sum(c["seconds"] for c in calls.values())
 
     response = {
         **checked,
@@ -294,6 +333,8 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
             "redactions": dict(redactions),
             "answer_redactions": dict(answer_redactions),
             "tokens": tokens,
+            "calls": calls,
+            "repeats": {"threshold": REPEAT_THRESHOLD, "compared": repeats},
             "model_seconds": round(seconds, 1),
             "revision": request.revision,
         },
@@ -301,6 +342,8 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
     tracing.tag({"outcome": checked["status"], "manual_review_required": checked["manual_review_required"],
                  "suggestions": len(checked["suggestions"]),
                  "researched_fixes": sum(1 for x in checked["suggestions"] if x["basis"] == "research"),
-                 "injection_flags": ",".join(flagged) or "none"})
+                 "injection_flags": ",".join(flagged) or "none",
+                 "review": summary["status"], "review_removed": len(summary["removed"]),
+                 "review_partly": len(summary["partly"])})
     tracing.safe_outputs(root, {k: v for k, v in checked.items()})
     return response

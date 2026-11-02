@@ -5,10 +5,12 @@
 verify_prefix: ACME verify
 # Keep the incidents to show their notes in ServiceNow; reset.yml closes them. True deletes them.
 verify_cleanup: false
-verify_note_target_seconds: 60
+# Time to the note is reported, not judged (DD32): accuracy comes first. V1 and V9 fail only past this
+# backstop, which means something is stuck, not slow.
+verify_note_backstop_seconds: 600
 # After an incident completes, how long to watch for a second note or workflow run.
 verify_quiet_seconds: 30
-verify_wait_retries: 30
+verify_wait_retries: 120
 verify_wait_delay: 5
 verify_workflow_name: AI incident enrichment
 verify_enrichment_deployment: enrichment
@@ -20,9 +22,7 @@ verify_trust: true
 verify_workload_name: payments-notify
 verify_trust_family: jvm-memory
 # The fault's OOM kill comes a few minutes after the trigger, and the incident is enriched as it is raised.
-verify_trust_retries: 48
-# V9 fails only above this: seconds from the incident being raised to its AI work note.
-verify_trust_note_ceiling: 180
+verify_trust_retries: 90
 # The planted log lines' sensitive values, which must reach neither the note, the trace nor AAP's job records (V7).
 verify_planted_values:
   - 4111 1111 1111 1111

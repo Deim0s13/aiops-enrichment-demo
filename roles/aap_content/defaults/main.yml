@@ -97,7 +97,7 @@ aap_content_ready_delay: 10
 # Prove the trigger, workflow, write-back and failure branch on every build (checks.yml).
 aap_content_checks: true
 aap_content_check_prefix: ACME build check
-aap_content_check_retries: 30
+aap_content_check_retries: 60
 aap_content_check_delay: 10
 # The integration check's alerts carry this service label, so its incident is its own.
 aap_content_check_service: acme-build-check

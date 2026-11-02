@@ -67,7 +67,7 @@ workload_check_image: registry.access.redhat.com/ubi9/python-312:9.8-1791998425
 workload_check_retries: 48
 workload_check_delay: 10
 # After the alerts fire: how long to wait for the integration's incident and its enrichment.
-workload_incident_retries: 30
+workload_incident_retries: 60
 workload_incident_delay: 10
 # The memory fault's enrichment must cite the current runbook or a past resolution (design 9), and never
 # the superseded 1.x runbook, the restricted break-glass procedure or another service's resolution.

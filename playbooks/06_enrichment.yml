@@ -44,6 +44,7 @@
         enrichment_service_refused_namespace: "{{ demo_namespaces.data }}"
         enrichment_service_repository: "{{ demo_repository }}"
         enrichment_service_request_extra: "{{ demo_model.request_extra | default({}) }}"
+        enrichment_service_request_extra_thinking: "{{ demo_model.request_extra_thinking | default({}) }}"
         enrichment_service_validate_certs: "{{ demo_cluster_validate_certs }}"
         enrichment_service_research_sources: "{{ demo_research_sources }}"
 
