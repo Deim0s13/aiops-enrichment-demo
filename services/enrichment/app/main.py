@@ -36,7 +36,7 @@ from pydantic import BaseModel, Field
 from app import injection, knowledge, model, policy, prompt, research, retrieval, review, tracing
 from app.sanitise import sanitise, sanitise_tree
 
-SERVICE_VERSION = "0.7.0"
+SERVICE_VERSION = "0.7.1"
 # A suggestion scoring at or above this against a documented step repeats it (DD32).
 # Provisional: phase 06 reports the scores of its memory request, to set it from.
 REPEAT_THRESHOLD = float(os.environ.get("ENRICHMENT_REPEAT_THRESHOLD", "0.85"))
@@ -277,7 +277,7 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
 
     # DD31: every claim checked against the sources it cites, by a second call.
     calls = {"answer": {**tokens, "seconds": round(seconds, 1)}}
-    items = review.claims(checked)
+    items = review.claims(checked, [e["id"] for e in evidence if not e["id"].endswith("-GAP")])
     if not review.ENABLED or not items:
         summary = {"version": review.REVIEW_VERSION, "status": "off" if not review.ENABLED else "nothing to check",
                    "claims": len(items), "supported": 0, "partly": [], "removed": [], "unchecked": []}

@@ -63,6 +63,9 @@ enrichment_service_model_timeout: 300
 enrichment_service_thinking: false
 enrichment_service_request_extra_thinking: {}
 enrichment_service_thinking_tokens: 6000
+# Thinking for the citation check alone (DD31), leaving the answer as it is: the reviewer reasons before
+# it judges. Off by default, to compare.
+enrichment_service_review_thinking: false
 # Tracing (M4.5, DD23): every request is traced in OpenShift AI's MLflow, in this experiment in the
 # workspace of the service's namespace. Best effort: if MLflow is down, enrichment carries on and the
 # note says the trace was not recorded.

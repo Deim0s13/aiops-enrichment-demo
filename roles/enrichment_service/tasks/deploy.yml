@@ -208,7 +208,13 @@
                         {{ (enrichment_service_max_tokens | int + (enrichment_service_thinking_tokens | int
                             if enrichment_service_thinking | bool else 0)) | string }}
                     - name: ENRICHMENT_REVIEW_MAX_TOKENS
-                      value: "{{ (2000 + (enrichment_service_thinking_tokens | int if enrichment_service_thinking | bool else 0)) | string }}"
+                      value: >-
+                        {{ (2000 + (enrichment_service_thinking_tokens | int
+                            if enrichment_service_thinking | bool or enrichment_service_review_thinking | bool else 0)) | string }}
+                    - name: ENRICHMENT_REVIEW_REQUEST_EXTRA
+                      value: >-
+                        {{ enrichment_service_request_extra_thinking | to_json
+                           if enrichment_service_review_thinking | bool else '' }}
                     - name: ENRICHMENT_REVIEW
                       value: "{{ 'on' if enrichment_service_review | bool else 'off' }}"
                     - name: ENRICHMENT_REPEAT_THRESHOLD
@@ -383,7 +389,9 @@
         {{ enrichment_service_research_per_page }} a page
       - >-
         Accuracy (DD31, DD32): citation check {{ 'on' if enrichment_service_review | bool else 'off' }}; thinking mode
-        {{ 'on' if enrichment_service_thinking | bool else 'off' }}; each model call may take {{ enrichment_service_model_timeout }} seconds
+        {{ 'on' if enrichment_service_thinking | bool else 'off' }}, for the check
+        {{ 'on' if enrichment_service_thinking | bool or enrichment_service_review_thinking | bool else 'off' }};
+        each model call may take {{ enrichment_service_model_timeout }} seconds
       - >-
         API token: {{ 'generated' if enrichment_service_token_new else 'reused' }}, in
         {{ enrichment_service_namespace }}/{{ enrichment_service_token_secret }} and

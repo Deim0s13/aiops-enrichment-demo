@@ -49,7 +49,8 @@ PAGE_BYTES = 262144
 TIMEOUT = float(os.environ.get("ENRICHMENT_RESEARCH_TIMEOUT", "5"))
 CACHE_SECONDS = int(os.environ.get("ENRICHMENT_RESEARCH_CACHE_SECONDS", "900"))
 CA_FILE = os.environ.get("ENRICHMENT_RESEARCH_CA_FILE", "")
-RESEARCH_VERSION = f"allow-list|named-in-evidence|sitemap|h2-sections|t{THRESHOLD:.2f}|k{MAX_SECTIONS}|page{PER_PAGE}"
+RESEARCH_VERSION = (f"allow-list|named-in-evidence|sitemap|h2-sections|no-home-page|t{THRESHOLD:.2f}|k{MAX_SECTIONS}"
+                    f"|page{PER_PAGE}")
 
 _cache: dict[str, tuple[float, list[dict], list[str]]] = {}
 
@@ -111,7 +112,7 @@ class _Page(HTMLParser):
     def __init__(self):
         super().__init__()
         self.title, self.updated, self.sections = "", "", []
-        self._skip, self._in, self._section_id = 0, "", ""
+        self._skip, self._in, self._section_id, self._link = 0, "", "", False
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -121,6 +122,8 @@ class _Page(HTMLParser):
             self.updated = attrs.get("content", "")[:30]
         elif tag == "section" and attrs.get("id"):
             self._section_id = attrs["id"]
+        elif tag == "a":
+            self._link = True
         elif tag in ("p", "li", "br", "tr") and self.sections and not self._skip:
             self.sections[-1]["text"] += " "
         elif tag in ("h1", "h2") and not self._skip:
@@ -129,6 +132,8 @@ class _Page(HTMLParser):
                 self.sections.append({"id": attrs.get("id") or self._section_id, "heading": "", "text": ""})
 
     def handle_endtag(self, tag):
+        if tag == "a":
+            self._link = False
         if tag in self.SKIP and self._skip:
             self._skip -= 1
         elif tag == self._in:
@@ -143,6 +148,8 @@ class _Page(HTMLParser):
             self.sections[-1]["heading"] += data
         elif self.sections:
             self.sections[-1]["text"] += data
+            if self._link:
+                self.sections[-1]["links"] = self.sections[-1].get("links", 0) + len(data.strip())
 
 
 def _slug(text: str) -> str:
@@ -163,6 +170,9 @@ def _site(source: dict, embedder, counts: Counter) -> tuple[list[dict], list[str
     fetched_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     sections = []
     for url in urls:
+        # A site's home page is a contents list: it says nothing to act on, and took a slot from pages that do.
+        if re.search(r"/(index\.html?)?$", urllib.parse.urlsplit(url).path or "/"):
+            continue
         parser = _Page()
         parser.feed(_fetch(url, host))
         page = re.sub(r"\.html?$", "", urllib.parse.urlsplit(url).path.strip("/").split("/")[-1]) or "index"

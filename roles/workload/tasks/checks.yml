@@ -310,7 +310,7 @@
         passed: "{{ fix | regex_findall('KB-[A-Z]+-[0-9]+#(?:actions|resolution|root-cause)[a-z0-9-]*') | length > 0 }}"
         detail: >-
           next steps cite {{ fix | regex_findall('KB-[A-Z]+-[0-9]+#[a-z0-9-]+') | unique | join(', ') or 'no knowledge' }};
-          {{ note.count('[Investigate]') + note.count('[Possible fix]') }} low-trust suggestion(s)
+          {{ note.count('[Investigate') + note.count('[Possible fix') }} low-trust suggestion(s)
       - check: the work note leads to its trace in MLflow
         passed: "{{ note is search('trace tr-[0-9a-f]+ [(]MLflow[)]') }}"
         detail: "{{ note | regex_search('References: [^|]*') | default('no References line', true) | trim }}"

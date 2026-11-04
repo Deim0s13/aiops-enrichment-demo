@@ -325,7 +325,7 @@ Check passed: the call is traced in MLflow, step by step, with no card number in
   (trace tr-... in experiment aiops-enrichment, read back HTTP 200 and 200; steps enrich, sanitise, retrieve, model, check; card number in trace: no)
 ```
 
-To compare notes with the model's thinking mode on (DD32), rerun this phase with `-e enrichment_service_thinking=true`, then trigger a scenario; rerun it without to switch back. Each answer then gets 6,000 more tokens of room for the reasoning. If the notes come back unchanged and the token counts do not rise, the model server is holding the model to the schema from its first token, so it never reasons; that is worth knowing too.
+To compare notes with the model's thinking mode on (DD32), rerun this phase with `-e enrichment_service_thinking=true`, then trigger a scenario; rerun it without to switch back. `-e enrichment_service_review_thinking=true` switches it on for the citation check alone, leaving the answer as it is. Each answer then gets 6,000 more tokens of room for the reasoning. If the notes come back unchanged and the token counts do not rise, the model server is holding the model to the schema from its first token, so it never reasons; that is worth knowing too.
 
 To look at a trace, open MLflow from the OpenShift AI dashboard, choose the `aiops-enrichment` project (its MLflow workspace) and the `aiops-enrichment` experiment, and open its traces. Each trace is tagged with its incident number, so you can find the one behind a work note by the trace ID on the note's References line, or by the incident.
 

@@ -35,7 +35,7 @@ class ModelError(RuntimeError):
 
 
 def complete(system: str, user: str, schema: dict, temperature: float | None = None,
-             max_tokens: int | None = None) -> tuple[dict, dict, float]:
+             max_tokens: int | None = None, extra: dict | None = None) -> tuple[dict, dict, float]:
     """Returns the model's answer as a dict, the token usage, and the seconds the call took."""
     if not (MAAS_URL and MAAS_MODEL and MAAS_API_KEY):
         raise ModelError("The service has no model gateway address, model name or key (MAAS_URL, MAAS_MODEL, MAAS_API_KEY).")
@@ -45,7 +45,7 @@ def complete(system: str, user: str, schema: dict, temperature: float | None = N
         "max_tokens": max_tokens or MAX_TOKENS,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         "response_format": {"type": "json_schema", "json_schema": {"name": "enrichment", "strict": True, "schema": schema}},
-        **MAAS_REQUEST_EXTRA,
+        **(MAAS_REQUEST_EXTRA if extra is None else extra),
     }
     request = urllib.request.Request(
         f"{MAAS_URL}/v1/chat/completions",

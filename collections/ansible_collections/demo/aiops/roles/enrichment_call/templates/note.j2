@@ -25,7 +25,7 @@
                 'private_key': 'private key'} %}
 [AI-generated enrichment | revision {{ enrichment_call_revision }} | not reviewed by an engineer]
 Outcome: {{ 'enriched, with a documented fix' if a.status == 'enriched' else ('no documented fix; fixes researched in ' ~ vendors ~ '\'s documentation and the model\'s own suggestions are given' if researched else 'no documented fix, so only the model\'s low-trust suggestions are given') }} | Manual review required: {{ 'yes' if a.manual_review_required else 'no' }}
-Summary: {{ a.summary }}
+Summary: {{ a.summary }}{{ (' (NOT FULLY SUPPORTED by its sources: ' ~ a.summary_note | regex_replace(stop, '\\1.') ~ ')') if a.summary_note | default('') else '' }}
 {% if a.symptoms | default([]) %}
 Symptoms:
 {% for s in a.symptoms %}
@@ -68,7 +68,7 @@ Gaps: none
 {% endif %}
 {% set rv = a.review | default({}) %}
 {% if rv.status | default('') == 'checked' %}
-Checked against its sources (a second model call, {{ rv.version }}): {{ rv.claims }} claim(s); {{ rv.supported }} supported, {{ rv.partly | length }} partly supported, {{ rv.removed | length }} removed{{ (', ' ~ rv.unchecked | length ~ ' not checked') if rv.unchecked | default([]) else '' }}.
+Checked against its sources (a second model call, {{ rv.version }}): {{ rv.claims }} claim(s); {{ rv.supported }} supported, {{ rv.partly | length }} partly supported, {{ rv.removed | length }} removed{{ (', ' ~ rv.retimed | length ~ ' moved to follow-up') if rv.retimed | default([]) else '' }}{{ (', ' ~ rv.unchecked | length ~ ' not checked') if rv.unchecked | default([]) else '' }}.
 {% elif rv.status | default('') %}
 Checked against its sources: {{ rv.status }}.
 {% endif %}

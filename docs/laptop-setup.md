@@ -78,11 +78,11 @@ read -rs VAULT_TOKEN && export VAULT_TOKEN            # paste the root token, th
 v() { podman exec -i -e VAULT_TOKEN aiops-demo-vault vault "$@"; }
 ```
 
-**Entitlements.** The first command creates the secret; the rest add keys to it with `patch`.
+**Entitlements.** The first command creates the secret; the rest add keys to it with `patch`. The manifest line loads the most recently downloaded `manifest_*.zip`, so an older manifest left in Downloads is never picked up by mistake. Before you export a manifest, check in the Customer Portal that its subscription allocation holds the subscription you expect, with the end date you expect: phase 03 reports the name and expiry of what it attached.
 
 ```bash
 v kv put   -mount=aiops-demo entitlements pull_secret=- < ~/Downloads/pull-secret.txt
-base64 -i ~/Downloads/manifest_*.zip | v kv patch -mount=aiops-demo entitlements aap_manifest_b64=-
+ls -t ~/Downloads/manifest_*.zip | head -1 | xargs base64 -i | v kv patch -mount=aiops-demo entitlements aap_manifest_b64=-
 read -rs T && printf %s "$T" | v kv patch -mount=aiops-demo entitlements automation_hub_token=- ; unset T
 v kv patch -mount=aiops-demo entitlements registry_username='<registry service account username>'
 read -rs T && printf %s "$T" | v kv patch -mount=aiops-demo entitlements registry_password=- ; unset T

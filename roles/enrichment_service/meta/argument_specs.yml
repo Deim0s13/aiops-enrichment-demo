@@ -107,6 +107,9 @@ argument_specs:
       enrichment_service_request_extra_thinking:
         type: dict
         description: The model request fields that switch its thinking mode on, from demo_model.request_extra_thinking.
+      enrichment_service_review_thinking:
+        type: bool
+        description: Switch the model's thinking mode on for the citation check alone.
       enrichment_service_thinking_tokens:
         type: int
         description: Extra room in each answer for the model's reasoning when thinking is on.
