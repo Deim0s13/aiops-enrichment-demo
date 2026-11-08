@@ -2,7 +2,8 @@
 # call with the token goes the whole way: sanitisation, retrieval as the read-only identity, the model
 # through the gateway and the service's checks. Its evidence carries a test card number, which must
 # not come back. A second call, for a failure no approved knowledge covers (MessageHub throttling, S2),
-# must be researched in the allow-listed vendor documentation (DD29).
+# must be researched in the allow-listed vendor documentation (DD29). A third drafts a resolution
+# from an engineer's resolution notes (DD33), for phase 06 to check against the template.
 import json
 import os
 import ssl
@@ -45,6 +46,21 @@ throttling = {
 }
 
 
+resolution = {
+    "id": "KB-RS-999",
+    "incident": {"sys_id": "2" * 32, "number": "INC0000002", "cmdb_ci": "payments-notify", "priority": "2",
+                 "short_description": "Phase 06 build check: payments-notify customer confirmations are queuing",
+                 "opened_at": "2026-11-04 02:27:45", "resolved_at": "2026-11-04 02:52:10",
+                 "close_code": "Workaround provided"},
+    "close_notes": ("What you saw:\nMessageHub refused deliveries with HTTP 429 and the backlog grew.\n\n"
+                    "What you checked:\nThe MessageHub status page showed degraded mode in our region.\n\n"
+                    "What fixed it:\nWe paused sending and waited for MessageHub to recover, then the backlog drained.\n\n"
+                    "What to do next time:\nCheck the MessageHub status page first."),
+    "ai_note": "", "service_version": "2.4.1", "owner": "Payments Platform Operations",
+    "context": {"event_id": "phase 06 draft check"},
+}
+
+
 def call(path, body=None, token=None, timeout=15):
     headers = {"Content-Type": "application/json"}
     if token:
@@ -68,6 +84,7 @@ no_token = call("/v1/enrich", incident)
 with_token = call("/v1/enrich", incident, os.environ["TOKEN"], timeout=600)
 provenance = with_token[1].get("provenance", {})
 researched = call("/v1/enrich", throttling, os.environ["TOKEN"], timeout=600) if os.environ.get("RESEARCH") == "1" else (0, {})
+drafted = call("/v1/draft-resolution", resolution, os.environ["TOKEN"], timeout=600)
 print(json.dumps({
     "health": health[0],
     "no_token": no_token[0],
@@ -91,6 +108,14 @@ print(json.dumps({
     "trace_id": provenance.get("trace_id"),
     "trace_recorded": provenance.get("trace_recorded", False),
     "error": health[1].get("error") or with_token[1].get("error"),
+    "draft": {
+        "status": drafted[0],
+        "filename": drafted[1].get("filename", ""),
+        "markdown": drafted[1].get("markdown", ""),
+        "sections": drafted[1].get("sections", []),
+        "unsupported": len(drafted[1].get("unsupported", [])),
+        "detail": str(drafted[1].get("detail", ""))[:300],
+    },
     "research": {
         "status": researched[0],
         "used": [{"id": d.get("id"), "score": d.get("score")} for d in researched[1].get("research_used", [])],

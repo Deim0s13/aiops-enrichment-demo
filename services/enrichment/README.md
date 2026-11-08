@@ -22,6 +22,10 @@ The contract is section 5.3 of the implementation design, and how each rule is a
 
 Evidence with text addressed to an AI assistant is flagged in the gaps, and requires manual review (`app/injection.py`, DD30). The response adds `evidence_considered` (the sanitised evidence), `knowledge_used` (the passages and their scores, or the passage each was added with), `research_used` (the documentation sections, with their addresses) and `checks_removed` to the design 5.3 fields, and its provenance records the versions, the candidates and their scores, what sanitisation removed, the tokens and the time the model took. If the knowledge index cannot be searched the service answers 503; if the model call fails it answers 502. The workflow writes either reason into its "AI enrichment unavailable" note.
 
+## Drafting a resolution
+
+`POST /v1/draft-resolution` (`app/drafting.py`, DD33, scenario S6) turns an engineer's resolution notes into a resolution in the template's layout, for the knowledge bot to open as a pull request. The notes are the source of truth for what was done and what fixed it; the incident and its AI work note are context only. The model fills each section through a strict schema and says where it came from; the service renders the document, and the review call checks each section against its claimed source. The notes are sanitised first, and too-short notes are refused with HTTP 422.
+
 ## Settings
 
 Set by phase 06 from the `enrichment_service` role's defaults and the inventory:

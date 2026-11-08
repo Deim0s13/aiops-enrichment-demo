@@ -19,6 +19,7 @@ mock_modules:
   - ansible.controller.workflow_launch
   - ansible.eda.decision_environment_info
   - ansible.eda.event_stream_info
+  - ansible.eda.rulebook_activation
   - ansible.eda.rulebook_activation_info
   - kubernetes.core.k8s
   - kubernetes.core.k8s_info

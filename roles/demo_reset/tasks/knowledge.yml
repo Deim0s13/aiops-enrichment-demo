@@ -1,0 +1,59 @@
+---
+# Closes the knowledge bot's open pull requests (DD33) and deletes their branches: drafts the demo
+# opened and nobody approved. A merged article is approved knowledge, and stays.
+- name: Get a short-lived token as the knowledge bot
+  demo.aiops.github_app_token:
+    app_id: "{{ secrets_values.github_app_id | string }}"
+    private_key: "{{ secrets_values.github_app_private_key }}"
+    repository: "{{ demo_reset_repository }}"
+  register: demo_reset_github
+  no_log: true
+
+- name: List the open pull requests
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/{{ demo_reset_repository }}/pulls?state=open&per_page=100"
+    headers:
+      Authorization: "Bearer {{ demo_reset_github.token }}"
+      Accept: application/vnd.github+json
+  register: demo_reset_pulls
+  no_log: true
+
+- name: Keep the bot's knowledge drafts
+  ansible.builtin.set_fact:
+    demo_reset_drafts: >-
+      {{ demo_reset_pulls.json | selectattr('head.ref', 'match', '^knowledge/INC[0-9]+$')
+         | selectattr('user.type', 'equalto', 'Bot') | list }}
+
+- name: Close each draft
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/{{ demo_reset_repository }}/pulls/{{ item.number }}"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ demo_reset_github.token }}"
+      Accept: application/vnd.github+json
+    body_format: json
+    body:
+      state: closed
+  loop: "{{ demo_reset_drafts }}"
+  loop_control:
+    label: "#{{ item.number }} {{ item.head.ref }}"
+  no_log: true
+
+- name: Delete each draft's branch
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/{{ demo_reset_repository }}/git/refs/heads/{{ item.head.ref }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ demo_reset_github.token }}"
+      Accept: application/vnd.github+json
+    status_code: [204, 422]
+  loop: "{{ demo_reset_drafts }}"
+  loop_control:
+    label: "{{ item.head.ref }}"
+  no_log: true
+
+- name: Report the drafts closed
+  ansible.builtin.debug:
+    msg: >-
+      {{ ('Closed the knowledge bot\'s open pull request(s) ' ~ (demo_reset_drafts | map(attribute='number') | map('string') | join(', '))
+          ~ ' and deleted their branches.') if demo_reset_drafts else 'The knowledge bot has no open pull requests.' }}

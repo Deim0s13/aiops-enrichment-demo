@@ -1,7 +1,9 @@
 ---
 # Receives qualifying incidents from the ServiceNow business rule through an EDA event stream, and
 # launches the enrichment workflow with only the fields it needs (design 5.1). The event stream
-# replaces this webhook source when the activation is created, and checks the token first.
+# replaces this webhook source when the activation is created, and checks the token first. An
+# incident resolved with Knowledge ticked arrives as a knowledge event, and launches the knowledge
+# bot's draft instead (DD33, scenario S6).
 - name: Enrich qualifying ServiceNow incidents
   hosts: all
   sources:
@@ -12,7 +14,8 @@
   rules:
     - name: Launch the enrichment workflow for a well-formed incident event
       condition: >-
-        event.payload.incident.sys_id is match("^[0-9a-f]{32}$")
+        event.payload.kind is not defined
+        and event.payload.incident.sys_id is match("^[0-9a-f]{32}$")
         and event.payload.incident.number is match("^INC[0-9]{7,}$")
       action:
         run_workflow_template:
@@ -29,6 +32,23 @@
               cmdb_ci: "{{ event.payload.incident.cmdb_ci | default('') }}"
               priority: "{{ event.payload.incident.priority | default('') }}"
               opened_at: "{{ event.payload.incident.opened_at | default('') }}"
+              event_id: "{{ event.payload.event_id | default('') }}"
+
+    - name: Draft a resolution for an incident resolved with Knowledge ticked
+      condition: >-
+        event.payload.kind == "knowledge"
+        and event.payload.incident.sys_id is match("^[0-9a-f]{32}$")
+        and event.payload.incident.number is match("^INC[0-9]{7,}$")
+      action:
+        run_job_template:
+          name: "Knowledge | Draft resolution"
+          organization: ACME Bank
+          include_events: false
+          job_args:
+            extra_vars:
+              incident_sys_id: "{{ event.payload.incident.sys_id }}"
+              incident_number: "{{ event.payload.incident.number }}"
+              cmdb_ci: "{{ event.payload.incident.cmdb_ci | default('') }}"
               event_id: "{{ event.payload.event_id | default('') }}"
 
     - name: Log and drop an event without the incident fields

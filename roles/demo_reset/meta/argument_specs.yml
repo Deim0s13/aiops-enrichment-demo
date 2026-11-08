@@ -17,3 +17,10 @@ argument_specs:
       demo_reset_close_notes:
         type: str
         description: The close note written on each incident closed.
+  knowledge:
+    short_description: Close the knowledge bot's open pull requests and delete their branches (DD33)
+    options:
+      demo_reset_repository:
+        type: str
+        required: true
+        description: The repository, as owner/name.

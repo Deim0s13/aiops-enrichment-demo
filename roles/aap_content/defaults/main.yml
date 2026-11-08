@@ -101,3 +101,12 @@ aap_content_check_retries: 60
 aap_content_check_delay: 10
 # The integration check's alerts carry this service label, so its incident is its own.
 aap_content_check_service: acme-build-check
+
+# DD33, scenario S6: the knowledge bot, acme-knowledge-bot, a GitHub App. Its job drafts a resolution
+# from an incident resolved with Knowledge ticked and opens a pull request; the enrichment trigger's
+# user may launch it, and nothing else may. Declared only when the App is in Vault.
+aap_content_knowledge_template: "Knowledge | Draft resolution"
+aap_content_github_app_credential_type: ACME GitHub App
+aap_content_github_app_credential: ACME knowledge bot
+aap_content_knowledge_owners:
+  payments-notify: Payments Platform Operations

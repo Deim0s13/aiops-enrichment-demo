@@ -1,0 +1,20 @@
+---
+# Knowledge | Draft resolution (DD33, scenario S6). Launched by the trigger when an incident is
+# resolved with Knowledge ticked. Vars from the rulebook: incident_sys_id, incident_number, cmdb_ci,
+# event_id. From the job template: knowledge_repository and knowledge_owners. The job drafts a
+# resolution from the engineer's resolution notes, through the enrichment service, and opens a pull
+# request with it as the knowledge bot. Nothing is published until a person approves and merges it.
+- name: "Knowledge | Draft a resolution"
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Draft the resolution and open its pull request
+      ansible.builtin.include_role:
+        name: demo.aiops.knowledge_draft
+      vars:
+        knowledge_draft_incident_sys_id: "{{ incident_sys_id }}"
+        knowledge_draft_cmdb_ci: "{{ cmdb_ci | default('') }}"
+        knowledge_draft_event_id: "{{ event_id | default('') }}"
+        knowledge_draft_workflow_job: "{{ awx_job_id | default('') }}"
+        knowledge_draft_repository: "{{ knowledge_repository }}"
+        knowledge_draft_owners: "{{ knowledge_owners | default({'payments-notify': 'Payments Platform Operations'}) }}"

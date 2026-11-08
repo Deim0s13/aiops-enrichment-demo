@@ -24,6 +24,44 @@
 - name: Declare the content
   ansible.builtin.include_tasks: declare.yml
 
+# An activation keeps the rulebook it was created with: a changed rulebook is only used by a new
+# activation. So an activation whose rulebook differs from this checkout's is removed, and recreated
+# below with the new one (the knowledge rule, DD33, was the first such change). Only the rules are
+# compared, so an unchanged rulebook leaves its activation alone.
+- name: Read the activations' rulebooks
+  ansible.eda.rulebook_activation_info:
+    name: "{{ item.name }}"
+    aap_hostname: "{{ aap_content_url }}"
+    aap_username: admin
+    aap_password: "{{ aap_content_admin_password }}"
+    aap_validate_certs: "{{ aap_content_validate_certs }}"
+  loop:
+    - { name: "{{ aap_content_activation_name }}", rulebook: "{{ aap_content_rulebook }}" }
+    - { name: "{{ aap_content_integration_activation }}", rulebook: "{{ aap_content_integration_rulebook }}" }
+  loop_control:
+    label: "{{ item.name }}"
+  register: aap_content_existing_activations
+  until: aap_content_existing_activations is not failed
+  retries: 3
+  delay: 5
+
+- name: Remove an activation whose rulebook has changed, so it is recreated with the new one
+  ansible.eda.rulebook_activation:
+    name: "{{ item.item.name }}"
+    state: absent
+    aap_hostname: "{{ aap_content_url }}"
+    aap_username: admin
+    aap_password: "{{ aap_content_admin_password }}"
+    aap_validate_certs: "{{ aap_content_validate_certs }}"
+  loop: "{{ aap_content_existing_activations.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.activations | default([]) | length > 0
+    # The rules only: EDA rewrites a rulebook's sources to attach its event stream.
+    - ((item.activations[0].rulebook_rulesets | default('[]', true) | from_yaml | first | default({})).rules | default([]))
+      != ((lookup('ansible.builtin.file', playbook_dir ~ '/../rulebooks/' ~ item.item.rulebook) | from_yaml | first).rules)
+
 - name: Apply the content with infra.aap_configuration
   ansible.builtin.include_role:
     name: infra.aap_configuration.dispatch

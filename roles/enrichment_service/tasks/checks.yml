@@ -144,6 +144,31 @@
     enrichment_service_trace_spans: "{{ (enrichment_service_trace_read.results | default([{}, {}]))[1].content | default('', true) }}"
   no_log: true
 
+# The drafted resolution (DD33) is checked with the same check GitHub runs on a knowledge pull request.
+- name: Write the drafted resolution where the template check can read it
+  ansible.builtin.tempfile:
+    state: directory
+  register: enrichment_service_draft_dir
+  when: enrichment_service_caller.draft.markdown | default('') | length > 0
+
+- name: Put the draft in a file under its own name
+  ansible.builtin.copy:
+    content: "{{ enrichment_service_caller.draft.markdown }}"
+    dest: "{{ enrichment_service_draft_dir.path }}/{{ enrichment_service_caller.draft.filename | basename }}"
+    mode: "0600"
+  when: enrichment_service_draft_dir is not skipped
+
+- name: Check the draft against the template
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ enrichment_service_source }}/../../tools/knowledge/check.py"
+      - "{{ enrichment_service_draft_dir.path }}/{{ enrichment_service_caller.draft.filename | basename }}"
+  register: enrichment_service_draft_check
+  changed_when: false
+  failed_when: false
+  when: enrichment_service_draft_dir is not skipped
+
 # The versions this checkout says the service is at, to compare with what answered: phase 06 builds
 # from main on GitHub, so a difference means the change was not pushed, or the build did not run.
 - name: Read the versions in this checkout
@@ -230,6 +255,14 @@
           model calls {{ enrichment_service_caller.seconds | default({}) | dict2items | map(attribute='key')
                          | zip(enrichment_service_caller.seconds | default({}) | dict2items | map(attribute='value') | map(attribute='seconds'))
                          | map('join', ' ') | join(' s, ') }} s
+      - check: a resolution is drafted from an engineer's notes in the template's layout, by the check GitHub runs (DD33)
+        passed: "{{ enrichment_service_caller.draft.status | default(-1) == 200 and enrichment_service_draft_check.rc | default(1) == 0 }}"
+        detail: >-
+          HTTP {{ enrichment_service_caller.draft.status | default('none') }};
+          {{ (enrichment_service_draft_check.stdout_lines | default([enrichment_service_caller.draft.detail | default('not drafted')]))
+             | join('; ') }}; sections from
+          {{ enrichment_service_caller.draft.sections | default([]) | map(attribute='source') | join(', ') or 'none' }};
+          {{ enrichment_service_caller.draft.unsupported | default(0) }} not supported by the source they claim
       - check: a failure no approved knowledge covers is researched in the allow-listed vendor documentation (DD29)
         passed: >-
           {{ enrichment_service_research_sources_resolved | length == 0

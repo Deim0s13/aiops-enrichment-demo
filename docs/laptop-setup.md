@@ -109,7 +109,70 @@ read -rs T && printf %s "$T" | v kv put -mount=aiops-demo source github_token=- 
 
 Preflight checks that the token can read the repository, and tries a harmless write (a branch pointing at a commit that does not exist) to confirm it is refused. GitHub reports what your account may do on the repository, not what the token may do, so trying is the only reliable test. When it expires, create a new one and store it the same way.
 
-**Cluster.** Skip this for now. The cluster secrets change with every demo environment, so they are loaded as part of each build: see step 3 of [build-guide.md](build-guide.md).
+### The knowledge bot (optional)
+
+Set this up only if you want scenario S6, the knowledge loop (DD33). You do not need to repeat anything above: the bot's two values go into the `source` secret alongside the GitHub token.
+
+When an engineer resolves an incident with Knowledge ticked, `acme-knowledge-bot` opens a pull request with a resolution drafted from their notes. It is a GitHub App: its own identity, permissions on this repository only, and tokens that last an hour. Without it, the kit builds as before and S6 is skipped.
+
+**Create the App in GitHub.**
+
+1. Open Settings > Developer settings > GitHub Apps > **New GitHub App**, and set:
+   - GitHub App name `acme-knowledge-bot` (names are unique across GitHub, so add a suffix if it is taken)
+   - Homepage URL: this repository's address
+   - Webhook: untick **Active** for now; the second half of S6 sets it
+   - Repository permissions: **Contents**, Read and write; **Pull requests**, Read and write. GitHub adds Metadata, Read-only, by itself. Nothing else
+   - Where can this GitHub App be installed: **Only on this account**
+2. Choose **Create GitHub App**. Note the **App ID** at the top of the App's page (a number such as `1234567`), then under Private keys choose **Generate a private key**: a `.pem` file downloads.
+3. Choose **Install App** in the left menu, install it on your account, and choose **Only select repositories**, `aiops-enrichment-demo`.
+
+**Store the App ID and private key in Vault.** Vault must be unsealed, with the root token in `VAULT_TOKEN` and the `v` function defined, as at the start of this step. Run each command on its own, not pasted together.
+
+The App ID. The command prints a prompt, then waits: type or paste the App ID and press Enter.
+
+```bash
+printf 'App ID: ' && read -r T && printf %s "$T" | v kv patch -mount=aiops-demo source github_app_id=- ; unset T
+```
+
+The private key. This loads the newest `.pem` file in Downloads, and needs nothing typed:
+
+```bash
+ls -t ~/Downloads/*.private-key.pem | head -1 | xargs cat | v kv patch -mount=aiops-demo source github_app_private_key=-
+```
+
+Check both, without showing the key. You should see the App ID, then the key's first line, which starts with `-----BEGIN` and names a private key:
+
+```bash
+v kv get -mount=aiops-demo -field=github_app_id source && v kv get -mount=aiops-demo -field=github_app_private_key source | head -1
+```
+
+Then delete the `.pem` file from Downloads: the key now lives only in Vault.
+
+**Protect `main`**, so a knowledge article is published only when a person approves it. Do this after you have pushed the kit, including `.github/workflows/knowledge.yml`: the push runs the check once, and GitHub only offers a check as required once it has run. You can see it under the repository's **Actions** tab, as a run of *knowledge*.
+
+1. In the repository, open **Settings**, then in the left sidebar **Rules** > **Rulesets**.
+2. Click **New ruleset** > **New branch ruleset**.
+3. **Ruleset name**: `protect-main`.
+4. **Enforcement status**: change it from *Disabled* to **Active**. A disabled ruleset is saved but does nothing.
+5. **Bypass list**: click **Add bypass**, choose **Repository admin**, then **Add selected**. Leave it on *Always allow*, so you can still push the kit's own changes straight to `main`. The bot is not on the list, so it cannot bypass the rules; in a bank, nobody would be.
+6. **Target branches**: click **Add target** > **Include default branch**.
+7. **Branch rules**: leave **Restrict deletions** and **Block force pushes** ticked, as they are by default, and tick:
+   - **Require a pull request before merging**, with **Required approvals** set to `1`. Leave its other options unticked.
+   - **Require status checks to pass**. Click **Add checks**, type `Knowledge template check` and select it. Leave **Require branches to be up to date before merging** unticked, or every bot pull request needs updating each time `main` moves.
+8. Leave everything else as it is, and click **Create**.
+
+If the check is not offered in step 7, it has not run yet: check the **Actions** tab, then come back and edit the ruleset.
+
+Two things to know:
+
+- On a private repository, rulesets are enforced only with GitHub Pro, Team or Enterprise. On GitHub Free, GitHub saves the ruleset but shows a banner saying it is not enforced. The demo still works, because the bot never merges, but the approval is then a habit rather than a control. Making the repository public, or GitHub Pro, makes it a control.
+- Because you can bypass, GitHub offers you a box to merge without the approval. In the demo, approve the pull request rather than bypass it, so the story holds: a person approved this before it became knowledge.
+
+### The cluster
+
+Skip this for now. The cluster secrets change with every demo environment, so they are loaded as part of each build: see step 3 of [build-guide.md](build-guide.md).
+
+### Check and finish
 
 Check what is stored without showing values, then drop the root token from your session:
 

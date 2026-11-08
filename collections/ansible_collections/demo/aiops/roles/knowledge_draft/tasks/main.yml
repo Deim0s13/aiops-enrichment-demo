@@ -1,0 +1,236 @@
+---
+- name: Check the incident ID before using it
+  ansible.builtin.assert:
+    that: knowledge_draft_incident_sys_id is match('^[0-9a-f]{32}$')
+    fail_msg: "{{ knowledge_draft_incident_sys_id | string | truncate(40) }} is not a ServiceNow system ID."
+    quiet: true
+
+- name: Read the incident
+  servicenow.itsm.api_info:
+    resource: incident
+    sysparm_query: "sys_id={{ knowledge_draft_incident_sys_id }}"
+    columns: [sys_id, number, short_description, priority, opened_at, resolved_at, close_code, close_notes, knowledge, state]
+  register: knowledge_draft_found
+  until: knowledge_draft_found is not failed
+  retries: 3
+  delay: 5
+
+- name: Stop if there is no such incident
+  ansible.builtin.assert:
+    that: knowledge_draft_found.record | length == 1
+    fail_msg: "There is no incident with system ID {{ knowledge_draft_incident_sys_id }}, or this identity cannot read it."
+    quiet: true
+
+- name: Keep the incident
+  ansible.builtin.set_fact:
+    knowledge_draft_incident: "{{ knowledge_draft_found.record[0] }}"
+    knowledge_draft_incident_cmdb_ci: "{{ knowledge_draft_cmdb_ci | default('', true) | string }}"
+
+# The trigger fires only for an incident resolved with Knowledge ticked; a retried job checks again.
+- name: Decide whether there is anything to draft
+  ansible.builtin.set_fact:
+    knowledge_draft_wanted: >-
+      {{ knowledge_draft_incident.state | string in ['6', '7']
+         and knowledge_draft_incident.knowledge | string | lower == 'true'
+         and knowledge_draft_incident.close_notes | default('', true) | trim | length > 0 }}
+
+- name: End here if the incident is not resolved with Knowledge ticked and resolution notes
+  ansible.builtin.meta: end_host
+  when: not knowledge_draft_wanted | bool
+
+- name: Read the incident's latest AI work note, as context
+  servicenow.itsm.api_info:
+    resource: sys_journal_field
+    sysparm_query: >-
+      element_id={{ knowledge_draft_incident_sys_id }}^element=work_notes^valueLIKEAI-generated enrichment^ORDERBYDESCsys_created_on
+    columns: [value]
+  register: knowledge_draft_note
+  until: knowledge_draft_note is not failed
+  retries: 3
+  delay: 5
+
+- name: Keep the note and the service's version from it
+  ansible.builtin.set_fact:
+    knowledge_draft_ai_note: "{{ (knowledge_draft_note.record | first | default({})).value | default('') | truncate(19000) }}"
+    knowledge_draft_service_version: >-
+      {{ ((knowledge_draft_note.record | first | default({})).value | default('')
+          | regex_search('version ([0-9][0-9A-Za-z.-]*[0-9A-Za-z])', '\1') or ['']) | first }}
+
+- name: Get a short-lived token as the knowledge bot
+  demo.aiops.github_app_token:
+    app_id: "{{ lookup('ansible.builtin.env', 'GITHUB_APP_ID') }}"
+    private_key: "{{ lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'GITHUB_APP_PRIVATE_KEY_FILE')) }}"
+    repository: "{{ knowledge_draft_repository }}"
+    api_url: "{{ knowledge_draft_api_url }}"
+  register: knowledge_draft_github
+  no_log: true
+
+- name: Remember how to call GitHub
+  ansible.builtin.set_fact:
+    knowledge_draft_api: "{{ knowledge_draft_api_url }}/repos/{{ knowledge_draft_repository }}"
+    knowledge_draft_headers:
+      Authorization: "Bearer {{ knowledge_draft_github.token }}"
+      Accept: application/vnd.github+json
+      X-GitHub-Api-Version: "2022-11-28"
+    knowledge_draft_branch: "knowledge/{{ knowledge_draft_incident.number }}"
+  no_log: true
+
+# One pull request per incident: a retried job, or a second resolve, opens no second one.
+- name: Look for a pull request already opened for the incident
+  ansible.builtin.uri:
+    url: >-
+      {{ knowledge_draft_api }}/pulls?state=all&head={{ knowledge_draft_repository.split('/')[0] }}:{{ knowledge_draft_branch }}
+    headers: "{{ knowledge_draft_headers }}"
+  register: knowledge_draft_existing
+  no_log: true
+
+- name: Note the existing pull request and end here
+  when: knowledge_draft_existing.json | length > 0
+  block:
+    - name: Report the existing pull request
+      ansible.builtin.debug:
+        msg: "A pull request for {{ knowledge_draft_incident.number }} already exists: {{ knowledge_draft_existing.json[0].html_url }}"
+
+    - name: End here
+      ansible.builtin.meta: end_host
+
+- name: List the resolutions on the base branch, for the next free ID
+  ansible.builtin.uri:
+    url: "{{ knowledge_draft_api }}/contents/{{ knowledge_draft_path }}?ref={{ knowledge_draft_base_branch }}"
+    headers: "{{ knowledge_draft_headers }}"
+  register: knowledge_draft_listing
+  no_log: true
+
+- name: Choose the next ID
+  ansible.builtin.set_fact:
+    knowledge_draft_id: >-
+      {{ 'KB-RS-%03d' | format(((knowledge_draft_listing.json | map(attribute='name') | select('match', '^KB-RS-[0-9]+')
+         | map('regex_replace', '^KB-RS-([0-9]+).*$', '\1') | map('int') | list) + [0]) | max + 1) }}
+
+- name: Ask the enrichment service for the draft
+  ansible.builtin.uri:
+    url: "{{ lookup('ansible.builtin.env', 'ENRICHMENT_URL') }}/v1/draft-resolution"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ lookup('ansible.builtin.env', 'ENRICHMENT_TOKEN') }}"
+    ca_path: "{{ lookup('ansible.builtin.env', 'ENRICHMENT_CA_FILE') }}"
+    body_format: json
+    body:
+      id: "{{ knowledge_draft_id }}"
+      incident:
+        sys_id: "{{ knowledge_draft_incident.sys_id }}"
+        number: "{{ knowledge_draft_incident.number }}"
+        short_description: "{{ knowledge_draft_incident.short_description | default('', true) | string | truncate(160) }}"
+        cmdb_ci: "{{ knowledge_draft_incident_cmdb_ci }}"
+        priority: "{{ knowledge_draft_incident.priority | default('', true) | string }}"
+        opened_at: "{{ knowledge_draft_incident.opened_at | default('', true) | string }}"
+        resolved_at: "{{ knowledge_draft_incident.resolved_at | default('', true) | string }}"
+        close_code: "{{ knowledge_draft_incident.close_code | default('', true) | string | truncate(80) }}"
+      close_notes: "{{ knowledge_draft_incident.close_notes | string | truncate(8000) }}"
+      ai_note: "{{ knowledge_draft_ai_note }}"
+      service_version: "{{ knowledge_draft_service_version | trim }}"
+      owner: "{{ knowledge_draft_owners[knowledge_draft_incident_cmdb_ci] | default(knowledge_draft_owners.values() | first) }}"
+      context:
+        workflow_job: "{{ knowledge_draft_workflow_job | string | regex_replace('[^0-9]', '') | truncate(20, end='') }}"
+        event_id: "{{ knowledge_draft_event_id | string | regex_replace('[^A-Za-z0-9 ._:-]', '') | truncate(100, end='') }}"
+    timeout: "{{ knowledge_draft_timeout }}"
+    status_code: [-1, 200, 401, 422, 500, 502, 503]
+  register: knowledge_draft_response
+  no_log: true
+
+- name: Stop if the service did not draft it
+  ansible.builtin.assert:
+    that: knowledge_draft_response.status == 200 and knowledge_draft_response.json.markdown is defined
+    fail_msg: >-
+      The enrichment service answered {{ ('HTTP ' ~ knowledge_draft_response.status) if knowledge_draft_response.status > 0 else 'nothing' }}:
+      {{ (knowledge_draft_response.json.detail | default(knowledge_draft_response.msg | default('no detail'))) | string | truncate(300) }}
+    quiet: true
+
+- name: Keep the draft
+  ansible.builtin.set_fact:
+    knowledge_draft_doc: "{{ knowledge_draft_response.json }}"
+    knowledge_draft_versions: >-
+      {{ knowledge_draft_response.json.markdown | regex_search('versions: \[([^\]]*)\]', '\1') | first | default('') | replace('"', '') }}
+
+- name: Find the base branch's head
+  ansible.builtin.uri:
+    url: "{{ knowledge_draft_api }}/git/ref/heads/{{ knowledge_draft_base_branch }}"
+    headers: "{{ knowledge_draft_headers }}"
+  register: knowledge_draft_base
+  no_log: true
+
+- name: Create the incident's branch
+  ansible.builtin.uri:
+    url: "{{ knowledge_draft_api }}/git/refs"
+    method: POST
+    headers: "{{ knowledge_draft_headers }}"
+    body_format: json
+    body:
+      ref: "refs/heads/{{ knowledge_draft_branch }}"
+      sha: "{{ knowledge_draft_base.json.object.sha }}"
+    status_code: [201, 422]
+  register: knowledge_draft_ref
+  no_log: true
+
+- name: Add the article to the branch
+  ansible.builtin.uri:
+    url: "{{ knowledge_draft_api }}/contents/{{ knowledge_draft_path }}/{{ knowledge_draft_doc.filename }}"
+    method: PUT
+    headers: "{{ knowledge_draft_headers }}"
+    body_format: json
+    body:
+      message: "{{ knowledge_draft_doc.id }}: draft resolution from {{ knowledge_draft_incident.number }}"
+      content: "{{ knowledge_draft_doc.markdown | b64encode }}"
+      branch: "{{ knowledge_draft_branch }}"
+    status_code: [201]
+  no_log: true
+
+- name: Open the pull request
+  ansible.builtin.uri:
+    url: "{{ knowledge_draft_api }}/pulls"
+    method: POST
+    headers: "{{ knowledge_draft_headers }}"
+    body_format: json
+    body:
+      title: "{{ knowledge_draft_doc.id }}: {{ knowledge_draft_doc.title | truncate(200) }}"
+      head: "{{ knowledge_draft_branch }}"
+      base: "{{ knowledge_draft_base_branch }}"
+      body: "{{ lookup('ansible.builtin.template', 'pull_request.md.j2') }}"
+    status_code: [201]
+  register: knowledge_draft_pr
+  no_log: true
+
+- name: Label it
+  ansible.builtin.uri:
+    url: "{{ knowledge_draft_api }}/issues/{{ knowledge_draft_pr.json.number }}/labels"
+    method: POST
+    headers: "{{ knowledge_draft_headers }}"
+    body_format: json
+    body:
+      labels: "{{ knowledge_draft_labels }}"
+    status_code: [200, 201]
+  failed_when: false
+  no_log: true
+
+- name: Note the pull request on the incident
+  servicenow.itsm.api:
+    resource: incident
+    action: patch
+    sys_id: "{{ knowledge_draft_incident_sys_id }}"
+    data:
+      work_notes: >-
+        [Knowledge] A draft resolution, {{ knowledge_draft_doc.id }}, is in pull request #{{ knowledge_draft_pr.json.number }} for the
+        knowledge owner's review: {{ knowledge_draft_pr.json.html_url }}. It was drafted by acme-knowledge-bot from this
+        incident's resolution notes{{ (', and ' ~ knowledge_draft_doc.unsupported | length ~ ' section(s) are marked for checking')
+        if knowledge_draft_doc.unsupported else '' }}. Once approved and merged, it becomes approved knowledge.
+  register: knowledge_draft_noted
+  until: knowledge_draft_noted is not failed
+  retries: 3
+  delay: 5
+
+- name: Report the pull request
+  ansible.builtin.set_stats:
+    data:
+      knowledge_pull_request: "{{ knowledge_draft_pr.json.html_url }}"
+      knowledge_document: "{{ knowledge_draft_doc.id }}"
+    per_host: false

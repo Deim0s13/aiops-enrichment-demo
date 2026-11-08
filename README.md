@@ -53,6 +53,7 @@ aiops-enrichment-demo/
 │   └── payments-notify/              sample service with a reproducible fault
 ├── knowledge/                        synthetic runbooks and prior resolutions, with approval metadata
 ├── vendor-docs/                      a fictional vendor's public documentation, which enrichment may research
+├── tools/knowledge/                  the resolution template and the check every knowledge change must pass
 └── docs/
 ```
 

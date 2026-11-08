@@ -329,6 +329,17 @@
   ansible.builtin.include_tasks: checks_throttling.yml
   when: workload_check_throttling | bool
 
+# The knowledge loop's first half (S6, DD33), from the S2 incident, once the bot is set up.
+- name: Prove the knowledge loop as far as a person's approval (S6)
+  ansible.builtin.include_tasks: checks_knowledge.yml
+  vars:
+    workload_knowledge_incident: "{{ workload_throttling_incident.record | default([]) | first | default({}) }}"
+  when:
+    - workload_check_throttling | bool
+    - workload_check_knowledge | bool
+    - secrets_values.github_app_id | default('', true) | length > 0
+    - workload_throttling_incident.record | default([]) | length > 0
+
 - name: Report the checks
   ansible.builtin.set_fact:
     workload_report: "{{ workload_report + (workload_check_lines | from_json) }}"

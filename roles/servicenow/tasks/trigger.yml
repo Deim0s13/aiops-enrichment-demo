@@ -127,6 +127,51 @@
           aiops-enrichment-demo build (phase 07).
         script: "{{ lookup('ansible.builtin.template', 'trigger.js.j2') | trim }}"
 
+# DD33, scenario S6: an incident resolved with Knowledge ticked is posted to the same event stream,
+# marked as a knowledge event, so the knowledge bot can draft a resolution from its resolution notes.
+- name: Create or update the knowledge trigger business rule
+  ansible.builtin.include_tasks: record.yml
+  vars:
+    servicenow_record:
+      kind: trigger
+      label: "{{ servicenow_knowledge_rule }}"
+      table: sys_script
+      query: "collection=incident^name={{ servicenow_knowledge_rule }}"
+      data:
+        name: "{{ servicenow_knowledge_rule }}"
+        collection: incident
+        when: async
+        order: "110"
+        action_insert: "false"
+        action_update: "true"
+        active: "true"
+        advanced: "true"
+        # Evaluated as the incident is saved, so the change to Resolved is seen; the script runs after.
+        condition: "current.state.changesTo(6) && current.knowledge == true && !current.close_notes.nil()"
+        description: >-
+          Posts each incident of the on-call group resolved with Knowledge ticked to the AAP event stream, so a
+          resolution can be drafted from its resolution notes for review (DD33). Managed by the aiops-enrichment-demo
+          build (phase 07).
+        script: "{{ lookup('ansible.builtin.template', 'knowledge_trigger.js.j2') | trim }}"
+
+# The engineer's side of the template (DD33): headings for the resolution notes, applied from the
+# incident form's Templates menu, with Knowledge ticked.
+- name: Create or update the resolution notes template
+  ansible.builtin.include_tasks: record.yml
+  vars:
+    servicenow_record:
+      kind: trigger
+      label: "{{ servicenow_notes_template.name }}"
+      table: sys_template
+      query: "table=incident^name={{ servicenow_notes_template.name }}"
+      data:
+        name: "{{ servicenow_notes_template.name }}"
+        table: incident
+        short_description: "{{ servicenow_notes_template.description }}"
+        global: "true"
+        active: "true"
+        template: "close_notes={{ servicenow_notes_template.headings | join('\n\n') }}\n^knowledge=true^EQ"
+
 - name: Summarise the trigger records
   ansible.builtin.set_fact:
     servicenow_report: "{{ servicenow_summary_json | from_json }}"

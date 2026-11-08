@@ -1,0 +1,35 @@
+**{{ knowledge_draft_doc.id }}** drafted by acme-knowledge-bot from the resolution notes of **{{ knowledge_draft_incident.number }}**, written by the engineer who resolved it.
+
+Approving and merging this pull request publishes the article to ACME Bank's knowledge base: from then on, the enrichment service may cite it as a documented fix for {{ knowledge_draft_incident_cmdb_ci }} {{ knowledge_draft_versions }}. Read it as you would any other article: check that it says what the engineer did, and edit anything that is wrong, unclear or missing before you approve.
+
+### Where each section came from
+
+| Section | Source |
+|---|---|
+{% for s in knowledge_draft_doc.sections %}
+| {{ s.section }} | {{ s.source | replace('engineer', "the engineer's resolution notes") | replace('incident', 'the incident record') | replace('model', "**the model's own wording: check it**") }} |
+{% endfor %}
+
+{% if knowledge_draft_doc.unsupported %}
+### Not supported by the source it claims
+
+A second model call checked each section against its source (DD31). These were not fully supported, so they are marked as the model's:
+
+{% for u in knowledge_draft_doc.unsupported %}
+- **{{ u.section }}** ({{ u.supported }}): {{ u.reason }}
+{% endfor %}
+{% endif %}
+{% if knowledge_draft_doc.flags %}
+### Flags
+
+{% for f in knowledge_draft_doc.flags %}
+- {{ f }}
+{% endfor %}
+{% endif %}
+{% if knowledge_draft_doc.provenance.redactions %}
+
+Removed from the notes before drafting: {{ knowledge_draft_doc.provenance.redactions | dict2items | map(attribute='key') | zip(knowledge_draft_doc.provenance.redactions | dict2items | map(attribute='value')) | map('join', ' ') | join(', ') }}.
+{% endif %}
+
+---
+References: incident {{ knowledge_draft_incident.number }} | {{ knowledge_draft_doc.provenance.draft_version }} | {{ knowledge_draft_doc.provenance.review_version }} ({{ knowledge_draft_doc.provenance.review }}) | model {{ knowledge_draft_doc.provenance.model }} | service {{ knowledge_draft_doc.provenance.service_version }} | {{ ('trace ' ~ knowledge_draft_doc.provenance.trace_id ~ ' (MLflow)') if knowledge_draft_doc.provenance.trace_recorded else 'trace not recorded' }} | AAP job {{ knowledge_draft_workflow_job or 'n/a' }}

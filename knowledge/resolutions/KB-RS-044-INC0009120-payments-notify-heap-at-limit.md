@@ -20,6 +20,16 @@ On 18 August 2026, `payments-notify` 2.4 was killed for exceeding its memory lim
 
 After INC0008812, change CHG0030418 raised the maximum heap (`JVM_MAX_HEAP`) from 192m to 256m, to give the template cache more room. The container memory limit stayed at 256Mi, so the maximum heap now equalled the limit.
 
+## Timeline (NZDT)
+
+| Time | Event |
+|---|---|
+| 10:12 | First `OOMKilled` restart (exit code 137), heap at 64% of its maximum |
+| 10:40 | Third restart; on-call engineer engaged |
+| 11:05 | Heap dump captured and pod restarted with `payments-heapdump-restart` |
+| 11:20 | Payments Engineering confirms the template cache holds most of the heap |
+| 12:10 | Ninth and last restart; kills stop as volume falls after the midday peak |
+
 ## What we found
 
 - Each container ended with `OOMKilled`, exit code 137, while the heap was at 60 to 90% of its maximum: well short of full.

@@ -77,3 +77,29 @@ workload_forbidden_sources: [KB-RB-009, KB-SEC-003, KB-RS-029]
 # own incident, and a note that says there is no documented fix and gives only low-trust suggestions.
 # Adds about five minutes.
 workload_check_throttling: true
+# S6, the knowledge loop's first half (DD33): resolve the S2 incident with Knowledge ticked and check
+# the bot's pull request. Runs once the bot is in Vault. The pull request is closed afterwards unless
+# workload_knowledge_keep is true, to look at it.
+workload_check_knowledge: true
+workload_knowledge_keep: false
+workload_knowledge_close_code: Workaround provided
+# What an engineer would write in the "ACME resolution notes" template after S2, from what they saw.
+# Wrapped as an engineer's notes would be; the line breaks are kept.
+workload_knowledge_close_notes: |-
+  What you saw:
+  MessageHub refused deliveries with HTTP 429 for client acme-payments-notify, with Retry-After 30,
+  and the backlog grew to over 2,000 customer payment confirmations.
+
+  What you checked:
+  The MessageHub status page showed an incident in our region with degraded mode, which halves every
+  client's limit. Our retries were waiting for Retry-After; only one instance sends with this client ID.
+
+  What fixed it:
+  Nothing on our side: we paused notification sending so retries stopped counting against the reduced
+  limit, and opened a Priority 1 case with MessageHub through our account administrator, quoting the
+  client ID and the time the 429s began. When MessageHub cleared the incident about 15 minutes later,
+  we resumed sending and the backlog drained in about 5 minutes.
+
+  What to do next time:
+  Check the MessageHub status page first. If MessageHub is in degraded mode, pause sending and wait;
+  do not scale out or ask for a higher limit, which MessageHub does not grant during an incident.

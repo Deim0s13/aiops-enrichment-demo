@@ -13,6 +13,8 @@ For each request from the AAP workflow it:
    drops suggestions that repeat the documented fix, then has a second model call check every claim
    against the sources it cites (app.review, DD31);
 6. returns the answer with the evidence it considered, the passages it used and its provenance.
+It also drafts resolutions for the knowledge base from an engineer's resolution notes (/v1/draft-resolution,
+app.drafting, DD33).
 Each request is traced in MLflow, step by step (app.tracing), and the trace ID goes into the note.
 
 A failure to reach the knowledge index or the model is an error (503 or 502) with a reason that is
@@ -33,10 +35,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from app import injection, knowledge, model, policy, prompt, research, retrieval, review, tracing
+from app import drafting, injection, knowledge, model, policy, prompt, research, retrieval, review, tracing
 from app.sanitise import sanitise, sanitise_tree
 
-SERVICE_VERSION = "0.7.1"
+SERVICE_VERSION = "0.8.0"
 # A suggestion scoring at or above this against a documented step repeats it (DD32).
 # Provisional: phase 06 reports the scores of its memory request, to set it from.
 REPEAT_THRESHOLD = float(os.environ.get("ENRICHMENT_REPEAT_THRESHOLD", "0.85"))
@@ -100,6 +102,29 @@ class EnrichRequest(BaseModel):
     service_version: str = Field(default="", max_length=40, pattern=r"^([0-9]+(\.[0-9A-Za-z-]+)*)?$")
     evidence: list[Evidence] = Field(default_factory=list, max_length=50)
     catalogue: list[CatalogueEntry] = Field(default_factory=list, max_length=20)
+    context: Context = Field(default_factory=Context)
+
+
+class ResolvedIncident(BaseModel):
+    sys_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    number: str = Field(pattern=r"^INC[0-9]{7,}$")
+    short_description: str = Field(default="", max_length=160)
+    cmdb_ci: str = Field(default="", max_length=100, pattern=r"^[A-Za-z0-9._ -]*$")
+    priority: str = Field(default="", max_length=2)
+    opened_at: str = Field(default="", max_length=30)
+    resolved_at: str = Field(default="", max_length=30)
+    close_code: str = Field(default="", max_length=80)
+
+
+class DraftRequest(BaseModel):
+    """A request to draft a resolution (DD33): the document's ID, the incident, the engineer's notes."""
+
+    id: str = Field(pattern=r"^KB-RS-[0-9]{3,4}$")
+    incident: ResolvedIncident
+    close_notes: str = Field(min_length=1, max_length=8000)
+    ai_note: str = Field(default="", max_length=20000)
+    service_version: str = Field(default="", max_length=40, pattern=r"^([0-9]+(\.[0-9A-Za-z-]+)*)?$")
+    owner: str = Field(max_length=100, pattern=r"^[A-Za-z0-9 ,.&()'-]+$")
     context: Context = Field(default_factory=Context)
 
 
@@ -346,4 +371,94 @@ def _enrich(request: EnrichRequest, root, trace_ref: str) -> dict:
                  "review": summary["status"], "review_removed": len(summary["removed"]),
                  "review_partly": len(summary["partly"])})
     tracing.safe_outputs(root, {k: v for k, v in checked.items()})
+    return response
+
+
+@app.post("/v1/draft-resolution")
+def draft_resolution(request: DraftRequest, authorization: str | None = Header(default=None)) -> dict:
+    """Drafts a resolution in the template's layout from the engineer's notes (DD33)."""
+    authorise(authorization)
+    traced = tracing.ready()
+    with tracing.span("draft-resolution", "CHAIN") as root:
+        trace_id = root.trace_id
+        tracing.tag({"incident": request.incident.number, "document": request.id,
+                           "draft_version": drafting.DRAFT_VERSION, "service_version": SERVICE_VERSION,
+                           "workflow_job": request.context.workflow_job, "event_id": request.context.event_id})
+        counts: Counter = Counter()
+        incident = sanitise_tree(request.incident.model_dump(), counts)
+        notes = sanitise(request.close_notes, counts)
+        ai_note = sanitise(request.ai_note, counts)
+        if len(notes.split()) < 8:
+            raise HTTPException(status_code=422, detail="The resolution notes are too short to draft an article from: "
+                                                        "say what you saw, what you checked, what you did and what fixed it.")
+        flags = []
+        found = injection.find(notes)
+        if found:
+            flags.append(f"The resolution notes contain text addressed to an AI assistant (\"{found}\"). It was treated "
+                         "as data; check the draft carefully.")
+        user = drafting.user_message(incident, notes, ai_note)
+        with tracing.span("model", "CHAT_MODEL") as step:
+            tracing.safe_inputs(step, {"messages": [{"role": "system", "content": drafting.SYSTEM},
+                                                    {"role": "user", "content": user}]})
+            try:
+                answer, tokens, seconds = model.complete(drafting.SYSTEM, user, drafting.schema(), temperature=0.2,
+                                                         max_tokens=drafting.MAX_TOKENS)
+            except model.ModelError as error:
+                raise HTTPException(status_code=502, detail=f"The model could not draft the resolution: {error}") from None
+            answer_counts: Counter = Counter()
+            draft = drafting.tidy(sanitise_tree(answer, answer_counts))
+            tracing.safe_outputs(step, {"draft": draft})
+
+        # Each section is checked against the source it claims (DD31): one its source does not support
+        # is marked as the model's, so the reviewer sees it in the pull request.
+        items = drafting.sections_for_review(draft)
+        checked = {}
+        review_status = "nothing to check"
+        if items and review.ENABLED:
+            sources = {"ENGINEER-NOTES": notes, "AI-NOTE": ai_note or "(none)",
+                       "INCIDENT": f"{incident['short_description']}. Priority {incident['priority']}. Opened "
+                                   f"{drafting.local(incident['opened_at'])}; resolved {drafting.local(incident['resolved_at'])}."}
+            with tracing.span("review", "CHAT_MODEL") as step:
+                try:
+                    verdicts, review_tokens, review_seconds, _, _ = review.review(items, sources)
+                    checked = sanitise_tree(verdicts, answer_counts)
+                    tokens = {k: tokens[k] + review_tokens[k] for k in ("prompt", "completion")}
+                    seconds += review_seconds
+                    review_status = "checked"
+                except model.ModelError as error:
+                    review_status = f"not checked: {error}"
+                tracing.safe_outputs(step, {"verdicts": checked, "status": review_status})
+        unsupported = []
+        for item in items:
+            verdict = checked.get(item["ref"])
+            if verdict and verdict["supported"] != "yes":
+                draft[item["ref"]]["source"] = "model"
+                unsupported.append({"section": item["name"], "supported": verdict["supported"], "reason": verdict["reason"]})
+
+        markdown, title, filename = drafting.render(request.id, incident, drafting.major_versions(request.service_version),
+                                                    request.owner, draft)
+        names = [("summary", "Summary"), ("background", "Background"), ("timeline", "Timeline"),
+                 ("what_we_found", "What we found"), ("resolution", "Resolution"),
+                 ("root_cause", "Root cause and follow-up"), ("lessons", "Lessons")]
+        sections = []
+        for key, name in names:
+            if key == "timeline":
+                origin = sorted({r["source"] for r in draft["timeline"]})
+                sections.append({"section": name, "source": ", ".join(origin)})
+            elif key != "background" or draft["background"]["text"]:
+                sections.append({"section": name, "source": draft[key]["source"]})
+        response = {
+            "id": request.id, "title": title, "filename": filename, "markdown": markdown, "sections": sections,
+            "unsupported": unsupported, "flags": flags,
+            "provenance": {"draft_version": drafting.DRAFT_VERSION, "review_version": review.REVIEW_VERSION,
+                           "review": review_status, "model": model.MAAS_MODEL, "tokens": tokens,
+                           "model_seconds": round(seconds, 1), "service_version": SERVICE_VERSION,
+                           "redactions": dict(counts), "answer_redactions": dict(answer_counts)},
+        }
+        tracing.safe_outputs(root, {"title": title, "sections": sections, "unsupported": unsupported})
+    recorded = traced and tracing.recorded(trace_id)
+    response["provenance"]["trace_id"] = trace_id if recorded else None
+    response["provenance"]["trace_recorded"] = recorded
+    log.info("trace=%s recorded=%s draft=%s incident=%s unsupported=%s tokens=%s", trace_id, recorded, request.id,
+             request.incident.number, len(unsupported), tokens)
     return response

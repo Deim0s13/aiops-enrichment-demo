@@ -19,6 +19,8 @@ approved_on: 2026-09-15
 ---
 ```
 
+Every resolution follows one template, `tools/knowledge/resolution-template.md`: the metadata above, then Summary, an optional Background, Timeline, What we found, Resolution, Root cause and follow-up, and Lessons, in that order (DD33). `tools/knowledge/check.py` checks every document against these rules and every resolution against the template; GitHub runs it on each pull request that changes `knowledge/`, and branch protection on `main` requires it to pass. Run it yourself with `python tools/knowledge/check.py`. A resolution drafted by the knowledge bot from an engineer's resolution notes (scenario S6) arrives the same way, as a pull request, with `source_incident` and `drafted_by` added to its metadata.
+
 Approval is represented by review of the pull request that adds or changes a document. Every document is ingested with its labels, and retrieval filters on status, service, version and access before any passage reaches the model (design 5.3, rule 2). Superseded and restricted documents are kept in the index deliberately, so the demo can prove the filter keeps them out, rather than relying on them never having been loaded.
 
 ## The corpus

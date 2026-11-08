@@ -1,0 +1,18 @@
+---
+# Knowledge | Draft resolution (DD33, scenario S6): from an incident resolved with Knowledge ticked,
+# the enrichment service drafts a resolution in the template's layout from the engineer's notes, and
+# the knowledge bot opens a pull request with it for the knowledge owner to review.
+knowledge_draft_incident_sys_id: ""
+knowledge_draft_cmdb_ci: ""
+knowledge_draft_event_id: ""
+knowledge_draft_workflow_job: ""
+# owner/name of the repository, and the branch the article goes into.
+knowledge_draft_repository: ""
+knowledge_draft_base_branch: main
+knowledge_draft_path: knowledge/resolutions
+# The owner a service's knowledge goes to, by configuration item; the first entry is the fallback.
+knowledge_draft_owners:
+  payments-notify: Payments Platform Operations
+knowledge_draft_api_url: https://api.github.com
+knowledge_draft_timeout: 600
+knowledge_draft_labels: [knowledge, ai-drafted]

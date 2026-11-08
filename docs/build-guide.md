@@ -390,6 +390,8 @@ What it does (role `aap_content`, the automation team's part). The content is de
 
     The incident is removed afterwards. This step takes a few minutes, because each notification is a short AAP job and the enrichment runs too.
 
+14. **The knowledge bot** (DD33, scenario S6), once its GitHub App is in Vault (laptop setup, step 3, *The knowledge bot*): a credential type and credential for `acme-knowledge-bot`, whose private key AAP writes to a file for the job; the job template *Knowledge \| Draft resolution*, which only the trigger's user may launch; a second rule in the enrichment rulebook, for knowledge events; and, in ServiceNow, the *ACME resolution notes* template and the *ACME trigger: knowledge draft* business rule, which posts an incident of the on-call group resolved with Knowledge ticked. An activation whose rules have changed is recreated, since an activation keeps the rulebook it was created with.
+
 ## 13 Phase 08: workload
 
 The cluster builds the sample service from GitHub, so **push** any change to `services/payments-notify` first. Run phase 07 first: the alerts are routed to its integration stand-in.
@@ -478,6 +480,10 @@ It raises incidents as `svc-monitoring`, as the integration will, and reads the 
 | V7 | A test card number, an email address and a token planted in the log are found in neither the work note, the MLflow trace nor any record of the incident's AAP workflow |
 | V8 | The superseded runbook, the restricted one (and its marker phrase) and another service's resolution reach neither the note nor the trace |
 | V9 | The time from incident to note and the tokens used are reported, not judged; fails only past 10 minutes |
+
+### Scenario S6: the knowledge loop
+
+Run S2, then resolve its incident as an engineer would. In the incident, open the form's menu > **Templates** > **Apply template** > *ACME resolution notes*, which fills the resolution notes with four headings and ticks **Knowledge**. Under each heading, write what you saw, what you checked, what fixed it and what to do next time; choose a resolution code and set the state to **Resolved**. Within a minute or two the incident gets a "[Knowledge]" work note with a pull request link. In GitHub, the pull request by `acme-knowledge-bot` holds a resolution in the template's layout, says which sections came from your notes and which are the model's wording, and shows whether the *Knowledge template check* passed. Review it, edit it in the pull request if needed, and approve and merge it: that is the publication. (The second half of S6, a merge refreshing the index so the next S2 cites it, follows.) Phase 08 proves this as far as the pull request, then closes it; `-e workload_knowledge_keep=true` keeps it open to look at. `reset.yml` closes the bot's open pull requests. The PDI may also create a draft article in ServiceNow's own knowledge base when Knowledge is ticked; it plays no part in the demo.
 
 V6 to V9 run payments-notify's memory fault with the planted lines (scenario `planted`) on a fresh pod, so they take about five minutes and leave one real incident open, which the report names; `-e verify_trust=false` skips them. They need phases 07 and 08 from the same commit: the redaction is in the diagnostics (DD28) and the scenario in payments-notify.
 

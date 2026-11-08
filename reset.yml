@@ -3,7 +3,8 @@
 #   ansible-navigator run reset.yml
 # Restarts the sample service with a new pod, which clears a recurring fault, then resolves and closes
 # the demo's own incidents (raised by svc-monitoring in the on-call group), with a close note, and
-# deletes anything the build checks left behind. Touches nothing else in the PDI or the cluster.
+# deletes anything the build checks left behind. Touches nothing else in the PDI or the cluster. If
+# the knowledge bot is set up (DD33), closes its open pull requests and deletes their branches too.
 
 - name: Reset the demo to a clean state between runs
   hosts: localhost
@@ -20,11 +21,11 @@
     kubernetes.core.k8s_info: *cluster_auth
 
   tasks:
-    - name: Resolve the cluster and ServiceNow secrets
+    - name: Resolve the cluster, ServiceNow and source secrets
       ansible.builtin.include_role:
         name: secrets
       vars:
-        secrets_groups: [cluster, servicenow]
+        secrets_groups: [cluster, servicenow, source]
 
     # First, so the service has stopped failing before its incidents are closed.
     - name: Restart the sample service, clearing a recurring fault
@@ -39,3 +40,11 @@
         name: demo_reset
       vars:
         demo_reset_assignment_group: "{{ demo_servicenow.assignment_group }}"
+
+    - name: Close the knowledge bot's open pull requests
+      ansible.builtin.include_role:
+        name: demo_reset
+        tasks_from: knowledge
+      vars:
+        demo_reset_repository: "{{ demo_repository.owner }}/{{ demo_repository.name }}"
+      when: secrets_values.github_app_id | default('', true) | length > 0

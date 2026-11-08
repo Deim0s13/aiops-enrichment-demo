@@ -1,0 +1,48 @@
+---
+argument_specs:
+  main:
+    short_description: Draft a resolution from a resolved incident and open a pull request with it
+    description:
+      - Reads the incident and its latest AI work note from ServiceNow, asks the enrichment service to draft a
+        resolution from the engineer's resolution notes (DD33), and opens a pull request with it as the knowledge
+        bot, acme-knowledge-bot, a GitHub App. Notes the pull request on the incident.
+      - Does nothing if the incident is not resolved with Knowledge ticked, or a pull request for it already exists.
+      - Needs SN_HOST, SN_USERNAME and SN_PASSWORD, ENRICHMENT_URL, ENRICHMENT_TOKEN and ENRICHMENT_CA_FILE, and
+        GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_FILE in the environment, from the job's credentials.
+    options:
+      knowledge_draft_incident_sys_id:
+        type: str
+        required: true
+        description: The incident's system ID.
+      knowledge_draft_cmdb_ci:
+        type: str
+        description: The incident's configuration item, by name.
+      knowledge_draft_event_id:
+        type: str
+        description: The trigger's event ID, for the trace.
+      knowledge_draft_workflow_job:
+        type: str
+        description: The AAP job, for the trace.
+      knowledge_draft_repository:
+        type: str
+        required: true
+        description: The repository, as owner/name.
+      knowledge_draft_base_branch:
+        type: str
+        description: The branch the pull request goes into.
+      knowledge_draft_path:
+        type: str
+        description: The corpus directory for resolutions.
+      knowledge_draft_owners:
+        type: dict
+        description: The owning team for a service's knowledge, by configuration item.
+      knowledge_draft_api_url:
+        type: str
+        description: The GitHub API's address.
+      knowledge_draft_timeout:
+        type: int
+        description: Seconds to wait for the draft.
+      knowledge_draft_labels:
+        type: list
+        elements: str
+        description: Labels for the pull request.

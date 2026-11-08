@@ -1,0 +1,47 @@
+// Posts each incident of the on-call group that is resolved with Knowledge ticked to the AAP event
+// stream (DD33, scenario S6), so the knowledge bot can draft a resolution from its resolution notes.
+// Only the incident's identifiers go: the job reads the notes from ServiceNow itself, so they never
+// travel in an event or sit in AAP's records. Retried like the enrichment trigger. Managed by the
+// aiops-enrichment-demo build.
+(function executeRule(current, previous) {
+    if (current.getValue('assignment_group') != '{{ servicenow_ids.group }}') {
+        return;
+    }
+    var number = current.getValue('number');
+    var body = JSON.stringify({
+        kind: 'knowledge',
+        event_id: gs.generateGUID(),
+        incident: {
+            sys_id: current.getUniqueValue(),
+            number: number,
+            cmdb_ci: current.getDisplayValue('cmdb_ci')
+        }
+    });
+    var delays = {{ servicenow_trigger_retry_delays_ms | to_json }};
+    var attempt = 0;
+    var status = 0;
+    var detail = '';
+    while (true) {
+        attempt++;
+        try {
+            var request = new sn_ws.RESTMessageV2('{{ servicenow_trigger_rest_message }}', 'post');
+            request.setRequestBody(body);
+            var response = request.execute();
+            status = response.getStatusCode();
+            detail = (status >= 200 && status <= 299) ? '' : String(response.getErrorMessage() || '');
+        } catch (e) {
+            status = 0;
+            detail = String(e);
+        }
+        var delivered = status >= 200 && status <= 299;
+        var mayPass = status == 0 || status == 429 || status >= 500;
+        if (delivered || !mayPass || attempt > delays.length) {
+            break;
+        }
+        gs.sleep(delays[attempt - 1]);
+    }
+    if (!(status >= 200 && status <= 299)) {
+        gs.error('ACME knowledge trigger: could not post ' + number + ' after ' + attempt
+            + ' attempt(s); last answer HTTP ' + status + (detail ? ': ' + detail : ''));
+    }
+})(current, previous);

@@ -191,3 +191,7 @@ demo_required_secrets:
   servicenow_admin_username: { path: servicenow, key: admin_username }
   servicenow_admin_password: { path: servicenow, key: admin_password }
   github_token: { path: source, key: github_token }
+  # The knowledge bot, acme-knowledge-bot, a GitHub App (DD33, scenario S6): optional, so a kit without
+  # it builds as before. Laptop setup step 3 says how to load them.
+  github_app_id: { path: source, key: github_app_id, optional: true }
+  github_app_private_key: { path: source, key: github_app_private_key, optional: true }

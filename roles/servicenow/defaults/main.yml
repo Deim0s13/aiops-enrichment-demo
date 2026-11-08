@@ -135,4 +135,14 @@ servicenow_trigger_priorities: ["2", "3"]
 # attempts over about 7 seconds. The rule runs asynchronously, so waiting holds up nothing else.
 servicenow_trigger_retry_delays_ms: [2000, 5000]
 servicenow_trigger_check_retries: 60
+# DD33, scenario S6: the knowledge trigger, and the template for an engineer's resolution notes.
+servicenow_knowledge_rule: "ACME trigger: knowledge draft"
+servicenow_notes_template:
+  name: ACME resolution notes
+  description: Headings for the resolution notes, with Knowledge ticked, so a resolution can be drafted from them for review.
+  headings:
+    - "What you saw:"
+    - "What you checked:"
+    - "What fixed it:"
+    - "What to do next time:"
 servicenow_trigger_check_delay: 10

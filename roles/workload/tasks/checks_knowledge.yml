@@ -1,0 +1,151 @@
+---
+# Scenario S6, first half (DD33): the knowledge loop as far as it can go without a person. The S2
+# incident is resolved as an engineer would resolve it, from the "ACME resolution notes" template with
+# Knowledge ticked. The knowledge trigger then has the bot draft a resolution from those notes and open
+# a pull request. The check finds the pull request as the bot, checks the article against the template
+# with the same check GitHub runs, then closes it and deletes its branch, since only a person may
+# approve one. Appends its results to workload_results. Takes a few minutes.
+
+- name: Resolve the S2 incident as the engineer would, with Knowledge ticked
+  servicenow.itsm.api:
+    instance: &admin
+      host: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}"
+      username: "{{ secrets_values.servicenow_admin_username }}"
+      password: "{{ secrets_values.servicenow_admin_password }}"
+    resource: incident
+    action: patch
+    sys_id: "{{ workload_knowledge_incident.sys_id }}"
+    data:
+      state: "6"
+      close_code: "{{ workload_knowledge_close_code }}"
+      close_notes: "{{ workload_knowledge_close_notes }}"
+      knowledge: "true"
+  register: workload_knowledge_resolved
+  until: workload_knowledge_resolved is not failed
+  retries: 3
+  delay: 5
+
+- name: Wait for the bot's note on the incident
+  servicenow.itsm.api_info:
+    instance: *admin
+    resource: sys_journal_field
+    sysparm_query: >-
+      element_id={{ workload_knowledge_incident.sys_id }}^element=work_notes^valueLIKE[Knowledge]^ORDERBYDESCsys_created_on
+    columns: [value]
+  register: workload_knowledge_note
+  until: workload_knowledge_note is not failed and workload_knowledge_note.record | length > 0
+  retries: "{{ workload_incident_retries }}"
+  delay: "{{ workload_incident_delay }}"
+  failed_when: false
+
+- name: Get a short-lived token as the knowledge bot
+  demo.aiops.github_app_token:
+    app_id: "{{ secrets_values.github_app_id | string }}"
+    private_key: "{{ secrets_values.github_app_private_key }}"
+    repository: "{{ workload_repository.owner }}/{{ workload_repository.name }}"
+  register: workload_knowledge_github
+  no_log: true
+
+- name: Remember how to call GitHub
+  ansible.builtin.set_fact:
+    workload_knowledge_api: "https://api.github.com/repos/{{ workload_repository.owner }}/{{ workload_repository.name }}"
+    workload_knowledge_headers:
+      Authorization: "Bearer {{ workload_knowledge_github.token }}"
+      Accept: application/vnd.github+json
+      X-GitHub-Api-Version: "2022-11-28"
+    workload_knowledge_branch: "knowledge/{{ workload_knowledge_incident.number }}"
+  no_log: true
+
+- name: Find the pull request
+  ansible.builtin.uri:
+    url: "{{ workload_knowledge_api }}/pulls?state=open&head={{ workload_repository.owner }}:{{ workload_knowledge_branch }}"
+    headers: "{{ workload_knowledge_headers }}"
+  register: workload_knowledge_pulls
+  no_log: true
+
+- name: Read its files
+  ansible.builtin.uri:
+    url: "{{ workload_knowledge_api }}/pulls/{{ workload_knowledge_pulls.json[0].number }}/files"
+    headers: "{{ workload_knowledge_headers }}"
+  register: workload_knowledge_files
+  when: workload_knowledge_pulls.json | length > 0
+  no_log: true
+
+- name: Read the article from its branch
+  ansible.builtin.uri:
+    url: "{{ workload_knowledge_api }}/contents/{{ workload_knowledge_files.json[0].filename }}?ref={{ workload_knowledge_branch }}"
+    headers: "{{ workload_knowledge_headers | combine({'Accept': 'application/vnd.github.raw+json'}) }}"
+    return_content: true
+  register: workload_knowledge_article
+  when: workload_knowledge_files.json | default([]) | length == 1
+  no_log: true
+
+- name: Write the article where the check can read it
+  ansible.builtin.tempfile:
+    suffix: ".md"
+  register: workload_knowledge_file
+  when: workload_knowledge_article.content | default('') | length > 0
+
+- name: Put the article in the file, under its own name
+  ansible.builtin.copy:
+    content: "{{ workload_knowledge_article.content }}"
+    dest: "{{ workload_knowledge_file.path | dirname }}/{{ workload_knowledge_files.json[0].filename | basename }}"
+    mode: "0600"
+  when: workload_knowledge_file is not skipped
+
+# The same check GitHub runs on the pull request (.github/workflows/knowledge.yml).
+- name: Check the article against the template
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ playbook_dir }}/../tools/knowledge/check.py"
+      - "{{ workload_knowledge_file.path | dirname }}/{{ workload_knowledge_files.json[0].filename | basename }}"
+  register: workload_knowledge_check
+  changed_when: false
+  failed_when: false
+  when: workload_knowledge_file is not skipped
+
+- name: Close the pull request and delete its branch, unless asked to keep them
+  when: workload_knowledge_pulls.json | default([]) | length > 0 and not workload_knowledge_keep | bool
+  block:
+    - name: Close the pull request
+      ansible.builtin.uri:
+        url: "{{ workload_knowledge_api }}/pulls/{{ workload_knowledge_pulls.json[0].number }}"
+        method: PATCH
+        headers: "{{ workload_knowledge_headers }}"
+        body_format: json
+        body:
+          state: closed
+      no_log: true
+
+    - name: Delete its branch
+      ansible.builtin.uri:
+        url: "{{ workload_knowledge_api }}/git/refs/heads/{{ workload_knowledge_branch }}"
+        method: DELETE
+        headers: "{{ workload_knowledge_headers }}"
+        status_code: [204, 422]
+      no_log: true
+
+- name: Judge the first half of the knowledge loop
+  ansible.builtin.set_fact:
+    workload_results: "{{ workload_results + workload_knowledge_results }}"
+  vars:
+    pr: "{{ workload_knowledge_pulls.json | default([]) | first | default({}) }}"
+    note: "{{ (workload_knowledge_note.record | default([]) | first | default({})).value | default('') }}"
+    article: "{{ workload_knowledge_article.content | default('') }}"
+    workload_knowledge_results:
+      - check: "S6: resolving with Knowledge ticked has the bot open a pull request, noted on the incident"
+        passed: "{{ pr.number is defined and note | length > 0 and pr.html_url | default('') in note }}"
+        detail: >-
+          {{ workload_knowledge_incident.number }};
+          {{ ('pull request #' ~ pr.number ~ ' by ' ~ pr.user.login | default('?')) if pr.number is defined else 'no pull request' }};
+          {{ 'noted on the incident' if note else 'no note on the incident' }}
+      - check: "S6: the drafted article follows the template, by the check GitHub runs, and says where each section came from"
+        passed: >-
+          {{ workload_knowledge_check.rc | default(1) == 0 and workload_knowledge_files.json | default([]) | length == 1
+             and 'Where each section came from' in pr.body | default('') and workload_knowledge_incident.number in article }}
+        detail: >-
+          {{ (workload_knowledge_files.json | default([{}]) | first).filename | default('no file') }};
+          {{ (workload_knowledge_check.stdout_lines | default(['not checked']))[-1] }}{{ ('; ' ~ (workload_knowledge_check.stdout_lines[:-1] | join('; ')))
+             if workload_knowledge_check.stdout_lines | default([]) | length > 1 else '' }};
+          {{ 'kept open for review' if workload_knowledge_keep | bool else 'pull request closed and branch deleted' }}

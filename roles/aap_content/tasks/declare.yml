@@ -412,3 +412,68 @@
             event_stream: "{{ aap_content_alert_stream_name }}"
         restart_policy: on-failure
         enabled: true
+
+# DD33, scenario S6: the knowledge bot. Declared only once its GitHub App is in Vault (laptop setup),
+# so a kit without it builds as before. Its private key is written to a file for the job, never put
+# in the job's variables, and the job asks GitHub for a token limited to this repository.
+- name: Decide whether the knowledge bot is set up
+  ansible.builtin.set_fact:
+    aap_content_knowledge_enabled: >-
+      {{ secrets_values.github_app_id | default('', true) | length > 0
+         and secrets_values.github_app_private_key | default('', true) is search('PRIVATE KEY') }}
+
+- name: Describe the knowledge bot's credential type
+  ansible.builtin.set_fact:
+    aap_content_knowledge_credential_type:
+      name: "{{ aap_content_github_app_credential_type }}"
+      description: A GitHub App, passed to jobs as GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_FILE (DD33).
+      kind: cloud
+      inputs:
+        fields:
+          - { id: app_id, type: string, label: App ID }
+          - { id: private_key, type: string, label: Private key, secret: true, multiline: true }
+        required: [app_id, private_key]
+      injectors:
+        file:
+          template: !unsafe "{{ private_key }}"
+        env:
+          GITHUB_APP_ID: !unsafe "{{ app_id }}"
+          GITHUB_APP_PRIVATE_KEY_FILE: !unsafe "{{ tower.filename }}"
+  when: aap_content_knowledge_enabled | bool
+
+- name: Declare the knowledge bot's job and who may launch it
+  ansible.builtin.set_fact:
+    aap_content_cfg_controller_credential_types: "{{ aap_content_cfg_controller_credential_types + [aap_content_knowledge_credential_type] }}"
+    aap_content_cfg_controller_templates: >-
+      {{ aap_content_cfg_controller_templates + [{
+           'name': aap_content_knowledge_template,
+           'description': aap_content_knowledge_description,
+           'playbook': 'automation/knowledge/draft_resolution.yml',
+           'organization': aap_content_organisation,
+           'project': aap_content_project_name,
+           'inventory': aap_content_inventory_name,
+           'execution_environment': aap_content_ee_name,
+           'credentials': [aap_content_servicenow_credential, aap_content_enrichment_credential, aap_content_github_app_credential],
+           'extra_vars': {'knowledge_repository': aap_content_repository.owner ~ '/' ~ aap_content_repository.name,
+                          'knowledge_owners': aap_content_knowledge_owners},
+           'ask_variables_on_launch': true}] }}
+    aap_content_cfg_controller_roles: >-
+      {{ aap_content_cfg_controller_roles + [{'user': aap_content_eda_user, 'job_template': aap_content_knowledge_template,
+                                               'role': 'execute'}] }}
+  vars:
+    aap_content_knowledge_description: >-
+      Drafts a resolution from an incident resolved with Knowledge ticked, from the engineer's notes, and opens a pull
+      request for review (DD33).
+  when: aap_content_knowledge_enabled | bool
+
+- name: Declare the knowledge bot's credential
+  ansible.builtin.set_fact:
+    aap_content_cfg_controller_credentials: >-
+      {{ aap_content_cfg_controller_credentials + [{
+           'name': aap_content_github_app_credential,
+           'description': 'acme-knowledge-bot, a GitHub App with contents and pull requests on this repository only (DD33).',
+           'organization': aap_content_organisation,
+           'credential_type': aap_content_github_app_credential_type,
+           'inputs': {'app_id': secrets_values.github_app_id | string, 'private_key': secrets_values.github_app_private_key}}] }}
+  when: aap_content_knowledge_enabled | bool
+  no_log: true
