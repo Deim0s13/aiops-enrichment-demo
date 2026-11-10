@@ -1,0 +1,27 @@
+---
+# Entry point: stop with one clear line if the PDI is asleep or out of reach, before anything changes.
+# A hibernating PDI answers every call with a web page instead of JSON, which otherwise surfaces as
+# a page of HTML from whichever task calls it first. Used by connect.yml, reset.yml, verify.yml and
+# phase 08. Needs only the PDI's address, so it runs without credentials.
+
+- name: Check that the PDI is awake (an awake instance answers 401 without credentials)
+  ansible.builtin.uri:
+    url: "{{ secrets_values.servicenow_instance_url | regex_replace('/$', '') }}/api/now/table/sys_user?sysparm_limit=1"
+    follow_redirects: none
+    headers:
+      Accept: application/json
+    status_code: [200, 301, 302, 401]
+    timeout: "{{ servicenow_timeout }}"
+  register: servicenow_awake
+  failed_when: false
+
+- name: Stop if the PDI is hibernating or unreachable
+  ansible.builtin.assert:
+    that: servicenow_awake.status | default(-1) == 401
+    fail_msg: >-
+      {{ 'The ServiceNow PDI is hibernating. Sign in at developer.servicenow.com to wake it, wait until it shows as '
+         ~ 'online (a few minutes), then run this again.'
+         if servicenow_awake.status | default(-1) in [200, 301, 302] else
+         'Cannot reach the ServiceNow PDI at ' ~ secrets_values.servicenow_instance_url ~ ' ('
+         ~ (servicenow_awake.msg | default('no response') | truncate(200)) ~ ').' }}
+    quiet: true

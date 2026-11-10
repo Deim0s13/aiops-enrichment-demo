@@ -15,22 +15,5 @@
     servicenow_credentials: {}
   no_log: true
 
-- name: Check that the PDI is awake (an awake instance answers 401 without credentials)
-  ansible.builtin.uri:
-    url: "{{ servicenow_url }}/api/now/table/sys_user?sysparm_limit=1"
-    follow_redirects: none
-    headers:
-      Accept: application/json
-    status_code: [200, 301, 302, 401]
-    timeout: "{{ servicenow_timeout }}"
-  register: servicenow_awake
-  failed_when: false
-
-- name: Stop if the PDI is hibernating or unreachable
-  ansible.builtin.assert:
-    that: servicenow_awake.status | default(-1) == 401
-    fail_msg: >-
-      {{ 'The ServiceNow PDI looks like it is hibernating. Wake it at developer.servicenow.com and rerun.'
-         if servicenow_awake.status | default(-1) in [200, 301, 302] else
-         'Cannot reach the ServiceNow PDI (' ~ (servicenow_awake.msg | default('no response') | truncate(200)) ~ ').' }}
-    quiet: true
+- name: Check that the PDI is awake
+  ansible.builtin.include_tasks: awake.yml

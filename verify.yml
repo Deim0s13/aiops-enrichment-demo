@@ -29,6 +29,11 @@
       vars:
         secrets_groups: [cluster, servicenow]
 
+    - name: Check that the ServiceNow PDI is awake
+      ansible.builtin.include_role:
+        name: servicenow
+        tasks_from: awake
+
     - name: Run the checks
       ansible.builtin.include_role:
         name: verify

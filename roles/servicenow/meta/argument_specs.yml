@@ -72,6 +72,15 @@ argument_specs:
       servicenow_timeout:
         type: int
         description: Seconds to wait for each ServiceNow API call.
+  awake:
+    short_description: Stop with one clear line if the ServiceNow PDI is hibernating or unreachable
+    description:
+      - Probes the PDI without credentials; an awake instance answers 401. Used before anything that calls ServiceNow.
+      - Reads the PDI URL from secrets_values (group servicenow).
+    options:
+      servicenow_timeout:
+        type: int
+        description: Seconds to wait for the probe.
   trigger:
     short_description: Post qualifying incidents to the AAP event stream, and prove it hands-off
     description:

@@ -27,6 +27,11 @@
       vars:
         secrets_groups: [cluster, servicenow, source]
 
+    - name: Check that the ServiceNow PDI is awake
+      ansible.builtin.include_role:
+        name: servicenow
+        tasks_from: awake
+
     # First, so the service has stopped failing before its incidents are closed.
     - name: Restart the sample service, clearing a recurring fault
       ansible.builtin.include_role:

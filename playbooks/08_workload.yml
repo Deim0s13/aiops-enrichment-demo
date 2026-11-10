@@ -30,6 +30,11 @@
       vars:
         secrets_groups: [cluster, servicenow, source]
 
+    - name: Check that the ServiceNow PDI is awake
+      ansible.builtin.include_role:
+        name: servicenow
+        tasks_from: awake
+
     - name: Deploy payments-notify and prove the fault
       ansible.builtin.include_role:
         name: workload

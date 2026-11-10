@@ -197,7 +197,8 @@
           ansible.builtin.assert:
             that: preflight_servicenow_probe.status | default(-1) == 401
             fail_msg: >-
-              {{ 'The ServiceNow PDI looks like it is hibernating. Wake it at developer.servicenow.com and rerun.'
+              {{ 'The ServiceNow PDI is hibernating. Sign in at developer.servicenow.com to wake it, wait until it shows as '
+                 ~ 'online (a few minutes), then run this again.'
                  if preflight_servicenow_probe.status | default(-1) in [200, 301, 302] else
                  'Cannot reach ' ~ secrets_values.servicenow_instance_url ~ ' ('
                  ~ (preflight_servicenow_probe.msg | default('no response') | truncate(200)) ~ ').' }}

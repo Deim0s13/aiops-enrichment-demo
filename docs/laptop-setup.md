@@ -78,14 +78,38 @@ read -rs VAULT_TOKEN && export VAULT_TOKEN            # paste the root token, th
 v() { podman exec -i -e VAULT_TOKEN aiops-demo-vault vault "$@"; }
 ```
 
-**Entitlements.** The first command creates the secret; the rest add keys to it with `patch`. The manifest line loads the most recently downloaded `manifest_*.zip`, so an older manifest left in Downloads is never picked up by mistake. Before you export a manifest, check in the Customer Portal that its subscription allocation holds the subscription you expect, with the end date you expect: phase 03 reports the name and expiry of what it attached.
+**Entitlements.** Run each command on its own, not pasted together. The first creates the entry with `put`, which **replaces everything already in it**, so run it only when setting up from scratch. The others add or change one value each with `patch` and leave the rest alone: to update one value later (a new manifest, a regenerated token), run only its command.
+
+The manifest command loads the most recently downloaded `manifest_*.zip`, so an older manifest left in Downloads is never picked up by mistake. Before you export a manifest, check in the Customer Portal that its subscription allocation holds the subscription you expect, with the end date you expect: phase 03 reports the name and expiry of what it attached.
+
+First time only:
 
 ```bash
-v kv put   -mount=aiops-demo entitlements pull_secret=- < ~/Downloads/pull-secret.txt
+v kv put -mount=aiops-demo entitlements pull_secret=- < ~/Downloads/pull-secret.txt
+```
+
+The manifest:
+
+```bash
 ls -t ~/Downloads/manifest_*.zip | head -1 | xargs base64 -i | v kv patch -mount=aiops-demo entitlements aap_manifest_b64=-
-read -rs T && printf %s "$T" | v kv patch -mount=aiops-demo entitlements automation_hub_token=- ; unset T
-v kv patch -mount=aiops-demo entitlements registry_username='<registry service account username>'
-read -rs T && printf %s "$T" | v kv patch -mount=aiops-demo entitlements registry_password=- ; unset T
+```
+
+The Automation Hub offline token, from console.redhat.com/ansible/automation-hub/token. Nothing shows as you paste it:
+
+```bash
+printf 'Automation Hub token: ' && read -rs T && echo && printf %s "$T" | v kv patch -mount=aiops-demo entitlements automation_hub_token=- ; unset T
+```
+
+The registry service account's username, from access.redhat.com/terms-based-registry. It looks like `12345678|name`:
+
+```bash
+printf 'Registry username: ' && read -r T && printf %s "$T" | v kv patch -mount=aiops-demo entitlements registry_username=- ; unset T
+```
+
+The same service account's token. Nothing shows as you paste it:
+
+```bash
+printf 'Registry token: ' && read -rs T && echo && printf %s "$T" | v kv patch -mount=aiops-demo entitlements registry_password=- ; unset T
 ```
 
 **ServiceNow.**
@@ -95,7 +119,7 @@ v kv put -mount=aiops-demo servicenow instance_url=https://devNNNNNN.service-now
 read -rs T && printf %s "$T" | v kv patch -mount=aiops-demo servicenow admin_password=- ; unset T
 ```
 
-**Source.** AAP syncs this repository as its project, and the repository is private, so AAP needs a token that can read it and nothing else (DD16). In GitHub, open Settings > Developer settings > Personal access tokens > Fine-grained tokens > Generate new token, and set:
+**Source.** AAP syncs this repository as its project with a token that can read it and nothing else (DD16). The repository is public, so it would sync without one, but the token keeps the kit working from a private fork or copy, and it is how AAP reads a bank's source control. In GitHub, open Settings > Developer settings > Personal access tokens > Fine-grained tokens > Generate new token, and set:
 
 - Token name `aiops-demo-aap`, with an expiry that covers your demo period (90 days, say)
 - Resource owner: your account; Repository access: Only select repositories, `aiops-enrichment-demo`
@@ -165,7 +189,7 @@ If the check is not offered in step 7, it has not run yet: check the **Actions**
 
 Two things to know:
 
-- On a private repository, rulesets are enforced only with GitHub Pro, Team or Enterprise. On GitHub Free, GitHub saves the ruleset but shows a banner saying it is not enforced. The demo still works, because the bot never merges, but the approval is then a habit rather than a control. Making the repository public, or GitHub Pro, makes it a control.
+- GitHub enforces rulesets on public repositories on any plan, so on this repository the approval is a real control. On a private copy owned by a personal account, GitHub saves the ruleset but does not enforce it, and says so in a banner; the demo still works, because the bot never merges, but the approval is then a habit rather than a control. In a bank, GitHub Enterprise enforces it.
 - Because you can bypass, GitHub offers you a box to merge without the approval. In the demo, approve the pull request rather than bypass it, so the story holds: a person approved this before it became knowledge.
 
 ### The cluster
@@ -293,7 +317,7 @@ ansible-navigator run playbooks/00_preflight.yml \
 | Preflight: "Cannot reach Vault at http://host.containers.internal:8200" | The Vault container is not running (`podman ps`), or the Podman machine is stopped. On Linux, `host.containers.internal` may not reach a port bound to `127.0.0.1`: set `AIOPS_VAULT_ADDR=http://127.0.0.1:8200` and add `--execution-environment-container-options="--net=host"` |
 | "Vault is sealed" | The laptop or Podman machine restarted. Unseal as above |
 | "Vault refused the ... AppRole login" or "approle.env has no credentials for ..." | The secret IDs expired or were rotated, or `approle.env` was not sourced in this terminal. Issue new ones as above |
-| "The ServiceNow PDI looks like it is hibernating" | Wake it at developer.servicenow.com. PDIs hibernate after a period without use and are reclaimed if left long enough |
+| "The ServiceNow PDI is hibernating" | Sign in at developer.servicenow.com to wake it, and wait until it shows as online. Preflight, phases 04, 07 and 08, `verify.yml` and `reset.yml` all check first. PDIs hibernate after a period without use and are reclaimed if left long enough |
 | "ServiceNow did not accept the administrator credentials" | The PDI password changes when an instance is reclaimed or upgraded. Update `aiops-demo/servicenow` |
 | "The API presents a certificate signed by a CA that is not publicly trusted" | Load the cluster's CA bundle, as in step 3 of [build-guide.md](build-guide.md) |
 | "registry.redhat.io rejected registry_username and registry_password" | The registry service account was deleted or its token regenerated. Check it at access.redhat.com/terms-based-registry and update `aiops-demo/entitlements` |
