@@ -38,23 +38,39 @@
   ansible.builtin.meta: end_host
   when: not knowledge_draft_wanted | bool
 
-- name: Read the incident's latest AI work note, as context
+# Through the incident's own work notes field, which the job's identity may read with itil: the journal
+# table behind it is for administrators, and a query on it as this identity returns nothing, which
+# left the first S6 article without the AI note's context or the service's version (versions "unknown").
+# The field's display value holds every work note, newest first, each after a "date - author (Work
+# notes)" line; the first one that is an AI-generated enrichment is the latest.
+- name: Read the incident's work notes, for its latest AI note, as context
   servicenow.itsm.api_info:
-    resource: sys_journal_field
-    sysparm_query: >-
-      element_id={{ knowledge_draft_incident_sys_id }}^element=work_notes^valueLIKEAI-generated enrichment^ORDERBYDESCsys_created_on
-    columns: [value]
-  register: knowledge_draft_note
-  until: knowledge_draft_note is not failed
+    resource: incident
+    sysparm_query: "sys_id={{ knowledge_draft_incident_sys_id }}"
+    columns: [work_notes]
+    display_value: "true"
+  register: knowledge_draft_notes
+  until: knowledge_draft_notes is not failed
   retries: 3
   delay: 5
 
-- name: Keep the note and the service's version from it
+- name: Keep the latest AI note and the service's version from it
   ansible.builtin.set_fact:
-    knowledge_draft_ai_note: "{{ (knowledge_draft_note.record | first | default({})).value | default('') | truncate(19000) }}"
+    knowledge_draft_ai_note: "{{ knowledge_draft_ai_note_found | default('', true) | truncate(19000) }}"
     knowledge_draft_service_version: >-
-      {{ ((knowledge_draft_note.record | first | default({})).value | default('')
+      {{ (knowledge_draft_ai_note_found | default('', true)
           | regex_search('version ([0-9][0-9A-Za-z.-]*[0-9A-Za-z])', '\1') or ['']) | first }}
+  vars:
+    knowledge_draft_ai_note_found: >-
+      {{ (knowledge_draft_notes.record | first | default({})).work_notes | default('', true)
+         | regex_search('\[AI-generated enrichment[\s\S]*?(?=\n\n\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} - |$)') }}
+
+- name: Say so if there is no AI note to draw on
+  ansible.builtin.debug:
+    msg: >-
+      {{ knowledge_draft_incident.number }} has no AI-generated enrichment note that this identity can read, so the draft
+      works from the resolution notes and the incident record alone, and the article's versions are "unknown".
+  when: knowledge_draft_service_version | trim | length == 0
 
 - name: Get a short-lived token as the knowledge bot
   demo.aiops.github_app_token:

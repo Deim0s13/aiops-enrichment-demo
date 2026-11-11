@@ -149,3 +149,8 @@
           {{ (workload_knowledge_check.stdout_lines | default(['not checked']))[-1] }}{{ ('; ' ~ (workload_knowledge_check.stdout_lines[:-1] | join('; ')))
              if workload_knowledge_check.stdout_lines | default([]) | length > 1 else '' }};
           {{ 'kept open for review' if workload_knowledge_keep | bool else 'pull request closed and branch deleted' }}
+      # The draft takes the service's release from the incident's AI note: "unknown" means it could not read the note.
+      - check: "S6: the draft read the incident's AI note, so the article names the service's release"
+        passed: "{{ article | length > 0 and 'versions: [\"unknown\"]' not in article }}"
+        detail: >-
+          {{ (article | regex_search('versions: .*') | default('no versions line', true)) if article else 'no article' }}

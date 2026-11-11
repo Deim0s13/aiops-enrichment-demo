@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field
 from app import drafting, injection, knowledge, model, policy, prompt, research, retrieval, review, tracing
 from app.sanitise import sanitise, sanitise_tree
 
-SERVICE_VERSION = "0.8.0"
+SERVICE_VERSION = "0.8.1"
 # A suggestion scoring at or above this against a documented step repeats it (DD32).
 # Provisional: phase 06 reports the scores of its memory request, to set it from.
 REPEAT_THRESHOLD = float(os.environ.get("ENRICHMENT_REPEAT_THRESHOLD", "0.85"))
