@@ -1,0 +1,27 @@
+name: knowledge
+
+# Every change to the knowledge corpus is checked against its rules and, for a resolution, the
+# template (tools/knowledge/resolution-template.md, DD33). Branch protection on main makes this check,
+# and a person's approval, required before a knowledge pull request can merge: the approval is the
+# publication.
+on:
+  pull_request:
+    paths: ["knowledge/**", "tools/knowledge/**"]
+  push:
+    branches: [main]
+    paths: ["knowledge/**", "tools/knowledge/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Knowledge template check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml==6.0.2
+      - run: python tools/knowledge/check.py
