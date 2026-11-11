@@ -51,8 +51,13 @@ def check(path: Path, required_sections: list[str]) -> list[str]:
             problems.append(f"{path.name}: {key} is {meta[key]!r}, not one of {', '.join(allowed)}")
     if meta.get("id") and not path.name.startswith(f"{meta['id']}-") and path.stem != meta["id"]:
         problems.append(f"{path.name}: the file name does not start with its id, {meta['id']}")
-    if meta.get("versions") is not None and not isinstance(meta.get("versions"), list):
-        problems.append(f"{path.name}: versions is not a list")
+    # The same rule as ingestion (services/enrichment/app/knowledge.py), so an article the index would
+    # refuse cannot pass review: KB-RS-045 was drafted with versions ["unknown"] and passed.
+    versions = meta.get("versions")
+    if versions is not None and (not isinstance(versions, list)
+                                 or not all(re.fullmatch(r"\d+\.x", str(v)) for v in versions)):
+        problems.append(f"{path.name}: versions is {versions!r}; it must be a list of releases such as [\"2.x\"]. "
+                        "Set the release the article covers before approving it")
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", str(meta.get("approved_on", ""))):
         problems.append(f"{path.name}: approved_on is not a date (YYYY-MM-DD)")
     if not re.search(rf"^# {re.escape(str(meta.get('title', '')))}$", body, re.M):

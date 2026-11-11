@@ -483,7 +483,23 @@ It raises incidents as `svc-monitoring`, as the integration will, and reads the 
 
 ### Scenario S6: the knowledge loop
 
-Run S2, then resolve its incident as an engineer would. In the incident, open the form's menu > **Templates** > **Apply template** > *ACME resolution notes*, which fills the resolution notes with four headings and ticks **Knowledge**. Under each heading, write what you saw, what you checked, what fixed it and what to do next time; choose a resolution code and set the state to **Resolved**. Within a minute or two the incident gets a "[Knowledge]" work note with a pull request link. In GitHub, the pull request by `acme-knowledge-bot` holds a resolution in the template's layout, says which sections came from your notes and which are the model's wording, and shows whether the *Knowledge template check* passed. Review it, edit it in the pull request if needed, and approve and merge it: that is the publication. (The second half of S6, a merge refreshing the index so the next S2 cites it, follows.) Phase 08 proves this as far as the pull request, then closes it; `-e workload_knowledge_keep=true` keeps it open to look at. `reset.yml` closes the bot's open pull requests. The PDI may also create a draft article in ServiceNow's own knowledge base when Knowledge is ticked; it plays no part in the demo.
+Run S2, wait for its AI note, then resolve its incident as an engineer would. The knowledge trigger fires when an incident of the on-call group changes to **Resolved** with **Knowledge** ticked and resolution notes filled in. There are two ways to fill them in; the outcome is the same.
+
+**With the template.** Open the incident in the classic form, not the Service Operations Workspace (an address containing `/now/sow/`): `https://devNNNNNN.service-now.com/incident.do?sysparm_query=number=INC00100xx`. Click the **☰** icon at the left of the form header (or right-click the header) and choose **Templates** > **Apply Template** > *ACME resolution notes*. It fills **Resolution notes**, on the **Resolution Information** tab, with four headings and ticks **Knowledge**. If the menu has no **Templates**, choose **View** > **Default view** and look again. Some PDI releases and views do not offer it at all; then fill the notes in by hand.
+
+**By hand.** On the **Resolution Information** tab, paste the four headings into **Resolution notes** and tick **Knowledge**:
+
+```text
+What you saw:
+
+What you checked:
+
+What fixed it:
+
+What to do next time:
+```
+
+Either way, write under each heading what you saw, what you checked, what fixed it and what to do next time, in your own words: the draft uses nothing else for what was done, and writes "Not recorded" for an empty heading. Then choose a **Resolution code**, set **State** to **Resolved** (not Closed: the trigger fires on the change to Resolved) and save. Within a minute or two the incident gets a "[Knowledge]" work note with a pull request link. In GitHub, the pull request by `acme-knowledge-bot` holds a resolution in the template's layout, says which sections came from your notes and which are the model's wording, and shows whether the *Knowledge template check* passed. Review it, edit it in the pull request if needed, and approve and merge it: that is the publication. The check fails if the article does not name the release it covers, such as `versions: ["2.x"]`, since the index would refuse it; set it before approving. A merged resolution reaches the index when phase 05 next runs, after which an S2 incident should cite it as a documented fix. (The second half of S6, a merge refreshing the index so the next S2 cites it, follows.) Phase 08 proves this as far as the pull request, then closes it; `-e workload_knowledge_keep=true` keeps it open to look at. `reset.yml` closes the bot's open pull requests. The PDI may also create a draft article in ServiceNow's own knowledge base when Knowledge is ticked; it plays no part in the demo.
 
 V6 to V9 run payments-notify's memory fault with the planted lines (scenario `planted`) on a fresh pod, so they take about five minutes and leave one real incident open, which the report names; `-e verify_trust=false` skips them. They need phases 07 and 08 from the same commit: the redaction is in the diagnostics (DD28) and the scenario in payments-notify.
 
