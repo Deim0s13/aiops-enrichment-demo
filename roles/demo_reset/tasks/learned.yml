@@ -1,0 +1,113 @@
+---
+# DD34: removes what the knowledge loop added, for a clean demo: the resolutions on main that the
+# knowledge bot drafted and a person approved. Hand-written documents have no drafted_by line and are
+# never touched. The files are removed in one commit, made as the operator with the reset token (the
+# operator is on main's bypass list; the bot is not), and the index is refreshed from that commit.
+
+- name: Stop if there is no reset token
+  ansible.builtin.assert:
+    that: secrets_values.github_reset_token | default('', true) | length > 0
+    fail_msg: >-
+      Removing the knowledge loop's resolutions needs the reset token in Vault (source/github_reset_token): see laptop
+      setup, step 3, The knowledge bot. Without it, run the reset without demo_reset_knowledge.
+    quiet: true
+
+- name: Find the resolutions the knowledge bot drafted
+  ansible.builtin.include_role:
+    name: knowledge
+    tasks_from: drafted
+  vars:
+    knowledge_repository: "{{ demo_reset_knowledge_repository }}"
+    knowledge_github_token: "{{ secrets_values.github_reset_token }}"
+
+- name: Remove them from main and refresh the index
+  when: knowledge_drafted | length > 0
+  vars:
+    demo_reset_api: "https://api.github.com/repos/{{ demo_reset_knowledge_repository.owner }}/{{ demo_reset_knowledge_repository.name }}"
+    demo_reset_headers:
+      Authorization: "Bearer {{ secrets_values.github_reset_token }}"
+      Accept: application/vnd.github+json
+      X-GitHub-Api-Version: "2022-11-28"
+  block:
+    - name: Read the head commit's tree
+      ansible.builtin.uri:
+        url: "{{ demo_reset_api }}/git/commits/{{ knowledge_drafted_commit }}"
+        headers: "{{ demo_reset_headers }}"
+      register: demo_reset_head
+      no_log: true
+
+    - name: Make a tree without them
+      ansible.builtin.uri:
+        url: "{{ demo_reset_api }}/git/trees"
+        method: POST
+        headers: "{{ demo_reset_headers }}"
+        body_format: json
+        body:
+          base_tree: "{{ demo_reset_head.json.tree.sha }}"
+          # A null sha removes the path.
+          tree: "{{ demo_reset_removals | from_json }}"
+        status_code: [201]
+      register: demo_reset_tree
+      vars:
+        demo_reset_removals: >-
+          [{% for d in knowledge_drafted %}{"path": {{ d.path | to_json }}, "mode": "100644", "type": "blob",
+          "sha": null}{{ '' if loop.last else ',' }}{% endfor %}]
+      no_log: true
+
+    - name: Commit it
+      ansible.builtin.uri:
+        url: "{{ demo_reset_api }}/git/commits"
+        method: POST
+        headers: "{{ demo_reset_headers }}"
+        body_format: json
+        body:
+          message: |-
+            Reset: remove the knowledge loop's demo resolutions ({{ knowledge_drafted | map(attribute='id') | join(', ') }})
+
+            Drafted by acme-knowledge-bot and approved during a demo; removed by reset.yml (DD34).
+          tree: "{{ demo_reset_tree.json.sha }}"
+          parents: ["{{ knowledge_drafted_commit }}"]
+        status_code: [201]
+      register: demo_reset_commit
+      no_log: true
+
+    - name: Move main to it
+      ansible.builtin.uri:
+        url: "{{ demo_reset_api }}/git/refs/heads/{{ demo_reset_knowledge_repository.branch }}"
+        method: PATCH
+        headers: "{{ demo_reset_headers }}"
+        body_format: json
+        body:
+          sha: "{{ demo_reset_commit.json.sha }}"
+          force: false
+        status_code: [200, 409, 422]
+      register: demo_reset_moved
+      no_log: true
+
+    - name: Stop if GitHub refused
+      ansible.builtin.assert:
+        that: demo_reset_moved.status == 200
+        fail_msg: >-
+          GitHub refused to update {{ demo_reset_knowledge_repository.branch }} (HTTP {{ demo_reset_moved.status }}:
+          {{ (demo_reset_moved.json | default({})).message | default('no message') }}). Check that the reset token belongs to
+          you, has Contents read and write on this repository, and that you are on the ruleset's bypass list; or main moved
+          while the reset ran, so run it again.
+        quiet: true
+
+    - name: Refresh the index from that commit
+      ansible.builtin.include_role:
+        name: knowledge
+        tasks_from: refresh
+      vars:
+        knowledge_namespace: "{{ demo_reset_knowledge_namespace }}"
+        knowledge_repository: "{{ demo_reset_knowledge_repository }}"
+        knowledge_source_ref: "{{ demo_reset_commit.json.sha }}"
+        knowledge_github_token: "{{ secrets_values.github_reset_token }}"
+
+- name: Report what was removed
+  ansible.builtin.debug:
+    msg: >-
+      {{ ("Removed the knowledge loop's resolutions " ~ (knowledge_drafted | map(attribute='id') | join(', ')) ~ ' from '
+          ~ demo_reset_knowledge_repository.branch ~ ' (commit ' ~ demo_reset_commit.json.sha[:12] ~ '). ' ~ knowledge_report | first)
+         if knowledge_drafted | length > 0 else 'There are no resolutions drafted by the knowledge bot on '
+         ~ demo_reset_knowledge_repository.branch ~ ', so there was nothing to remove.' }}

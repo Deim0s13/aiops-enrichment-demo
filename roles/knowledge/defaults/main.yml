@@ -19,6 +19,14 @@ knowledge_postgres_credentials_secret: postgres-credentials
 
 # The corpus: Markdown documents under this directory on the repository's branch, README files excepted.
 knowledge_corpus_dir: knowledge
+# Read at this commit or branch, with this token: the read-only token from Vault by default; the
+# refresh after a merge (DD34) passes the pushed commit and the knowledge bot's token.
+knowledge_source_ref: "{{ knowledge_repository.branch }}"
+knowledge_github_token: "{{ secrets_values.github_token }}"
+# Phase 05 creates the ingestion account; the refresh only runs the Job.
+knowledge_manage_accounts: true
+# A resolution the knowledge bot drafted carries this in its drafted_by line (drafted.yml).
+knowledge_bot_marker: acme-knowledge-bot
 knowledge_corpus_configmap: knowledge-corpus
 
 # The same image as the enrichment service (phase 06), which carries the embedding model.

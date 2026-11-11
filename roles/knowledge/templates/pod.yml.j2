@@ -3,7 +3,7 @@
 automountServiceAccountToken: false
 containers:
   - name: knowledge
-    image: "{{ incluster_build_image }}"
+    image: "{{ knowledge_image_ref | default(incluster_build_image) }}"
     command: {{ knowledge_pod_command | to_json }}
     env:
 {% for key in ['host', 'port', 'name', 'user', 'password'] %}

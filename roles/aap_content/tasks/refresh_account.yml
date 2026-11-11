@@ -1,0 +1,125 @@
+---
+# DD34: the identity the index refresh job runs as. A service account in the AAP namespace whose only
+# rights are to run the ingestion Job in the enrichment namespace: replace the corpus ConfigMap, run
+# and remove the Job, read its log and the service's image. Like the diagnostics (DD20), the job gets
+# a time-limited token through an AAP credential; it is kept in a Secret and renewed near expiry.
+
+- name: Create the refresh service account
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: "{{ aap_content_refresh_sa }}"
+        namespace: "{{ aap_content_namespace }}"
+        labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: knowledge }
+
+- name: Let it run the ingestion Job in the enrichment namespace, and nothing else
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: Role
+        metadata:
+          name: "{{ aap_content_refresh_role }}"
+          namespace: "{{ aap_content_enrichment_namespace }}"
+          labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: knowledge }
+        rules:
+          - apiGroups: [""]
+            resources: [configmaps]
+            resourceNames: ["{{ aap_content_refresh_configmap }}"]
+            verbs: [get, update, patch]
+          - apiGroups: [batch]
+            resources: [jobs]
+            verbs: [get, list, watch, create, delete]
+          - apiGroups: [""]
+            resources: [pods]
+            verbs: [get, list]
+          - apiGroups: [""]
+            resources: [pods/log]
+            verbs: [get]
+          - apiGroups: [apps]
+            resources: [deployments]
+            resourceNames: ["{{ aap_content_refresh_image_deployment }}"]
+            verbs: [get]
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        metadata:
+          name: "{{ aap_content_refresh_role }}"
+          namespace: "{{ aap_content_enrichment_namespace }}"
+          labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: knowledge }
+        roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: "{{ aap_content_refresh_role }}" }
+        subjects:
+          - { kind: ServiceAccount, name: "{{ aap_content_refresh_sa }}", namespace: "{{ aap_content_namespace }}" }
+
+- name: Read its stored token
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ aap_content_namespace }}"
+    name: "{{ aap_content_refresh_token_secret }}"
+  register: aap_content_refresh_read
+  until: aap_content_refresh_read is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Decide whether the token needs renewing
+  ansible.builtin.set_fact:
+    aap_content_refresh_stored: "{{ aap_content_refresh_found.data | default({}) }}"
+    aap_content_refresh_token_new: >-
+      {{ aap_content_refresh_found | length == 0
+         or (aap_content_refresh_found.data.expires_at | default('') | b64decode)
+            < '%Y-%m-%dT%H:%M:%SZ' | strftime(now().timestamp() + aap_content_diagnostics_token_renew_hours * 3600, utc=true) }}
+  vars:
+    aap_content_refresh_found: "{{ aap_content_refresh_read.resources | first | default({}) }}"
+  no_log: true
+
+- name: Ask OpenShift for a time-limited token for it
+  ansible.builtin.uri:
+    url: >-
+      {{ secrets_values.cluster_api_url | regex_replace('/$', '') }}/api/v1/namespaces/{{ aap_content_namespace
+      }}/serviceaccounts/{{ aap_content_refresh_sa }}/token
+    method: POST
+    headers:
+      Authorization: "Bearer {{ secrets_values.cluster_api_token }}"
+    body_format: json
+    body:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      spec:
+        expirationSeconds: "{{ aap_content_diagnostics_token_hours * 3600 }}"
+    status_code: [201]
+    validate_certs: "{{ demo_cluster_validate_certs }}"
+    ca_path: "{{ secrets_cluster_ca_file | default(omit) }}"
+  register: aap_content_refresh_request
+  when: aap_content_refresh_token_new | bool
+  no_log: true
+
+- name: Keep the new token in the cluster
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ aap_content_refresh_token_secret }}"
+        namespace: "{{ aap_content_namespace }}"
+        labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: knowledge }
+      data:
+        token: "{{ aap_content_refresh_request.json.status.token | b64encode }}"
+        expires_at: "{{ aap_content_refresh_request.json.status.expirationTimestamp | b64encode }}"
+  when: aap_content_refresh_token_new | bool
+  no_log: true
+
+- name: Keep the token and its expiry for the credential
+  ansible.builtin.set_fact:
+    aap_content_refresh_token: >-
+      {{ aap_content_refresh_request.json.status.token if aap_content_refresh_token_new | bool
+         else aap_content_refresh_stored.token | b64decode }}
+    aap_content_refresh_expires_at: >-
+      {{ aap_content_refresh_request.json.status.expirationTimestamp if aap_content_refresh_token_new | bool
+         else aap_content_refresh_stored.expires_at | b64decode }}
+  no_log: true

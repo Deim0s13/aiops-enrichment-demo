@@ -21,6 +21,18 @@
 - name: Give the diagnostics a time-limited token for their service account
   ansible.builtin.include_tasks: diagnostics_token.yml
 
+# DD33 and DD34: the knowledge bot, set up only once its GitHub App is in Vault (laptop setup), so a
+# kit without it builds as before.
+- name: Decide whether the knowledge bot is set up
+  ansible.builtin.set_fact:
+    aap_content_knowledge_enabled: >-
+      {{ secrets_values.github_app_id | default('', true) | length > 0
+         and secrets_values.github_app_private_key | default('', true) is search('PRIVATE KEY') }}
+
+- name: Create the index refresh's service account and its time-limited token (DD34)
+  ansible.builtin.include_tasks: refresh_account.yml
+  when: aap_content_knowledge_enabled | bool
+
 - name: Declare the content
   ansible.builtin.include_tasks: declare.yml
 
@@ -38,6 +50,7 @@
   loop:
     - { name: "{{ aap_content_activation_name }}", rulebook: "{{ aap_content_rulebook }}" }
     - { name: "{{ aap_content_integration_activation }}", rulebook: "{{ aap_content_integration_rulebook }}" }
+    - { name: "{{ aap_content_refresh_activation }}", rulebook: "{{ aap_content_refresh_rulebook }}" }
   loop_control:
     label: "{{ item.name }}"
   register: aap_content_existing_activations

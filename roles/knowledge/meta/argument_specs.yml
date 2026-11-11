@@ -36,3 +36,35 @@ argument_specs:
         type: list
         elements: str
         description: Documents a search for the memory fault must never return.
+  refresh:
+    short_description: Reload the index from the corpus at a commit, without phase 05's setup (DD34)
+    description:
+      - Runs the ingestion Job with the enrichment service's deployed image. Run after a merge to main by the
+        knowledge bot's refresh job, and by reset.yml after it removes the demo's resolutions.
+    options:
+      knowledge_namespace:
+        type: str
+        required: true
+        description: The enrichment namespace, where the service runs and the ingestion Job runs.
+      knowledge_repository:
+        type: dict
+        required: true
+        description: The repository, with url, owner, name and branch.
+      knowledge_source_ref:
+        type: str
+        description: The commit or branch to read the corpus at; the repository's branch by default.
+      knowledge_github_token:
+        type: str
+        description: A token that can read the repository; the read-only token from Vault by default.
+  drafted:
+    short_description: List the resolutions on the branch that the knowledge bot drafted (DD34)
+    description:
+      - Sets knowledge_drafted, each with path, id, service and blob, and knowledge_drafted_commit.
+    options:
+      knowledge_repository:
+        type: dict
+        required: true
+        description: The repository, with url, owner, name and branch.
+      knowledge_github_token:
+        type: str
+        description: A token that can read the repository; the read-only token from Vault by default.

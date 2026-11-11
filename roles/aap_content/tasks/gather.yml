@@ -21,6 +21,7 @@
     - { api_version: v1, kind: Secret, name: "{{ aap_content_integration_servicenow_secret }}" }
     - { api_version: v1, kind: Secret, name: "{{ aap_content_integration_eda_user_secret }}" }
     - { api_version: v1, kind: Secret, name: "{{ aap_content_alert_stream_secret }}" }
+    - { api_version: v1, kind: Secret, name: "{{ aap_content_github_stream_secret }}" }
   loop_control:
     label: "{{ item.kind }} {{ item.name }}"
   register: aap_content_read
@@ -33,7 +34,7 @@
   ansible.builtin.set_fact:
     aap_content_found: >-
       {{ dict(['route', 'admin', 'stream', 'servicenow', 'eda_user', 'event_stream', 'enrichment', 'service_ca',
-          'monitoring', 'integration_user', 'alert_stream']
+          'monitoring', 'integration_user', 'alert_stream', 'github_stream']
          | zip(aap_content_read.results | map(attribute='resources') | map('first') | map('default', {}, true))) }}
   no_log: true
 
@@ -84,6 +85,11 @@
     aap_content_integration_password_new: "{{ aap_content_found.integration_user | length == 0 }}"
     aap_content_integration_password: >-
       {{ (aap_content_found.integration_user.data.password | b64decode) if aap_content_found.integration_user
+         else lookup('ansible.builtin.password', '/dev/null', length=aap_content_secret_length, chars=['ascii_letters', 'digits']) }}
+    # The secret GitHub signs the knowledge bot's webhook deliveries with (DD34).
+    aap_content_github_stream_secret_new: "{{ aap_content_found.github_stream | length == 0 }}"
+    aap_content_github_stream_hmac: >-
+      {{ (aap_content_found.github_stream.data.secret | b64decode) if aap_content_found.github_stream
          else lookup('ansible.builtin.password', '/dev/null', length=aap_content_secret_length, chars=['ascii_letters', 'digits']) }}
     aap_content_alert_stream_password_new: "{{ aap_content_found.alert_stream | length == 0 }}"
     aap_content_alert_stream_password: >-
@@ -168,6 +174,11 @@
       data:
         username: "{{ aap_content_alert_stream_username }}"
         password: "{{ aap_content_alert_stream_password }}"
+    - name: "{{ aap_content_github_stream_secret }}"
+      component: event-stream-hmac
+      new: "{{ aap_content_github_stream_secret_new }}"
+      data:
+        secret: "{{ aap_content_github_stream_hmac }}"
   loop_control:
     label: "{{ item.name }}"
   when: item.new | bool

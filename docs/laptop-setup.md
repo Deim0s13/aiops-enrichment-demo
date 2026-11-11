@@ -135,17 +135,18 @@ Preflight checks that the token can read the repository, and tries a harmless wr
 
 ### The knowledge bot (optional)
 
-Set this up only if you want scenario S6, the knowledge loop (DD33). You do not need to repeat anything above: the bot's two values go into the `source` secret alongside the GitHub token.
+Set this up only if you want scenario S6, the knowledge loop (DD33, DD34). You do not need to repeat anything above: the bot's values go into the `source` secret alongside the GitHub token.
 
-When an engineer resolves an incident with Knowledge ticked, `acme-knowledge-bot` opens a pull request with a resolution drafted from their notes. It is a GitHub App: its own identity, permissions on this repository only, and tokens that last an hour. Without it, the kit builds as before and S6 is skipped.
+When an engineer resolves an incident with Knowledge ticked, `acme-knowledge-bot` opens a pull request with a resolution drafted from their notes. When a person merges it, the App tells AAP, which refreshes the knowledge index, so the next incident of the same kind can use it. It is a GitHub App: its own identity, permissions on this repository only, and tokens that last an hour. Without it, the kit builds as before and S6 is skipped.
 
 **Create the App in GitHub.**
 
 1. Open Settings > Developer settings > GitHub Apps > **New GitHub App**, and set:
    - GitHub App name `acme-knowledge-bot` (names are unique across GitHub, so add a suffix if it is taken)
    - Homepage URL: this repository's address
-   - Webhook: untick **Active** for now; the second half of S6 sets it
+   - Webhook: tick **Active**, with Webhook URL `https://example.invalid` and no secret. Phase 07 replaces both with the AAP event stream's address and a generated secret, on every build
    - Repository permissions: **Contents**, Read and write; **Pull requests**, Read and write. GitHub adds Metadata, Read-only, by itself. Nothing else
+   - Subscribe to events: tick **Push**
    - Where can this GitHub App be installed: **Only on this account**
 2. Choose **Create GitHub App**. Note the **App ID** at the top of the App's page (a number such as `1234567`), then under Private keys choose **Generate a private key**: a `.pem` file downloads.
 3. Choose **Install App** in the left menu, install it on your account, and choose **Only select repositories**, `aiops-enrichment-demo`.
@@ -171,6 +172,25 @@ v kv get -mount=aiops-demo -field=github_app_id source && v kv get -mount=aiops-
 ```
 
 Then delete the `.pem` file from Downloads: the key now lives only in Vault.
+
+**If you created the App before the index refresh** (with Webhook unticked), change two settings. In GitHub, open Settings > Developer settings > GitHub Apps > `acme-knowledge-bot` > **Edit**:
+
+1. On the **General** page, under Webhook: tick **Active**, set Webhook URL to `https://example.invalid`, leave the secret empty, and click **Save changes**.
+2. On the **Permissions & events** page, under Subscribe to events: tick **Push**, and click **Save changes**.
+
+Phase 07 points the webhook at AAP. Its report says if the App is not subscribed to push events.
+
+**The reset token**, so `reset.yml` can remove the knowledge loop's resolutions from `main` for a clean demo (DD34). It acts as you, and you are on `main`'s bypass list; the bot is not, so the bot still cannot publish. In GitHub, open Settings > Developer settings > Personal access tokens > Fine-grained tokens > **Generate new token**, and set:
+
+- Token name `aiops-demo-reset`, with an expiry that covers your demo period
+- Repository access: **Only select repositories**, `aiops-enrichment-demo`
+- Repository permissions: **Contents**, Read and write. Nothing else
+
+Then store it. The command prints a prompt and waits; nothing shows as you paste:
+
+```bash
+printf 'Reset token: ' && read -rs T && echo && printf %s "$T" | v kv patch -mount=aiops-demo source github_reset_token=- ; unset T
+```
 
 **Protect `main`**, so a knowledge article is published only when a person approves it. Do this after you have pushed the kit, including `.github/workflows/knowledge.yml`: the push runs the check once, and GitHub only offers a check as required once it has run. You can see it under the repository's **Actions** tab, as a run of *knowledge*.
 

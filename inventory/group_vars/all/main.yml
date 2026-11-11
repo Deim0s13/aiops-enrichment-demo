@@ -195,3 +195,6 @@ demo_required_secrets:
   # it builds as before. Laptop setup step 3 says how to load them.
   github_app_id: { path: source, key: github_app_id, optional: true }
   github_app_private_key: { path: source, key: github_app_private_key, optional: true }
+  # Your own fine-grained token, Contents read and write on this repository only, used only by reset.yml
+  # -e demo_reset_knowledge=true to remove the knowledge loop's resolutions from main (DD34): optional.
+  github_reset_token: { path: source, key: github_reset_token, optional: true }

@@ -110,3 +110,26 @@ aap_content_github_app_credential_type: ACME GitHub App
 aap_content_github_app_credential: ACME knowledge bot
 aap_content_knowledge_owners:
   payments-notify: Payments Platform Operations
+
+# DD34: the index refresh after a merge. The knowledge bot's GitHub App sends each push to main to its
+# own event stream, which checks GitHub's signature; the refresh activation launches the refresh job
+# as the enrichment trigger's user. The job reloads the index as aiops-knowledge-refresh, a service
+# account that can only run the ingestion Job in the enrichment namespace, through a time-limited token.
+aap_content_refresh_template: "Knowledge | Refresh index"
+aap_content_refresh_sa: aiops-knowledge-refresh
+aap_content_refresh_role: aiops-knowledge-refresh
+aap_content_refresh_credential: "OpenShift | aiops-knowledge-refresh"
+aap_content_refresh_token_secret: aiops-knowledge-refresh-token
+# What the refresh Job may touch: the corpus ConfigMap, and the Deployment it reads the image from
+# (the knowledge role's knowledge_corpus_configmap and knowledge_image_name).
+aap_content_refresh_configmap: knowledge-corpus
+aap_content_refresh_image_deployment: enrichment
+aap_content_github_stream_name: GitHub knowledge pushes
+aap_content_github_stream_secret: eda-event-stream-github
+aap_content_github_stream_credential: "Event stream | GitHub knowledge pushes"
+aap_content_refresh_rulebook: knowledge_refresh.yml
+aap_content_refresh_rulebook_source: github
+aap_content_refresh_activation: Knowledge index refresh
+# GitHub checks the event stream's certificate before delivering. Set true only if the cluster's
+# routes do not have a publicly trusted certificate.
+aap_content_github_webhook_insecure_ssl: false

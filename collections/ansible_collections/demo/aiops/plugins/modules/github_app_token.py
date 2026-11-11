@@ -52,49 +52,8 @@ installation_id:
   returned: success
 """
 
-import base64
-import json
-import time
-
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.urls import fetch_url
-
-try:
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import padding
-    HAS_CRYPTOGRAPHY = True
-except ImportError:
-    HAS_CRYPTOGRAPHY = False
-
-
-def _b64(data):
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-
-def app_jwt(app_id, private_key):
-    """An RS256 JSON Web Token for the App, valid for nine minutes (GitHub allows ten)."""
-    now = int(time.time())
-    header = _b64(json.dumps({"alg": "RS256", "typ": "JWT"}, separators=(",", ":")).encode())
-    claims = _b64(json.dumps({"iat": now - 60, "exp": now + 540, "iss": str(app_id)}, separators=(",", ":")).encode())
-    key = serialization.load_pem_private_key(private_key.encode(), password=None)
-    signature = key.sign(f"{header}.{claims}".encode(), padding.PKCS1v15(), hashes.SHA256())
-    return f"{header}.{claims}.{_b64(signature)}"
-
-
-def call(module, method, url, token, body=None):
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-               "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "acme-knowledge-bot"}
-    data = None
-    if body is not None:
-        headers["Content-Type"] = "application/json"
-        data = json.dumps(body)
-    response, info = fetch_url(module, url, data=data, headers=headers, method=method, timeout=30)
-    content = response.read() if response else info.get("body", b"")
-    try:
-        parsed = json.loads(content or b"{}")
-    except ValueError:
-        parsed = {}
-    return info.get("status", -1), parsed
+from ansible_collections.demo.aiops.plugins.module_utils.github_app import call, signed
 
 
 def main():
@@ -109,23 +68,18 @@ def main():
         },
         supports_check_mode=True,
     )
-    if not HAS_CRYPTOGRAPHY:
-        module.fail_json(msg="The cryptography Python package is needed to sign the App's token.")
     params = module.params
     if params["repository"].count("/") != 1:
         module.fail_json(msg=f"repository should be owner/name, not {params['repository']!r}.")
     api = params["api_url"].rstrip("/")
-    try:
-        signed = app_jwt(params["app_id"], params["private_key"])
-    except (ValueError, TypeError) as error:
-        module.fail_json(msg=f"The App's private key could not be read: {type(error).__name__}. Check github_app_private_key in Vault.")
+    token = signed(module, params["app_id"], params["private_key"])
 
-    status, found = call(module, "GET", f"{api}/repos/{params['repository']}/installation", signed)
+    status, found = call(module, "GET", f"{api}/repos/{params['repository']}/installation", token)
     if status != 200:
         module.fail_json(msg=f"GitHub did not find the App installed on {params['repository']} (HTTP {status}: "
                              f"{found.get('message', 'no message')}). Check the App ID and that the App is installed on it.")
     installation = found["id"]
-    status, granted = call(module, "POST", f"{api}/app/installations/{installation}/access_tokens", signed,
+    status, granted = call(module, "POST", f"{api}/app/installations/{installation}/access_tokens", token,
                            {"repositories": [params["repository"].split("/")[1]], "permissions": params["permissions"]})
     if status != 201 or not granted.get("token"):
         module.fail_json(msg=f"GitHub refused an installation token (HTTP {status}: {granted.get('message', 'no message')}). "

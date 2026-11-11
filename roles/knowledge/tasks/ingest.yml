@@ -14,6 +14,8 @@
         namespace: "{{ knowledge_namespace }}"
         labels: { app.kubernetes.io/part-of: aiops-enrichment-demo, app.kubernetes.io/component: knowledge }
       automountServiceAccountToken: false
+  # The refresh after a merge (DD34) only runs the Job: phase 05 set up the account.
+  when: knowledge_manage_accounts | bool
 
 - name: Load the corpus into the index
   ansible.builtin.include_tasks: job.yml

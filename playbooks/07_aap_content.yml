@@ -33,6 +33,7 @@
         name: aap_content
       vars:
         aap_content_namespace: "{{ demo_namespaces.aap }}"
+        aap_content_enrichment_namespace: "{{ demo_namespaces.enrichment }}"
         aap_content_organisation: "{{ demo_aap_organisation }}"
         aap_content_repository: "{{ demo_repository }}"
         aap_content_ee_stream: "{{ demo_execution_environment.name }}"

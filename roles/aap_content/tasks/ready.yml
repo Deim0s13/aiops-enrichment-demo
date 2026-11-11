@@ -8,7 +8,9 @@
     aap_username: admin
     aap_password: "{{ aap_content_admin_password }}"
     aap_validate_certs: "{{ aap_content_validate_certs }}"
-  loop: ["{{ aap_content_activation_name }}", "{{ aap_content_integration_activation }}"]
+  loop: >-
+    {{ [aap_content_activation_name, aap_content_integration_activation]
+       + ([aap_content_refresh_activation] if aap_content_knowledge_enabled | bool else []) }}
   register: aap_content_activation
   until: >-
     aap_content_activation is not failed
@@ -56,6 +58,44 @@
     label: "{{ item.name }}"
   no_log: true
 
+# DD34: GitHub delivers the knowledge bot App's events to its event stream, whose address changes with
+# every environment, so the App's webhook is pointed at it here, with the secret EDA checks.
+- name: Point the knowledge bot's webhook at its event stream
+  when: aap_content_knowledge_enabled | bool
+  block:
+    - name: Read the GitHub event stream's address
+      ansible.eda.event_stream_info:
+        name: "{{ aap_content_github_stream_name }}"
+        aap_hostname: "{{ aap_content_url }}"
+        aap_username: admin
+        aap_password: "{{ aap_content_admin_password }}"
+        aap_validate_certs: "{{ aap_content_validate_certs }}"
+      register: aap_content_github_stream_info
+      until: aap_content_github_stream_info is not failed
+      retries: 3
+      delay: 5
+
+    - name: Set the App's webhook address and secret
+      demo.aiops.github_app_webhook:
+        app_id: "{{ secrets_values.github_app_id | string }}"
+        private_key: "{{ secrets_values.github_app_private_key }}"
+        url: "{{ aap_content_github_stream_info.event_streams[0].url }}"
+        secret: "{{ aap_content_github_stream_hmac }}"
+        insecure_ssl: "{{ aap_content_github_webhook_insecure_ssl }}"
+      register: aap_content_github_webhook
+
+    - name: Keep the GitHub event stream's address beside its secret
+      kubernetes.core.k8s:
+        state: patched
+        api_version: v1
+        kind: Secret
+        name: "{{ aap_content_github_stream_secret }}"
+        namespace: "{{ aap_content_namespace }}"
+        definition:
+          data:
+            url: "{{ aap_content_github_stream_info.event_streams[0].url | b64encode }}"
+      no_log: true
+
 - name: Report the content
   ansible.builtin.set_fact:
     aap_content_report:
@@ -72,6 +112,15 @@
       - >-
         Integration stand-in: activation {{ aap_content_integration_activation }} running, launching only
         {{ aap_content_integration_template }} as {{ aap_content_integration_eda_user }}; event stream {{ aap_content_alert_stream_url }}
+      - >-
+        {{ ('Knowledge bot: ' ~ aap_content_knowledge_template ~ ' and ' ~ aap_content_refresh_template ~ ', launched only by '
+            ~ aap_content_eda_user ~ '; activation ' ~ aap_content_refresh_activation ~ " running; the App's webhook delivers to "
+            ~ aap_content_github_webhook.url ~ '; refresh token ' ~ ('renewed' if aap_content_refresh_token_new else 'reused')
+            ~ ', expires ' ~ aap_content_refresh_expires_at
+            ~ ('' if aap_content_github_webhook.push_subscribed else
+               ". NOT SUBSCRIBED TO PUSH EVENTS: in the App's settings, under Permissions and events, tick Push and save,"
+               ~ ' or merges will not refresh the index'))
+           if aap_content_knowledge_enabled | bool else 'Knowledge bot: not set up (no GitHub App in Vault)' }}
       - >-
         Generated secrets: {{ aap_content_eda_user_secret }} {{ 'created' if aap_content_eda_password_new else 'reused' }},
         {{ aap_content_event_stream_secret }} {{ 'created' if aap_content_stream_token_new else 'reused' }},

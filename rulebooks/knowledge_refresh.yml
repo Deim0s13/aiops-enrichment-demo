@@ -1,0 +1,36 @@
+---
+# Receives the knowledge bot's GitHub App events through an EDA event stream, which checks GitHub's
+# signature (X-Hub-Signature-256) first, and launches the index refresh after each push to main, such
+# as a knowledge pull request being merged (DD34). The job checks what the push changed, so a push that
+# touches no knowledge leaves the index alone. The event stream replaces this webhook source when the
+# activation is created.
+- name: Refresh the knowledge index after a push to main
+  hosts: all
+  sources:
+    - name: github
+      ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+  rules:
+    - name: Refresh the index after a push to main
+      condition: >-
+        event.payload.ref == "refs/heads/main"
+        and event.payload.after is match("^[0-9a-f]{40}$")
+        and event.payload.before is match("^[0-9a-f]{40}$")
+        and event.payload.deleted == false
+      action:
+        run_job_template:
+          name: "Knowledge | Refresh index"
+          organization: ACME Bank
+          include_events: false
+          job_args:
+            extra_vars:
+              knowledge_after: "{{ event.payload.after }}"
+              knowledge_before: "{{ event.payload.before }}"
+              pushed_repository: "{{ event.payload.repository.full_name | default('') }}"
+
+    - name: Note GitHub's test delivery
+      condition: event.payload.zen is defined
+      action:
+        debug:
+          msg: "GitHub's webhook test delivery arrived, so the event stream accepts the App's signature."

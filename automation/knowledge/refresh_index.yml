@@ -1,0 +1,82 @@
+---
+# Knowledge | Refresh index (DD34). Launched by the knowledge refresh activation when GitHub reports a
+# push to main, such as a knowledge pull request being merged. Vars from the rulebook: knowledge_after
+# and knowledge_before (the commits), pushed_repository. From the job template: refresh_repository and
+# refresh_namespace. Reloads the index from the pushed commit, read as the knowledge bot, when the push
+# changed the corpus. Runs as the aiops-knowledge-refresh service account, which can only run the
+# ingestion Job in the enrichment namespace.
+- name: "Knowledge | Refresh the index after a push to main"
+  hosts: localhost
+  gather_facts: false
+  vars:
+    refresh_full_name: "{{ refresh_repository.owner }}/{{ refresh_repository.name }}"
+  tasks:
+    - name: Check the push before acting on it
+      ansible.builtin.assert:
+        that:
+          - knowledge_after | default('') is match('^[0-9a-f]{40}$')
+          - knowledge_before | default('') is match('^[0-9a-f]{40}$')
+        fail_msg: "The push did not name its commits as 40-character SHAs."
+        quiet: true
+
+    - name: End here if the push is for another repository
+      ansible.builtin.meta: end_play
+      when: pushed_repository | default('') != refresh_full_name
+
+    - name: Get a short-lived, read-only token as the knowledge bot
+      demo.aiops.github_app_token:
+        app_id: "{{ lookup('ansible.builtin.env', 'GITHUB_APP_ID') }}"
+        private_key: "{{ lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'GITHUB_APP_PRIVATE_KEY_FILE')) }}"
+        repository: "{{ refresh_full_name }}"
+        permissions: { contents: read }
+      register: refresh_github
+      no_log: true
+
+    # A new branch reports a "before" of all zeros, which has nothing to compare with.
+    - name: List the files the push changed
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ refresh_full_name }}/compare/{{ knowledge_before }}...{{ knowledge_after }}"
+        headers:
+          Authorization: "Bearer {{ refresh_github.token }}"
+          Accept: application/vnd.github+json
+        timeout: 20
+        status_code: [200, 404]
+      register: refresh_compare
+      when: knowledge_before is not match('^0+$')
+      no_log: true
+
+    - name: Decide whether the push changed the corpus
+      ansible.builtin.set_fact:
+        refresh_corpus_changed: >-
+          {{ refresh_compare is skipped or refresh_compare.status != 200
+             or (refresh_compare.json.files | default([]) | map(attribute='filename') | select('match', '^knowledge/') | list | length > 0) }}
+
+    - name: End here if the push did not change the corpus
+      when: not refresh_corpus_changed | bool
+      block:
+        - name: Say why nothing was refreshed
+          ansible.builtin.debug:
+            msg: "The push to {{ refresh_repository.branch }} at {{ knowledge_after[:12] }} changed nothing under knowledge/, so the index stays as it is."
+
+        - name: End here
+          ansible.builtin.meta: end_play
+
+    - name: Reload the index from the pushed commit
+      ansible.builtin.include_role:
+        name: knowledge
+        tasks_from: refresh
+      vars:
+        knowledge_namespace: "{{ refresh_namespace }}"
+        knowledge_repository: "{{ refresh_repository }}"
+        knowledge_source_ref: "{{ knowledge_after }}"
+        knowledge_github_token: "{{ refresh_github.token }}"
+
+    - name: Report the refresh
+      ansible.builtin.set_stats:
+        data:
+          knowledge_refresh: "{{ knowledge_report | first }}"
+        per_host: false
+
+    - name: Show the refresh
+      ansible.builtin.debug:
+        msg: "{{ knowledge_report }}"

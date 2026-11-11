@@ -1,14 +1,15 @@
 ---
 # The corpus as merged on the repository's branch, read with the read-only GitHub token (DD16) and
 # handed to the ingestion Job in a ConfigMap. A document edited on the laptop but not merged is not
-# loaded: approval is the pull request review (design 5.6).
+# loaded: approval is the pull request review (design 5.6). The refresh after a merge (DD34) reads the
+# commit that was pushed, as the knowledge bot.
 
 - name: Find the branch's latest commit
   ansible.builtin.uri:
-    url: "https://api.github.com/repos/{{ knowledge_repository.owner }}/{{ knowledge_repository.name }}/commits/{{ knowledge_repository.branch }}"
+    url: "https://api.github.com/repos/{{ knowledge_repository.owner }}/{{ knowledge_repository.name }}/commits/{{ knowledge_source_ref }}"
     headers:
       Accept: application/vnd.github+json
-      Authorization: "Bearer {{ secrets_values.github_token }}"
+      Authorization: "Bearer {{ knowledge_github_token }}"
     timeout: 20
   register: knowledge_commit
   until: knowledge_commit is not failed
@@ -21,7 +22,7 @@
     url: "https://api.github.com/repos/{{ knowledge_repository.owner }}/{{ knowledge_repository.name }}/git/trees/{{ knowledge_commit.json.sha }}?recursive=1"
     headers:
       Accept: application/vnd.github+json
-      Authorization: "Bearer {{ secrets_values.github_token }}"
+      Authorization: "Bearer {{ knowledge_github_token }}"
     timeout: 20
   register: knowledge_tree
   until: knowledge_tree is not failed
@@ -47,7 +48,7 @@
     url: "https://api.github.com/repos/{{ knowledge_repository.owner }}/{{ knowledge_repository.name }}/contents/{{ item }}?ref={{ knowledge_source_commit }}"
     headers:
       Accept: application/vnd.github.raw
-      Authorization: "Bearer {{ secrets_values.github_token }}"
+      Authorization: "Bearer {{ knowledge_github_token }}"
     return_content: true
     timeout: 20
   loop: "{{ knowledge_paths }}"

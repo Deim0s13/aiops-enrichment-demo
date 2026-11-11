@@ -413,15 +413,9 @@
         restart_policy: on-failure
         enabled: true
 
-# DD33, scenario S6: the knowledge bot. Declared only once its GitHub App is in Vault (laptop setup),
-# so a kit without it builds as before. Its private key is written to a file for the job, never put
-# in the job's variables, and the job asks GitHub for a token limited to this repository.
-- name: Decide whether the knowledge bot is set up
-  ansible.builtin.set_fact:
-    aap_content_knowledge_enabled: >-
-      {{ secrets_values.github_app_id | default('', true) | length > 0
-         and secrets_values.github_app_private_key | default('', true) is search('PRIVATE KEY') }}
-
+# DD33, scenario S6: the knowledge bot, declared only once its GitHub App is in Vault (main.yml decides).
+# Its private key is written to a file for the job, never put in the job's variables, and the job asks
+# GitHub for a token limited to this repository.
 - name: Describe the knowledge bot's credential type
   ansible.builtin.set_fact:
     aap_content_knowledge_credential_type:
@@ -475,5 +469,71 @@
            'organization': aap_content_organisation,
            'credential_type': aap_content_github_app_credential_type,
            'inputs': {'app_id': secrets_values.github_app_id | string, 'private_key': secrets_values.github_app_private_key}}] }}
+  when: aap_content_knowledge_enabled | bool
+  no_log: true
+
+# DD34: the index refresh after a merge. The knowledge bot's App posts each push to main to its own
+# event stream, which checks GitHub's signature; the refresh activation launches the refresh job as the
+# enrichment trigger's user, who may launch nothing else beyond its own workflow and the draft job.
+- name: Declare the index refresh's job, event stream and activation
+  ansible.builtin.set_fact:
+    aap_content_cfg_controller_templates: >-
+      {{ aap_content_cfg_controller_templates + [{
+           'name': aap_content_refresh_template,
+           'description': aap_content_refresh_description,
+           'playbook': 'automation/knowledge/refresh_index.yml',
+           'organization': aap_content_organisation,
+           'project': aap_content_project_name,
+           'inventory': aap_content_inventory_name,
+           'execution_environment': aap_content_ee_name,
+           'credentials': [aap_content_refresh_credential, aap_content_github_app_credential],
+           'extra_vars': {'refresh_repository': aap_content_repository, 'refresh_namespace': aap_content_enrichment_namespace},
+           'ask_variables_on_launch': true,
+           'allow_simultaneous': false}] }}
+    aap_content_cfg_controller_roles: >-
+      {{ aap_content_cfg_controller_roles + [{'user': aap_content_eda_user, 'job_template': aap_content_refresh_template,
+                                               'role': 'execute'}] }}
+    aap_content_cfg_eda_event_streams: >-
+      {{ aap_content_cfg_eda_event_streams + [{
+           'name': aap_content_github_stream_name,
+           'organization': aap_content_organisation,
+           'credential_name': aap_content_github_stream_credential,
+           'forward_events': true}] }}
+    aap_content_cfg_eda_rulebook_activations: >-
+      {{ aap_content_cfg_eda_rulebook_activations + [{
+           'name': aap_content_refresh_activation,
+           'description': 'Refreshes the knowledge index after each push to main, such as a merged knowledge pull request (DD34).',
+           'organization': aap_content_organisation,
+           'project': aap_content_project_name,
+           'rulebook': aap_content_refresh_rulebook,
+           'decision_environment': aap_content_de_name,
+           'eda_credentials': [aap_content_eda_aap_credential],
+           'event_streams': [{'source_name': aap_content_refresh_rulebook_source, 'event_stream': aap_content_github_stream_name}],
+           'restart_policy': 'on-failure',
+           'enabled': true}] }}
+  vars:
+    aap_content_refresh_description: >-
+      Reloads the knowledge index from a commit pushed to main, as the aiops-knowledge-refresh service account, when the
+      push changed the corpus (DD34).
+  when: aap_content_knowledge_enabled | bool
+
+- name: Declare the index refresh's credentials
+  ansible.builtin.set_fact:
+    aap_content_cfg_controller_credentials: >-
+      {{ aap_content_cfg_controller_credentials + [{
+           'name': aap_content_refresh_credential,
+           'description': 'Time-limited token for the aiops-knowledge-refresh service account, which can only run the ingestion Job (DD34).',
+           'organization': aap_content_organisation,
+           'credential_type': 'OpenShift or Kubernetes API Bearer Token',
+           'inputs': {'host': aap_content_diagnostics_api, 'bearer_token': aap_content_refresh_token, 'verify_ssl': true,
+                      'ssl_ca_cert': aap_content_diag_ca}}] }}
+    aap_content_cfg_eda_credentials: >-
+      {{ aap_content_cfg_eda_credentials + [{
+           'name': aap_content_github_stream_credential,
+           'description': 'The secret GitHub signs the knowledge bot App\'s deliveries with (X-Hub-Signature-256).',
+           'organization': aap_content_organisation,
+           'credential_type': 'GitHub Event Stream',
+           'inputs': {'auth_type': 'hmac', 'secret': aap_content_github_stream_hmac, 'hash_algorithm': 'sha256',
+                      'http_header_key': 'X-Hub-Signature-256', 'signature_encoding': 'hex', 'signature_prefix': 'sha256='}}] }}
   when: aap_content_knowledge_enabled | bool
   no_log: true

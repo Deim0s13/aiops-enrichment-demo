@@ -24,3 +24,14 @@ argument_specs:
         type: str
         required: true
         description: The repository, as owner/name.
+  learned:
+    short_description: Remove the resolutions the knowledge bot drafted from main, and refresh the index (DD34)
+    options:
+      demo_reset_knowledge_repository:
+        type: dict
+        required: true
+        description: The repository, with url, owner, name and branch.
+      demo_reset_knowledge_namespace:
+        type: str
+        required: true
+        description: The enrichment namespace, where the index refresh runs its ingestion Job.

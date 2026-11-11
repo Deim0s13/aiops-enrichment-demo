@@ -6,6 +6,8 @@
 # documented fix, give no next steps and no job, and give fixes researched in MessageHub's
 # documentation (DD29), each citing the page it comes from, and no other advice it can label as
 # approved. Appends its results to workload_results. Takes about five minutes.
+# Once the knowledge loop has added a resolution for payments-notify to main (DD34), S2 is no longer a
+# fault without a runbook: the note must then give the documented fix from that resolution instead.
 
 - name: Name the throttling problem, as the integration stand-in correlates it
   ansible.builtin.set_fact:
@@ -82,6 +84,19 @@
   delay: 5
   when: workload_throttling_incident.record | default([]) | length > 0
 
+# DD34: whether the knowledge loop has taught the index how to handle this fault.
+- name: Find the resolutions the knowledge bot drafted and a person approved
+  ansible.builtin.include_role:
+    name: knowledge
+    tasks_from: drafted
+  vars:
+    knowledge_repository: "{{ workload_repository }}"
+
+- name: Keep the ones for this service
+  ansible.builtin.set_fact:
+    workload_throttling_learned: >-
+      {{ knowledge_drafted | selectattr('service', 'equalto', workload_name) | map(attribute='id') | list }}
+
 # Left running, the fault would keep the alert firing for the rest of its time.
 - name: Clear the fault
   ansible.builtin.include_tasks: trigger.yml
@@ -90,11 +105,14 @@
 
 - name: Judge the throttling scenario
   ansible.builtin.set_fact:
-    workload_results: "{{ workload_results + workload_throttling_results }}"
+    workload_results: >-
+      {{ workload_results + workload_throttling_results
+         + (workload_throttling_learned_results if workload_throttling_learned else workload_throttling_unknown_results) }}
   vars:
     inc: "{{ workload_throttling_incident.record | default([]) | first | default({}) }}"
     note: "{{ (workload_throttling_note.record | default([]) | first | default({})).value | default('') }}"
     suggestions: "{{ note.count('[Investigate') + note.count('[Possible fix') }}"
+    fix: "{{ note.split('Next steps (documented fix')[1].split('Recommended automation')[0] if 'Next steps (documented fix' in note else '' }}"
     researched: >-
       {{ note.split('Researched fixes (from')[1].split('Suggestions from the model')[0].split('Recommended automation')[0]
          if 'Researched fixes (from' in note else '' }}
@@ -111,6 +129,18 @@
         detail: >-
           {{ (inc.number ~ ', priority ' ~ inc.priority ~ ', raised by ' ~ inc.sys_created_by) if inc.number is defined
              else 'no open incident for ' ~ workload_throttling_correlation }}
+    workload_throttling_learned_results:
+      - check: "S2: the note gives the documented fix from the resolution the knowledge loop added, and no job"
+        passed: >-
+          {{ inc.u_ai_enrichment_state | default('') == 'complete'
+             and 'Outcome: enriched, with a documented fix' in note and fix | length > 0
+             and workload_throttling_learned | select('in', fix) | list | length > 0
+             and 'Recommended automation: none' in note }}
+        detail: >-
+          learned {{ workload_throttling_learned | join(', ') }}; enrichment state {{ inc.u_ai_enrichment_state | default('', true) or 'empty' }};
+          {{ note | regex_search('Outcome: [^|]*') | default('no outcome', true) | trim }};
+          next steps cite {{ fix | regex_findall('KB-[A-Z]+-[0-9]+') | unique | join(', ') or 'nothing' }}
+    workload_throttling_unknown_results:
       - check: "S2: the note says there is no documented fix, with no next steps and no job"
         passed: >-
           {{ inc.u_ai_enrichment_state | default('') == 'insufficient_evidence'

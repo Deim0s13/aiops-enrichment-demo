@@ -5,6 +5,9 @@
 # the demo's own incidents (raised by svc-monitoring in the on-call group), with a close note, and
 # deletes anything the build checks left behind. Touches nothing else in the PDI or the cluster. If
 # the knowledge bot is set up (DD33), closes its open pull requests and deletes their branches too.
+# Approved knowledge stays, so the next incident can use what the knowledge loop learned. To remove
+# that too, for a clean demo (DD34):
+#   ansible-navigator run reset.yml -e demo_reset_knowledge=true
 
 - name: Reset the demo to a clean state between runs
   hosts: localhost
@@ -19,6 +22,7 @@
       validate_certs: "{{ demo_cluster_validate_certs }}"
       ca_cert: "{{ secrets_cluster_ca_file | default(omit) }}"
     kubernetes.core.k8s_info: *cluster_auth
+    kubernetes.core.k8s_log: *cluster_auth
 
   tasks:
     - name: Resolve the cluster, ServiceNow and source secrets
@@ -53,3 +57,19 @@
       vars:
         demo_reset_repository: "{{ demo_repository.owner }}/{{ demo_repository.name }}"
       when: secrets_values.github_app_id | default('', true) | length > 0
+
+    - name: Remove what the knowledge loop added, and refresh the index (DD34)
+      ansible.builtin.include_role:
+        name: demo_reset
+        tasks_from: learned
+      vars:
+        demo_reset_knowledge_repository: "{{ demo_repository }}"
+        demo_reset_knowledge_namespace: "{{ demo_namespaces.enrichment }}"
+      when: demo_reset_knowledge | default(false) | bool
+
+    - name: Say that approved knowledge was kept
+      ansible.builtin.debug:
+        msg: >-
+          Approved knowledge was kept, including any resolution the knowledge loop added, so the next incident can use it.
+          For a clean demo, run the reset with -e demo_reset_knowledge=true to remove those too.
+      when: not demo_reset_knowledge | default(false) | bool

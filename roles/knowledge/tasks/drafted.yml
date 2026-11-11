@@ -1,0 +1,70 @@
+---
+# Entry point (DD34): the resolutions on the branch that the knowledge bot drafted, which the demo
+# added through the knowledge loop. Hand-written documents have no drafted_by line, so they are never
+# among them. Sets knowledge_drafted (path, id, service and blob of each) and knowledge_drafted_commit.
+
+- name: Find the branch's latest commit
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/{{ knowledge_repository.owner }}/{{ knowledge_repository.name }}/commits/{{ knowledge_repository.branch }}"
+    headers:
+      Accept: application/vnd.github+json
+      Authorization: "Bearer {{ knowledge_github_token }}"
+    timeout: 20
+  register: knowledge_drafted_head
+  until: knowledge_drafted_head is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: List the repository's files at that commit
+  ansible.builtin.uri:
+    url: >-
+      https://api.github.com/repos/{{ knowledge_repository.owner }}/{{ knowledge_repository.name }}/git/trees/{{
+      knowledge_drafted_head.json.sha }}?recursive=1
+    headers:
+      Accept: application/vnd.github+json
+      Authorization: "Bearer {{ knowledge_github_token }}"
+    timeout: 20
+  register: knowledge_drafted_tree
+  until: knowledge_drafted_tree is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Read each resolution at that commit
+  ansible.builtin.uri:
+    url: >-
+      https://api.github.com/repos/{{ knowledge_repository.owner }}/{{ knowledge_repository.name }}/contents/{{ item.path }}?ref={{
+      knowledge_drafted_head.json.sha }}
+    headers:
+      Accept: application/vnd.github.raw
+      Authorization: "Bearer {{ knowledge_github_token }}"
+    return_content: true
+    timeout: 20
+  loop: >-
+    {{ knowledge_drafted_tree.json.tree | selectattr('type', 'equalto', 'blob')
+       | selectattr('path', 'match', '^' ~ knowledge_corpus_dir ~ '/resolutions/.+\.md$') | list }}
+  loop_control:
+    label: "{{ item.path }}"
+  register: knowledge_drafted_documents
+  until: knowledge_drafted_documents is not failed
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Keep the ones the knowledge bot drafted
+  ansible.builtin.set_fact:
+    knowledge_drafted_commit: "{{ knowledge_drafted_head.json.sha }}"
+    knowledge_drafted: "{{ knowledge_drafted_json | from_json }}"
+  vars:
+    knowledge_drafted_json: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for r in knowledge_drafted_documents.results | default([]) -%}
+      {%- set head = r.content | default('') -%}
+      {%- if head is search('(?m)^drafted_by:.*' ~ knowledge_bot_marker) -%}
+      {%- set ns.out = ns.out + [{'path': r.item.path, 'sha': r.item.sha,
+           'id': head | regex_search('(?m)^id: *\S+') | default('', true) | regex_replace('^id: *', ''),
+           'service': head | regex_search('(?m)^service: *\S+') | default('', true) | regex_replace('^service: *', '')}] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ ns.out | to_json }}

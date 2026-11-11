@@ -1,0 +1,46 @@
+---
+# Entry point (DD34): reload the index from the corpus at a commit, without phase 05's setup. Run by
+# the knowledge bot's refresh job after a merge to main, and by reset.yml after it removes the demo's
+# resolutions. Ingestion is idempotent, so a refresh that changes nothing leaves the index as it was.
+# Two refreshes at once collapse into one: each removes the other's Job, which has the same name,
+# before starting its own from the same commit.
+
+- name: Find the enrichment service's image, which carries the embedding model
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ knowledge_namespace }}"
+    name: "{{ knowledge_image_name }}"
+  register: knowledge_refresh_deployment
+  until: knowledge_refresh_deployment is not failed
+  retries: 3
+  delay: 5
+
+- name: Keep the image
+  ansible.builtin.set_fact:
+    knowledge_image_ref: >-
+      {{ ((knowledge_refresh_deployment.resources | first | default({})).spec.template.spec.containers | default([{}]) | first).image
+         | default('') }}
+
+- name: Stop if the enrichment service is not deployed
+  ansible.builtin.assert:
+    that: knowledge_image_ref | length > 0
+    fail_msg: "There is no {{ knowledge_image_name }} Deployment in {{ knowledge_namespace }}: run phases 05 and 06 first."
+    quiet: true
+
+- name: Read the corpus at the commit
+  ansible.builtin.include_tasks: corpus.yml
+
+- name: Load it into the index
+  ansible.builtin.include_tasks: ingest.yml
+  vars:
+    knowledge_manage_accounts: false
+
+- name: Report the refresh
+  ansible.builtin.set_fact:
+    knowledge_report:
+      - >-
+        Index refreshed from {{ knowledge_repository.branch }} at {{ knowledge_source_commit[:12] }}: {{ knowledge_paths | length }}
+        documents, {{ knowledge_ingest.passages }} passages. Added {{ knowledge_ingest.added | join(', ') or 'none' }};
+        updated {{ knowledge_ingest.updated | join(', ') or 'none' }}; removed {{ knowledge_ingest.removed | join(', ') or 'none' }};
+        {{ knowledge_ingest.unchanged | length }} unchanged

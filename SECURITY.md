@@ -32,7 +32,7 @@ Secrets are read from a KV version 2 engine mounted at `aiops-demo`:
 | `aiops-demo/entitlements` | `pull_secret`, `aap_manifest_b64`, `automation_hub_token`, `registry_username`, `registry_password` |
 | `aiops-demo/cluster` | `api_url`, `api_token`, and optionally `api_ca_cert` (the cluster's CA bundle, which is not a secret but changes with each environment) |
 | `aiops-demo/servicenow` | `instance_url`, `admin_username`, `admin_password` |
-| `aiops-demo/source` | `github_token`: a fine-grained GitHub token, limited to this repository with Contents read-only, which AAP uses to sync the repository as its project (phase 07). Preflight checks that it can read the repository, and that a harmless test write is refused |
+| `aiops-demo/source` | `github_token`: a fine-grained GitHub token, limited to this repository with Contents read-only, which AAP uses to sync the repository as its project (phase 07). Preflight checks that it can read the repository, and that a harmless test write is refused. Optional, for the knowledge loop (DD33, DD34): `github_app_id` and `github_app_private_key`, the knowledge bot's GitHub App, which can open pull requests but is not on `main`'s bypass list, so it cannot publish; and `github_reset_token`, your own fine-grained token with Contents read and write on this repository only, used only by `reset.yml -e demo_reset_knowledge=true` to remove the loop's resolutions from `main` |
 
 ## Without Vault
 

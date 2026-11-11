@@ -17,6 +17,10 @@ argument_specs:
         type: str
         required: true
         description: The AAP namespace, which also holds the published execution environment and the generated Secrets.
+      aap_content_enrichment_namespace:
+        type: str
+        required: true
+        description: The enrichment namespace, where the knowledge index refresh runs its ingestion Job (DD34).
       aap_content_organisation:
         type: str
         required: true
