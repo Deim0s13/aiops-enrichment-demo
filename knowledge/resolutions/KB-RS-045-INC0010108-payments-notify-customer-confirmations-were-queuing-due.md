@@ -3,7 +3,7 @@ id: KB-RS-045
 title: "Resolution: INC0010108, payments-notify: Payments-notify customer confirmations were queuing due to MessageHub refusing deliveries"
 type: resolution
 service: payments-notify
-versions: ["unknown"]
+versions: ["2.x"]
 owner: Payments Platform Operations
 access: internal
 status: approved
@@ -41,7 +41,8 @@ Nothing was changed on our side. MessageHub stopped refusing deliveries at about
 
 ## Root cause and follow-up
 
-- MessageHub stopped refusing deliveries at about 15:35 NZDT.
+- Cause: not recorded in the resolution notes. MessageHub stopped refusing deliveries at about 15:35 NZDT without any change on our side.
+- Follow-up: if it happens again, ask MessageHub through a change request whether our limit should be raised for peak periods.
 
 ## Lessons
 
