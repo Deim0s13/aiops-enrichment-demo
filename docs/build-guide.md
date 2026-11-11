@@ -514,7 +514,7 @@ Before a demo, close the incidents earlier runs left open:
 ansible-navigator run reset.yml
 ```
 
-Before a new demo, add `-e demo_reset_knowledge=true`, so what the last demo's knowledge loop learned is removed too (S6).
+Before a new demo, add `-e demo_reset_knowledge=true`, so what the last demo's knowledge loop learned is removed too (S6). If the demo environment has expired and you are about to build a new one, run it with `-e demo_reset_cluster=false` first: it closes the old incidents in the PDI, which outlives the environment, and tidies GitHub, without touching the cluster.
 
 It first restarts `payments-notify` with a new pod and waits until it is ready. The new pod starts without the recurring scenario's marker, so a recurring fault left running is cleared. Then it resolves and closes every open incident `svc-monitoring` raised in the on-call group, with a close note saying the reset closed it, and deletes anything the build checks left behind. Nothing else in the PDI or the cluster is touched.
 

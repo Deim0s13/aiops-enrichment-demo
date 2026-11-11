@@ -8,6 +8,9 @@
 # Approved knowledge stays, so the next incident can use what the knowledge loop learned. To remove
 # that too, for a clean demo (DD34):
 #   ansible-navigator run reset.yml -e demo_reset_knowledge=true
+# When the cluster has gone (an expired demo environment), the PDI and GitHub can still be reset before
+# the next build, which skips the steps that need the cluster:
+#   ansible-navigator run reset.yml -e demo_reset_cluster=false
 
 - name: Reset the demo to a clean state between runs
   hosts: localhost
@@ -43,6 +46,14 @@
         tasks_from: restart
       vars:
         workload_namespace: "{{ demo_namespaces.workload }}"
+      when: demo_reset_cluster | default(true) | bool
+
+    - name: Say that the cluster was left alone
+      ansible.builtin.debug:
+        msg: >-
+          Skipped the cluster (demo_reset_cluster=false): the sample service was not restarted, and the knowledge index was not
+          refreshed. A new environment's build starts both afresh.
+      when: not demo_reset_cluster | default(true) | bool
 
     - name: Close the demo's incidents
       ansible.builtin.include_role:
@@ -65,6 +76,7 @@
       vars:
         demo_reset_knowledge_repository: "{{ demo_repository }}"
         demo_reset_knowledge_namespace: "{{ demo_namespaces.enrichment }}"
+        demo_reset_knowledge_refresh: "{{ demo_reset_cluster | default(true) | bool }}"
       when: demo_reset_knowledge | default(false) | bool
 
     - name: Say that approved knowledge was kept

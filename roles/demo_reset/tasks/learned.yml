@@ -95,6 +95,7 @@
         quiet: true
 
     - name: Refresh the index from that commit
+      when: demo_reset_knowledge_refresh | default(true) | bool
       ansible.builtin.include_role:
         name: knowledge
         tasks_from: refresh
@@ -108,6 +109,8 @@
   ansible.builtin.debug:
     msg: >-
       {{ ("Removed the knowledge loop's resolutions " ~ (knowledge_drafted | map(attribute='id') | join(', ')) ~ ' from '
-          ~ demo_reset_knowledge_repository.branch ~ ' (commit ' ~ demo_reset_commit.json.sha[:12] ~ '). ' ~ knowledge_report | first)
+          ~ demo_reset_knowledge_repository.branch ~ ' (commit ' ~ demo_reset_commit.json.sha[:12] ~ '). '
+          ~ ((knowledge_report | first) if demo_reset_knowledge_refresh | default(true) | bool
+             else 'The index was not refreshed; the next build loads the corpus afresh.'))
          if knowledge_drafted | length > 0 else 'There are no resolutions drafted by the knowledge bot on '
          ~ demo_reset_knowledge_repository.branch ~ ', so there was nothing to remove.' }}
