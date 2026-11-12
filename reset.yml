@@ -32,7 +32,8 @@
       ansible.builtin.include_role:
         name: secrets
       vars:
-        secrets_groups: [cluster, servicenow, source]
+        # Without the cluster, its secrets are not read, so its unreachable API is not checked either.
+        secrets_groups: "{{ ['cluster', 'servicenow', 'source'] if demo_reset_cluster | default(true) | bool else ['servicenow', 'source'] }}"
 
     - name: Check that the ServiceNow PDI is awake
       ansible.builtin.include_role:

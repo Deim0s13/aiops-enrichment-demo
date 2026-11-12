@@ -64,6 +64,11 @@
           sysparm_input_display_value: "true"
         data:
           user_password: "{{ servicenow_new_password }}"
+      # A PDI sometimes refuses a connection for a moment; setting the same password again is harmless.
+      register: servicenow_password_set
+      until: servicenow_password_set is not failed
+      retries: 3
+      delay: 10
       no_log: true
 
     - name: "Store in the cluster the credentials for {{ servicenow_identity.user_name }}"
